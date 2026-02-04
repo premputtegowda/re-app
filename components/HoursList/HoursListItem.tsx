@@ -75,25 +75,25 @@ export function HoursListItem({ entry }: HoursListItemProps) {
 
   return (
     <>
-      <div className="bg-white border border-slate-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-4 hover:shadow-md transition-shadow">
         <div className="flex items-start justify-between gap-4">
           {/* Main content */}
           <div className="flex-1 space-y-3">
             {/* Header with date and time */}
             <div className="flex flex-wrap items-center gap-4">
-              <div className="flex items-center gap-2 text-slate-600">
+              <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
                 <Calendar size={16} />
                 <span className="text-sm font-medium">{formatDate(entry.date)}</span>
               </div>
-              <div className="flex items-center gap-2 text-primary-600">
+              <div className="flex items-center gap-2 text-primary-600 dark:text-primary-400">
                 <Clock size={16} />
                 <span className="text-sm font-semibold">{formatDuration(entry.totalMinutes)}</span>
               </div>
               <div
                 className={`px-2 py-1 rounded-full text-xs font-medium ${
                   entry.type === 'material'
-                    ? 'bg-secondary-100 text-secondary-700'
-                    : 'bg-accent-100 text-accent-700'
+                    ? 'bg-secondary-100 dark:bg-secondary-900/30 text-secondary-700 dark:text-secondary-400'
+                    : 'bg-accent-100 dark:bg-accent-900/30 text-accent-700 dark:text-accent-400'
                 }`}
               >
                 {entry.type === 'material' ? 'Material' : 'Non-Material'}
@@ -110,13 +110,13 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                       className="w-3 h-3 rounded-full"
                       style={{ backgroundColor: category.color }}
                     />
-                    <span className="text-sm text-slate-700">{category.name}</span>
+                    <span className="text-sm text-slate-700 dark:text-slate-300">{category.name}</span>
                   </div>
                 )}
               </div>
               <div className="flex items-center gap-2">
                 <Home size={16} className="text-slate-400" />
-                <span className="text-sm text-slate-700">{property?.name}</span>
+                <span className="text-sm text-slate-700 dark:text-slate-300">{property?.name}</span>
               </div>
             </div>
 
@@ -124,7 +124,7 @@ export function HoursListItem({ entry }: HoursListItemProps) {
             {entry.description && (
               <div className="flex items-start gap-2">
                 <FileText size={16} className="text-slate-400 mt-0.5" />
-                <p className="text-sm text-slate-600 flex-1">{entry.description}</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400 flex-1">{entry.description}</p>
               </div>
             )}
           </div>
@@ -133,14 +133,14 @@ export function HoursListItem({ entry }: HoursListItemProps) {
           <div className="flex gap-2">
             <button
               onClick={handleEdit}
-              className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+              className="p-2 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
               title="Edit"
             >
               <Edit2 size={18} />
             </button>
             <button
               onClick={() => setIsDeleteModalOpen(true)}
-              className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+              className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
               title="Delete"
             >
               <Trash2 size={18} />
@@ -247,7 +247,7 @@ export function HoursListItem({ entry }: HoursListItemProps) {
         title="Delete Entry"
       >
         <div className="space-y-4">
-          <p className="text-slate-600">
+          <p className="text-slate-600 dark:text-slate-400">
             Are you sure you want to delete this hours entry? This action cannot be undone.
           </p>
 

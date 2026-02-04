@@ -24,12 +24,12 @@ export function SummaryCard({
   trend,
 }: SummaryCardProps) {
   return (
-    <Card>
+    <Card className="hover:shadow-md transition-shadow">
       <div className="flex items-start justify-between">
         <div className="flex-1">
-          <p className="text-sm font-medium text-slate-600 mb-1">{title}</p>
-          <p className="text-3xl font-bold text-slate-900 mb-1">{value}</p>
-          {subtitle && <p className="text-sm text-slate-500">{subtitle}</p>}
+          <p className="text-sm font-medium text-slate-600 dark:text-slate-400 mb-1">{title}</p>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white mb-1">{value}</p>
+          {subtitle && <p className="text-sm text-slate-500 dark:text-slate-400">{subtitle}</p>}
           {trend && (
             <div className="mt-2">
               <span
@@ -42,7 +42,7 @@ export function SummaryCard({
             </div>
           )}
         </div>
-        <div className={`p-3 rounded-lg bg-slate-50 ${iconColor}`}>
+        <div className={`p-3 rounded-lg bg-slate-50 dark:bg-slate-700 ${iconColor}`}>
           <Icon size={24} />
         </div>
       </div>

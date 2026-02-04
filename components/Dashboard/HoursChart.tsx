@@ -32,9 +32,9 @@ export function CategoryChart({ data }: CategoryChartProps) {
 
   return (
     <Card>
-      <h3 className="text-lg font-semibold text-slate-900 mb-4">Hours by Category</h3>
+      <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Hours by Category</h3>
       {chartData.length === 0 ? (
-        <p className="text-center text-slate-500 py-8">No data available</p>
+        <p className="text-center text-slate-500 dark:text-slate-400 py-8">No data available</p>
       ) : (
         <ResponsiveContainer width="100%" height={300}>
           <BarChart data={chartData}>
@@ -69,9 +69,9 @@ export function PropertyChart({ data }: PropertyChartProps) {
 
   return (
     <Card>
-      <h3 className="text-lg font-semibold text-slate-900 mb-4">Hours by Property</h3>
+      <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Hours by Property</h3>
       {chartData.length === 0 ? (
-        <p className="text-center text-slate-500 py-8">No data available</p>
+        <p className="text-center text-slate-500 dark:text-slate-400 py-8">No data available</p>
       ) : (
         <ResponsiveContainer width="100%" height={300}>
           <PieChart>
@@ -109,9 +109,9 @@ export function MonthlyTrendChart({ data }: MonthlyTrendChartProps) {
 
   return (
     <Card>
-      <h3 className="text-lg font-semibold text-slate-900 mb-4">Monthly Hours Trend</h3>
+      <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Monthly Hours Trend</h3>
       {chartData.length === 0 ? (
-        <p className="text-center text-slate-500 py-8">No data available</p>
+        <p className="text-center text-slate-500 dark:text-slate-400 py-8">No data available</p>
       ) : (
         <ResponsiveContainer width="100%" height={300}>
           <LineChart data={chartData}>
@@ -150,9 +150,9 @@ export function TypeComparisonChart({ materialHours, nonMaterialHours }: TypeCom
 
   return (
     <Card>
-      <h3 className="text-lg font-semibold text-slate-900 mb-4">Material vs Non-Material Hours</h3>
+      <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Material vs Non-Material Hours</h3>
       {total === 0 ? (
-        <p className="text-center text-slate-500 py-8">No data available</p>
+        <p className="text-center text-slate-500 dark:text-slate-400 py-8">No data available</p>
       ) : (
         <div className="space-y-4">
           <ResponsiveContainer width="100%" height={200}>
@@ -179,16 +179,16 @@ export function TypeComparisonChart({ materialHours, nonMaterialHours }: TypeCom
             <div className="text-center">
               <div className="flex items-center justify-center gap-2 mb-1">
                 <div className="w-3 h-3 rounded-full bg-secondary-500" />
-                <span className="text-sm font-medium text-slate-700">Material</span>
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Material</span>
               </div>
-              <p className="text-2xl font-bold text-slate-900">{materialHours}h</p>
+              <p className="text-2xl font-bold text-slate-900 dark:text-white">{materialHours}h</p>
             </div>
             <div className="text-center">
               <div className="flex items-center justify-center gap-2 mb-1">
                 <div className="w-3 h-3 rounded-full bg-accent-500" />
-                <span className="text-sm font-medium text-slate-700">Non-Material</span>
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Non-Material</span>
               </div>
-              <p className="text-2xl font-bold text-slate-900">{nonMaterialHours}h</p>
+              <p className="text-2xl font-bold text-slate-900 dark:text-white">{nonMaterialHours}h</p>
             </div>
           </div>
         </div>

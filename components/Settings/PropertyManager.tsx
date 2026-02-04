@@ -81,8 +81,8 @@ export function PropertyManager() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Home className="text-primary-600" size={24} />
-          <h3 className="text-xl font-semibold text-slate-900">Properties</h3>
+          <Home className="text-primary-600 dark:text-primary-400" size={24} />
+          <h3 className="text-xl font-semibold text-slate-900 dark:text-white">Properties</h3>
         </div>
         <Button onClick={handleOpenAdd} size="sm" className="flex items-center gap-2">
           <Plus size={18} />
@@ -98,12 +98,12 @@ export function PropertyManager() {
             <Card key={property.id} padding="sm">
               <div className="flex items-start justify-between">
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-slate-900 truncate">{property.name}</p>
+                  <p className="font-medium text-slate-900 dark:text-white truncate">{property.name}</p>
                   {property.address && (
-                    <p className="text-sm text-slate-500 mt-1">{property.address}</p>
+                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{property.address}</p>
                   )}
                   {isInUse && (
-                    <p className="text-xs text-slate-500 mt-1">
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                       Used in {entries.filter((e) => e.property === property.id).length} entries
                     </p>
                   )}
@@ -111,14 +111,14 @@ export function PropertyManager() {
                 <div className="flex gap-1 ml-2">
                   <button
                     onClick={() => handleOpenEdit(property)}
-                    className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                    className="p-2 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
                     title="Edit"
                   >
                     <Edit2 size={16} />
                   </button>
                   <button
                     onClick={() => setDeleteConfirm(property.id)}
-                    className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
                     title="Delete"
                     disabled={isInUse}
                   >
@@ -134,8 +134,8 @@ export function PropertyManager() {
       {properties.length === 0 && (
         <Card>
           <div className="text-center py-8">
-            <Home className="mx-auto text-slate-300 mb-4" size={48} />
-            <p className="text-slate-600">No properties yet. Add your first property to get started.</p>
+            <Home className="mx-auto text-slate-300 dark:text-slate-600 mb-4" size={48} />
+            <p className="text-slate-600 dark:text-slate-400">No properties yet. Add your first property to get started.</p>
           </div>
         </Card>
       )}
@@ -195,7 +195,7 @@ export function PropertyManager() {
         title="Delete Property"
       >
         <div className="space-y-4">
-          <p className="text-slate-600">
+          <p className="text-slate-600 dark:text-slate-400">
             Are you sure you want to delete this property? This action cannot be undone.
           </p>
           <div className="flex gap-3">

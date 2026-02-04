@@ -26,7 +26,7 @@ export function Navigation({ currentView, onViewChange, isMobileMenuOpen, onMenu
   return (
     <>
       {/* Desktop Navigation */}
-      <nav className="hidden lg:block bg-white border-r border-slate-200 w-64 fixed left-0 top-16 bottom-0 overflow-y-auto">
+      <nav className="hidden lg:block bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 w-64 fixed left-0 top-16 bottom-0 overflow-y-auto">
         <div className="p-4 space-y-1">
           {navItems.map((item) => {
             const Icon = item.icon;
@@ -38,8 +38,8 @@ export function Navigation({ currentView, onViewChange, isMobileMenuOpen, onMenu
                 onClick={() => handleNavClick(item.id)}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
                   isActive
-                    ? 'bg-primary-50 text-primary-700 font-medium'
-                    : 'text-slate-600 hover:bg-slate-50'
+                    ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 font-medium'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'
                 }`}
               >
                 <Icon size={20} />
@@ -50,21 +50,21 @@ export function Navigation({ currentView, onViewChange, isMobileMenuOpen, onMenu
         </div>
 
         {/* Quick Links */}
-        <div className="p-4 border-t border-slate-200 mt-4">
-          <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
+        <div className="p-4 border-t border-slate-200 dark:border-slate-700 mt-4">
+          <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">
             Quick Actions
           </h3>
           <div className="space-y-1">
             <button
               onClick={() => handleNavClick('settings')}
-              className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors text-sm"
+              className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-sm"
             >
               <Tag size={18} />
               <span>Manage Categories</span>
             </button>
             <button
               onClick={() => handleNavClick('settings')}
-              className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors text-sm"
+              className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-sm"
             >
               <Folder size={18} />
               <span>Manage Properties</span>
@@ -83,7 +83,7 @@ export function Navigation({ currentView, onViewChange, isMobileMenuOpen, onMenu
           />
 
           {/* Menu */}
-          <nav className="fixed left-0 top-16 bottom-0 w-64 bg-white border-r border-slate-200 z-50 lg:hidden overflow-y-auto">
+          <nav className="fixed left-0 top-16 bottom-0 w-64 bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 z-50 lg:hidden overflow-y-auto">
             <div className="p-4 space-y-1">
               {navItems.map((item) => {
                 const Icon = item.icon;
@@ -95,8 +95,8 @@ export function Navigation({ currentView, onViewChange, isMobileMenuOpen, onMenu
                     onClick={() => handleNavClick(item.id)}
                     className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
                       isActive
-                        ? 'bg-primary-50 text-primary-700 font-medium'
-                        : 'text-slate-600 hover:bg-slate-50'
+                        ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 font-medium'
+                        : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'
                     }`}
                   >
                     <Icon size={20} />

@@ -115,11 +115,11 @@ export function FilterBar({ filter, onFilterChange }: FilterBarProps) {
         <Card>
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-slate-900">Filters</h3>
+              <h3 className="font-semibold text-slate-900 dark:text-white">Filters</h3>
               {hasActiveFilters && (
                 <button
                   onClick={handleClearFilters}
-                  className="text-sm text-primary-600 hover:text-primary-700 flex items-center gap-1"
+                  className="text-sm text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 flex items-center gap-1"
                 >
                   <X size={16} />
                   Clear all
@@ -156,7 +156,7 @@ export function FilterBar({ filter, onFilterChange }: FilterBarProps) {
                     className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
                       filter.categories?.includes(category.id)
                         ? 'bg-primary-600 text-white'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                        : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
                     }`}
                   >
                     {category.name}
@@ -176,7 +176,7 @@ export function FilterBar({ filter, onFilterChange }: FilterBarProps) {
                     className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
                       filter.properties?.includes(property.id)
                         ? 'bg-primary-600 text-white'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                        : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
                     }`}
                   >
                     {property.name}
@@ -194,7 +194,7 @@ export function FilterBar({ filter, onFilterChange }: FilterBarProps) {
                   className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
                     filter.types?.includes('material')
                       ? 'bg-primary-600 text-white'
-                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
                   }`}
                 >
                   Material
@@ -204,7 +204,7 @@ export function FilterBar({ filter, onFilterChange }: FilterBarProps) {
                   className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
                     filter.types?.includes('non-material')
                       ? 'bg-primary-600 text-white'
-                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
                   }`}
                 >
                   Non-Material
@@ -216,7 +216,7 @@ export function FilterBar({ filter, onFilterChange }: FilterBarProps) {
       )}
 
       {/* Results count */}
-      <div className="text-sm text-slate-600">
+      <div className="text-sm text-slate-600 dark:text-slate-400">
         Showing {filteredEntries.length} {filteredEntries.length === 1 ? 'entry' : 'entries'}
       </div>
     </div>
