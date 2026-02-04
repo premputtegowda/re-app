@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Search, Filter, X, Download } from 'lucide-react';
-import { useApp } from '@/context/AppContext';
+import { useStore } from '@/lib/store';
 import { Button } from '@/components/UI/Button';
 import { Input } from '@/components/UI/Input';
 import { Card } from '@/components/UI/Card';
@@ -16,9 +16,11 @@ interface FilterBarProps {
 }
 
 export function FilterBar({ filter, onFilterChange }: FilterBarProps) {
-  const { state } = useApp();
+  const entries = useStore((s) => s.entries);
+  const categories = useStore((s) => s.categories);
+  const properties = useStore((s) => s.properties);
   const [showFilters, setShowFilters] = useState(false);
-  const filteredEntries = useFilteredHours(state.entries, filter);
+  const filteredEntries = useFilteredHours(entries, filter);
 
   const handleSearchChange = (value: string) => {
     onFilterChange({ ...filter, searchQuery: value });
@@ -61,7 +63,7 @@ export function FilterBar({ filter, onFilterChange }: FilterBarProps) {
   };
 
   const handleExport = () => {
-    downloadCSV(filteredEntries, state.categories, state.properties);
+    downloadCSV(filteredEntries, categories, properties);
   };
 
   const hasActiveFilters =
@@ -147,7 +149,7 @@ export function FilterBar({ filter, onFilterChange }: FilterBarProps) {
             <div>
               <p className="label">Categories:</p>
               <div className="flex flex-wrap gap-2 mt-2">
-                {state.categories.map((category) => (
+                {categories.map((category) => (
                   <button
                     key={category.id}
                     onClick={() => handleCategoryToggle(category.id)}
@@ -167,7 +169,7 @@ export function FilterBar({ filter, onFilterChange }: FilterBarProps) {
             <div>
               <p className="label">Properties:</p>
               <div className="flex flex-wrap gap-2 mt-2">
-                {state.properties.map((property) => (
+                {properties.map((property) => (
                   <button
                     key={property.id}
                     onClick={() => handlePropertyToggle(property.id)}

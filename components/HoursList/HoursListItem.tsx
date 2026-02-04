@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Edit2, Trash2, Calendar, Clock, Tag, Home, FileText } from 'lucide-react';
-import { useApp } from '@/context/AppContext';
+import { useStore } from '@/lib/store';
 import { Button } from '@/components/UI/Button';
 import { Input } from '@/components/UI/Input';
 import { Modal } from '@/components/UI/Modal';
@@ -17,7 +17,10 @@ interface HoursListItemProps {
 }
 
 export function HoursListItem({ entry }: HoursListItemProps) {
-  const { state, updateEntry, deleteEntry } = useApp();
+  const categories = useStore((s) => s.categories);
+  const properties = useStore((s) => s.properties);
+  const updateEntry = useStore((s) => s.updateEntry);
+  const deleteEntry = useStore((s) => s.deleteEntry);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [errors, setErrors] = useState<any[]>([]);
@@ -32,8 +35,8 @@ export function HoursListItem({ entry }: HoursListItemProps) {
     type: entry.type,
   });
 
-  const category = state.categories.find((c) => c.id === entry.category);
-  const property = state.properties.find((p) => p.id === entry.property);
+  const category = categories.find((c) => c.id === entry.category);
+  const property = properties.find((p) => p.id === entry.property);
 
   const handleEdit = () => {
     setEditData({
@@ -190,7 +193,7 @@ export function HoursListItem({ entry }: HoursListItemProps) {
             label="Property"
             value={editData.property}
             onChange={(e) => setEditData({ ...editData, property: e.target.value })}
-            options={state.properties.map((p) => ({ value: p.id, label: p.name }))}
+            options={properties.map((p) => ({ value: p.id, label: p.name }))}
             error={getFieldError(errors, 'property')}
             fullWidth
           />
@@ -199,7 +202,7 @@ export function HoursListItem({ entry }: HoursListItemProps) {
             label="Category"
             value={editData.category}
             onChange={(e) => setEditData({ ...editData, category: e.target.value })}
-            options={state.categories.map((c) => ({ value: c.id, label: c.name }))}
+            options={categories.map((c) => ({ value: c.id, label: c.name }))}
             error={getFieldError(errors, 'category')}
             fullWidth
           />

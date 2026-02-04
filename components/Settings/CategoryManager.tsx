@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Plus, Edit2, Trash2, Tag } from 'lucide-react';
-import { useApp } from '@/context/AppContext';
+import { useStore } from '@/lib/store';
 import { Button } from '@/components/UI/Button';
 import { Input } from '@/components/UI/Input';
 import { Modal } from '@/components/UI/Modal';
@@ -16,7 +16,11 @@ const PRESET_COLORS = [
 ];
 
 export function CategoryManager() {
-  const { state, addCategory, updateCategory, deleteCategory } = useApp();
+  const categories = useStore((s) => s.categories);
+  const entries = useStore((s) => s.entries);
+  const addCategory = useStore((s) => s.addCategory);
+  const updateCategory = useStore((s) => s.updateCategory);
+  const deleteCategory = useStore((s) => s.deleteCategory);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
@@ -40,7 +44,7 @@ export function CategoryManager() {
   };
 
   const handleAdd = () => {
-    const validation = validateCategory(formData, state.categories);
+    const validation = validateCategory(formData, categories);
 
     if (!validation.isValid) {
       setErrors(validation.errors);
@@ -56,7 +60,7 @@ export function CategoryManager() {
   const handleUpdate = () => {
     if (!editingCategory) return;
 
-    const validation = validateCategory(formData, state.categories, editingCategory.id);
+    const validation = validateCategory(formData, categories, editingCategory.id);
 
     if (!validation.isValid) {
       setErrors(validation.errors);
@@ -92,8 +96,8 @@ export function CategoryManager() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {state.categories.map((category) => {
-          const isInUse = state.entries.some((e) => e.category === category.id);
+        {categories.map((category) => {
+          const isInUse = entries.some((e) => e.category === category.id);
 
           return (
             <Card key={category.id} padding="sm">
@@ -107,7 +111,7 @@ export function CategoryManager() {
                     <p className="font-medium text-slate-900 truncate">{category.name}</p>
                     {isInUse && (
                       <p className="text-xs text-slate-500">
-                        Used in {state.entries.filter((e) => e.category === category.id).length} entries
+                        Used in {entries.filter((e) => e.category === category.id).length} entries
                       </p>
                     )}
                   </div>
@@ -135,7 +139,7 @@ export function CategoryManager() {
         })}
       </div>
 
-      {state.categories.length === 0 && (
+      {categories.length === 0 && (
         <Card>
           <div className="text-center py-8">
             <Tag className="mx-auto text-slate-300 mb-4" size={48} />

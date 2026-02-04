@@ -1,7 +1,7 @@
 'use client';
 
 import { Clock, Calendar, TrendingUp, Activity, PlusCircle } from 'lucide-react';
-import { useApp } from '@/context/AppContext';
+import { useStore } from '@/lib/store';
 import { SummaryCard } from './SummaryCard';
 import { CategoryChart, PropertyChart, MonthlyTrendChart, TypeComparisonChart } from './HoursChart';
 import { Card } from '@/components/UI/Card';
@@ -22,13 +22,15 @@ interface DashboardProps {
 }
 
 export function Dashboard({ onViewChange }: DashboardProps) {
-  const { state } = useApp();
-  const recentEntries = useRecentEntries(state.entries, 5);
+  const entries = useStore((s) => s.entries);
+  const categories = useStore((s) => s.categories);
+  const properties = useStore((s) => s.properties);
+  const recentEntries = useRecentEntries(entries, 5);
 
-  const summary = calculateSummary(state.entries);
-  const categorySummaries = calculateCategorySummaries(state.entries, state.categories);
-  const propertySummaries = calculatePropertySummaries(state.entries, state.properties);
-  const monthlyData = calculateMonthlyData(state.entries);
+  const summary = calculateSummary(entries);
+  const categorySummaries = calculateCategorySummaries(entries, categories);
+  const propertySummaries = calculatePropertySummaries(entries, properties);
+  const monthlyData = calculateMonthlyData(entries);
 
   const topCategory = categorySummaries[0];
 

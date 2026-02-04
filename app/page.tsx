@@ -1,18 +1,16 @@
 'use client';
 
 import { useState } from 'react';
-import { AppProvider, useApp } from '@/context/AppContext';
+import { Toaster } from 'sonner';
 import { Layout } from '@/components/Layout/Layout';
 import { Dashboard } from '@/components/Dashboard/Dashboard';
 import { ChatLikeEntry } from '@/components/HoursEntry/ChatLikeEntry';
 import { HoursList } from '@/components/HoursList/HoursList';
 import { Settings } from '@/components/Settings/Settings';
-import { ToastContainer } from '@/components/UI/Toast';
 import type { ViewMode } from '@/types';
 
-function AppContent() {
+export default function Home() {
   const [currentView, setCurrentView] = useState<ViewMode>('dashboard');
-  const { toasts, removeToast } = useApp();
 
   const renderView = () => {
     switch (currentView) {
@@ -34,15 +32,7 @@ function AppContent() {
       <Layout currentView={currentView} onViewChange={setCurrentView}>
         {renderView()}
       </Layout>
-      <ToastContainer toasts={toasts} onClose={removeToast} />
+      <Toaster position="top-right" richColors closeButton />
     </>
-  );
-}
-
-export default function Home() {
-  return (
-    <AppProvider>
-      <AppContent />
-    </AppProvider>
   );
 }

@@ -2,21 +2,23 @@
 
 import { useState } from 'react';
 import { FileX } from 'lucide-react';
-import { useApp } from '@/context/AppContext';
+import { useStore } from '@/lib/store';
 import { FilterBar } from './FilterBar';
 import { HoursListItem } from './HoursListItem';
 import { useFilteredHours } from '@/hooks/useHoursData';
 import type { HoursFilter, SortConfig } from '@/types';
 
 export function HoursList() {
-  const { state, setFilter } = useApp();
-  const [localFilter, setLocalFilter] = useState<HoursFilter>(state.filter);
+  const entries = useStore((s) => s.entries);
+  const filter = useStore((s) => s.filter);
+  const setFilter = useStore((s) => s.setFilter);
+  const [localFilter, setLocalFilter] = useState<HoursFilter>(filter);
   const sortConfig: SortConfig = {
     field: 'date',
     order: 'desc',
   };
 
-  const filteredEntries = useFilteredHours(state.entries, localFilter, sortConfig);
+  const filteredEntries = useFilteredHours(entries, localFilter, sortConfig);
 
   const handleFilterChange = (filter: HoursFilter) => {
     setLocalFilter(filter);
@@ -39,7 +41,7 @@ export function HoursList() {
             <FileX className="mx-auto text-slate-300 mb-4" size={64} />
             <h3 className="text-lg font-semibold text-slate-900 mb-2">No entries found</h3>
             <p className="text-slate-600">
-              {state.entries.length === 0
+              {entries.length === 0
                 ? "You haven't logged any hours yet. Start by adding your first entry!"
                 : 'Try adjusting your filters to see more results.'}
             </p>

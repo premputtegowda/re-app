@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { Clock, Tag, Home, FileText, Zap, CheckCircle } from 'lucide-react';
-import { useApp } from '@/context/AppContext';
+import { useStore } from '@/lib/store';
 import { Button } from '@/components/UI/Button';
 import { Input } from '@/components/UI/Input';
 import { Card } from '@/components/UI/Card';
@@ -11,7 +11,9 @@ import { getTodayDate } from '@/utils/dateUtils';
 import type { HoursEntryFormData } from '@/types';
 
 export function ChatLikeEntry() {
-  const { state, addEntry } = useApp();
+  const properties = useStore((s) => s.properties);
+  const categories = useStore((s) => s.categories);
+  const addEntry = useStore((s) => s.addEntry);
   const [step, setStep] = useState(1);
   const [showSuccess, setShowSuccess] = useState(false);
   const [errors, setErrors] = useState<any[]>([]);
@@ -146,13 +148,13 @@ export function ChatLikeEntry() {
               <h3 className="text-lg font-semibold text-slate-900">Which property?</h3>
             </div>
 
-            {state.properties.length === 0 ? (
+            {properties.length === 0 ? (
               <p className="text-slate-500 text-center py-8">
                 No properties available. Please add a property in Settings first.
               </p>
             ) : (
               <div className="grid grid-cols-1 gap-3">
-                {state.properties.map((property) => (
+                {properties.map((property) => (
                   <button
                     key={property.id}
                     onClick={() => handlePropertySelect(property.id)}
@@ -179,13 +181,13 @@ export function ChatLikeEntry() {
               <h3 className="text-lg font-semibold text-slate-900">What category?</h3>
             </div>
 
-            {state.categories.length === 0 ? (
+            {categories.length === 0 ? (
               <p className="text-slate-500 text-center py-8">
                 No categories available. Please add a category in Settings first.
               </p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {state.categories.map((category) => (
+                {categories.map((category) => (
                   <button
                     key={category.id}
                     onClick={() => handleCategorySelect(category.id)}
@@ -391,11 +393,11 @@ export function ChatLikeEntry() {
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div className="text-slate-600">Property:</div>
                 <div className="font-medium">
-                  {state.properties.find((p) => p.id === formData.property)?.name}
+                  {properties.find((p) => p.id === formData.property)?.name}
                 </div>
                 <div className="text-slate-600">Category:</div>
                 <div className="font-medium">
-                  {state.categories.find((c) => c.id === formData.category)?.name}
+                  {categories.find((c) => c.id === formData.category)?.name}
                 </div>
                 <div className="text-slate-600">Time:</div>
                 <div className="font-medium">

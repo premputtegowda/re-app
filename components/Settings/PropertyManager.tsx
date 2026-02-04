@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Plus, Edit2, Trash2, Home } from 'lucide-react';
-import { useApp } from '@/context/AppContext';
+import { useStore } from '@/lib/store';
 import { Button } from '@/components/UI/Button';
 import { Input } from '@/components/UI/Input';
 import { Modal } from '@/components/UI/Modal';
@@ -11,7 +11,11 @@ import { validateProperty, getFieldError } from '@/utils/validationUtils';
 import type { Property, PropertyFormData } from '@/types';
 
 export function PropertyManager() {
-  const { state, addProperty, updateProperty, deleteProperty } = useApp();
+  const properties = useStore((s) => s.properties);
+  const entries = useStore((s) => s.entries);
+  const addProperty = useStore((s) => s.addProperty);
+  const updateProperty = useStore((s) => s.updateProperty);
+  const deleteProperty = useStore((s) => s.deleteProperty);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingProperty, setEditingProperty] = useState<Property | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
@@ -35,7 +39,7 @@ export function PropertyManager() {
   };
 
   const handleAdd = () => {
-    const validation = validateProperty(formData, state.properties);
+    const validation = validateProperty(formData, properties);
 
     if (!validation.isValid) {
       setErrors(validation.errors);
@@ -51,7 +55,7 @@ export function PropertyManager() {
   const handleUpdate = () => {
     if (!editingProperty) return;
 
-    const validation = validateProperty(formData, state.properties, editingProperty.id);
+    const validation = validateProperty(formData, properties, editingProperty.id);
 
     if (!validation.isValid) {
       setErrors(validation.errors);
@@ -87,8 +91,8 @@ export function PropertyManager() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {state.properties.map((property) => {
-          const isInUse = state.entries.some((e) => e.property === property.id);
+        {properties.map((property) => {
+          const isInUse = entries.some((e) => e.property === property.id);
 
           return (
             <Card key={property.id} padding="sm">
@@ -100,7 +104,7 @@ export function PropertyManager() {
                   )}
                   {isInUse && (
                     <p className="text-xs text-slate-500 mt-1">
-                      Used in {state.entries.filter((e) => e.property === property.id).length} entries
+                      Used in {entries.filter((e) => e.property === property.id).length} entries
                     </p>
                   )}
                 </div>
@@ -127,7 +131,7 @@ export function PropertyManager() {
         })}
       </div>
 
-      {state.properties.length === 0 && (
+      {properties.length === 0 && (
         <Card>
           <div className="text-center py-8">
             <Home className="mx-auto text-slate-300 mb-4" size={48} />
