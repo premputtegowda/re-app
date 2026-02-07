@@ -1,19 +1,20 @@
 # REPS Hours Tracker
 
-A modern, professional Real Estate Professional Status (REPS) hours tracking application built with Next.js 14, TypeScript, Zustand, and Tailwind CSS.
+A modern, professional Real Estate Professional Status (REPS) hours tracking application built with Next.js 14, FastAPI, PostgreSQL, and Google OAuth.
 
 ## Features
 
 ### Core Functionality
-- **Chat-Like Hours Entry**: Intuitive, 5-step guided interface for logging hours with minimal typing
+- **Google OAuth Authentication**: Secure sign-in with Google
+- **Chat-Like Hours Entry**: Intuitive, 5-step guided interface for logging hours
 - **Comprehensive Tracking**: Track hours by date, category, property, and type (material/non-material)
 - **Advanced Filtering**: Filter entries by date range, category, property, and type
 - **Search**: Full-text search across descriptions
 - **Edit & Delete**: Modify or remove existing entries
-- **Data Persistence**: All data stored locally in browser localStorage with Zustand persist middleware
+- **Cloud Sync**: All data synced to backend database
 
 ### Analytics & Reporting
-- **Dashboard**: Overview with summary cards showing total hours, monthly hours, weekly hours, and top categories
+- **Dashboard**: Overview with summary cards showing total hours, monthly hours, weekly hours
 - **Visual Charts**:
   - Hours by Category (Bar Chart)
   - Hours by Property (Pie Chart)
@@ -31,170 +32,238 @@ A modern, professional Real Estate Professional Status (REPS) hours tracking app
 - **Dark Mode**: Automatic dark mode based on system preferences
 - **Smooth Animations**: Framer Motion animations throughout the app
 - Fully responsive design (desktop, tablet, mobile)
-- Intuitive navigation
-- Visual feedback for all actions
 - Toast notifications (Sonner)
 
 ## Technology Stack
 
+### Frontend
 - **Framework**: Next.js 14 (App Router)
 - **Language**: TypeScript
 - **Styling**: Tailwind CSS v3
-- **State Management**: Zustand with persist middleware
+- **State Management**: Zustand
 - **Animations**: Framer Motion
 - **Charts**: Recharts
 - **Icons**: Lucide React
 - **Notifications**: Sonner
-- **Data Persistence**: localStorage (via Zustand persist)
+
+### Backend
+- **Framework**: FastAPI (Python 3.11+)
+- **Database**: PostgreSQL 15
+- **ORM**: SQLAlchemy 2.0 (async)
+- **Migrations**: Alembic
+- **Authentication**: Google OAuth 2.0 + JWT
 
 ## Getting Started
 
 ### Prerequisites
+- Node.js 18+
+- Python 3.11+
+- Docker (for PostgreSQL)
+- Google Cloud Console project with OAuth 2.0 credentials
 
-- Node.js 18+ and npm installed on your machine
-
-### Installation
-
-1. Clone the repository:
+### 1. Clone the Repository
 ```bash
 git clone https://github.com/premputtegowda/re-app.git
 cd re-app
 ```
 
-2. Install dependencies:
+### 2. Setup Google OAuth
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project or select an existing one
+3. Enable the Google+ API
+4. Go to Credentials → Create Credentials → OAuth 2.0 Client ID
+5. Configure the OAuth consent screen
+6. Add authorized JavaScript origins: `http://localhost:3000`
+7. Add authorized redirect URIs: `http://localhost:8000/api/auth/google/callback`
+8. Copy the Client ID and Client Secret
+
+### 3. Backend Setup
+
 ```bash
-npm install
+cd backend
+
+# Start PostgreSQL
+docker compose up db -d
+
+# Create virtual environment
+python3.11 -m venv venv
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Create .env file
+cp .env.example .env
+# Edit .env with your Google OAuth credentials
+
+# Run migrations
+alembic upgrade head
+
+# Start the server
+uvicorn app.main:app --reload
 ```
 
-3. Start the development server:
+Backend runs at: http://localhost:8000
+API docs at: http://localhost:8000/docs
+
+### 4. Frontend Setup
+
 ```bash
+# From project root
+npm install
+
+# Create .env.local file
+cp .env.local.example .env.local
+# Edit with your Google Client ID
+
+# Start the development server
 npm run dev
 ```
 
-4. Open your browser and visit:
-```
-http://localhost:3000
-```
+Frontend runs at: http://localhost:3000
 
-### Build for Production
+## Environment Variables
 
-To create a production build:
-```bash
-npm run build
+### Frontend (`.env.local`)
+```env
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
 ```
 
-To start the production server:
-```bash
-npm run start
+### Backend (`backend/.env`)
+```env
+DEBUG=true
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/reps_tracker
+JWT_SECRET_KEY=your-super-secret-key-change-in-production
+GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+GOOGLE_REDIRECT_URI=http://localhost:8000/api/auth/google/callback
+FRONTEND_URL=http://localhost:3000
 ```
 
 ## Usage Guide
 
-### First Time Setup
+### Getting Started
 
-1. **Add Properties**:
-   - Go to Settings (gear icon in sidebar)
-   - Click "Add Property" under the Properties section
-   - Enter property name and optional address
-   - Click "Add"
-
-2. **Add Categories** (Optional - default categories are provided):
-   - In Settings, scroll to Categories section
-   - Click "Add Category"
-   - Enter category name and choose a color
-   - Click "Add"
+1. **Sign In**: Click "Sign in with Google" on the login page
+2. **Add a Property**: Go to Settings and add your first property
+3. **Log Hours**: Use the guided form to log your hours
 
 ### Logging Hours
 
-1. Click "Add Hours" in the navigation or on the dashboard
-2. Follow the guided 5-step interface:
+1. Click "Add Hours" in the navigation
+2. Follow the 5-step interface:
    - **Step 1**: Select a property
    - **Step 2**: Select a category
-   - **Step 3**: Enter time (use quick buttons or custom input) and date
+   - **Step 3**: Enter time and date
    - **Step 4**: Choose type (Material or Non-Material)
-   - **Step 5**: Add description and review summary
-3. Click "Save Entry"
+   - **Step 5**: Add description and save
 
 ### Viewing Hours
 
 1. Click "View Hours" in the navigation
-2. Use the filter bar to:
-   - Search by description
-   - Filter by date range
-   - Filter by categories (multiple selection)
-   - Filter by properties (multiple selection)
-   - Filter by type
-3. Click "Export" to download filtered results as CSV
-4. Click edit or delete icons on any entry to modify it
+2. Use filters to find specific entries
+3. Click edit or delete icons to modify entries
 
 ### Dashboard
 
-The dashboard provides an overview of your hours:
-- **Summary Cards**: Total hours, monthly hours, weekly hours, top category
-- **Material vs Non-Material**: Visual breakdown
-- **Quick Stats**: Entry counts and averages
-- **Charts**: Visual representations of your data
-- **Recent Entries**: Quick view of latest logged hours
+View your analytics:
+- Summary cards with totals
+- Charts showing hours distribution
+- Recent entries
 
 ## Project Structure
 
 ```
 reps-tracker/
-├── app/
-│   ├── globals.css          # Global styles with dark mode
-│   ├── layout.tsx           # Root layout
-│   └── page.tsx             # Main page component
+├── app/                      # Next.js App Router
 ├── components/
-│   ├── Dashboard/           # Dashboard and analytics components
-│   ├── HoursEntry/          # Chat-like entry form
-│   ├── HoursList/           # List view with filtering
-│   ├── Layout/              # Header, navigation, layout
-│   ├── Settings/            # Category and property management
-│   └── UI/                  # Reusable UI components
-├── hooks/                   # Custom React hooks
+│   ├── Auth/                 # Login components
+│   ├── Dashboard/            # Analytics views
+│   ├── HoursEntry/           # Entry form
+│   ├── HoursList/            # List with filters
+│   ├── Layout/               # Header, navigation
+│   ├── Settings/             # Management
+│   └── UI/                   # Reusable components
 ├── lib/
-│   └── store.ts             # Zustand store with persist
-├── types/                   # TypeScript type definitions
-├── utils/                   # Utility functions
-├── next.config.js           # Next.js configuration
-├── tailwind.config.js       # Tailwind CSS configuration
-├── tsconfig.json            # TypeScript configuration
-└── README.md                # This file
+│   ├── api.ts                # API client
+│   ├── authStore.ts          # Auth state
+│   └── store.ts              # App state
+├── hooks/                    # Custom hooks
+├── types/                    # TypeScript types
+├── utils/                    # Utilities
+└── backend/
+    ├── app/
+    │   ├── models/           # Database models
+    │   ├── schemas/          # Pydantic schemas
+    │   ├── routers/          # API endpoints
+    │   ├── services/         # Business logic
+    │   └── utils/            # Utilities
+    ├── tests/                # Pytest tests
+    └── alembic/              # Migrations
 ```
 
-## Dark Mode
+## API Endpoints
 
-The app automatically adapts to your system's color scheme preference. Dark mode is enabled via Tailwind's `darkMode: 'media'` setting, which respects the `prefers-color-scheme` media query.
+### Authentication
+- `POST /api/auth/google/token` - Exchange Google credential for JWT
+- `POST /api/auth/refresh` - Refresh access token
+- `POST /api/auth/logout` - Logout
+- `GET /api/auth/me` - Get current user
 
-## Browser Support
+### Categories
+- `GET /api/categories` - List categories
+- `POST /api/categories` - Create category
+- `PUT /api/categories/{id}` - Update category
+- `DELETE /api/categories/{id}` - Delete category
 
-- Chrome (latest)
-- Firefox (latest)
-- Safari (latest)
-- Edge (latest)
+### Properties
+- Same CRUD pattern as categories
 
-## Tips
+### Entries
+- `GET /api/entries` - List entries (with filters)
+- `POST /api/entries` - Create entry
+- `PUT /api/entries/{id}` - Update entry
+- `DELETE /api/entries/{id}` - Delete entry
 
-1. **Quick Entry**: Use the quick-select buttons for common time values
-2. **Filtering**: Combine multiple filters for precise results
-3. **Backup**: Regularly export your data as CSV for backup
-4. **Organization**: Use descriptive category names and colors for easy identification
-5. **Mobile**: The app works great on mobile devices for on-the-go logging
-6. **Dark Mode**: Switch your system to dark mode for a comfortable nighttime experience
+### Analytics
+- `GET /api/analytics/summary` - Get summary stats
+- `GET /api/analytics/by-category` - Hours by category
+- `GET /api/analytics/by-property` - Hours by property
+- `GET /api/analytics/monthly` - Monthly trends
+
+## Testing
+
+### Backend Tests
+```bash
+cd backend
+source venv/bin/activate
+pytest -v
+```
 
 ## Troubleshooting
 
-**Data not persisting?**
-- Check that localStorage is enabled in your browser
-- Ensure you're not in private/incognito mode
+**Can't sign in with Google?**
+- Check that your Google OAuth credentials are correctly configured
+- Ensure the authorized origins and redirect URIs are set correctly
+- Check browser console for errors
 
-**Charts not displaying?**
-- Make sure you have at least one hour entry
-- Try refreshing the page
+**Backend not connecting?**
+- Ensure PostgreSQL is running: `docker compose up db -d`
+- Check that `.env` has correct database URL
+- Run migrations: `alembic upgrade head`
 
-**Can't delete category/property?**
-- Categories and properties can't be deleted if they're used in any entries
-- Delete or reassign entries first
+**Frontend not connecting to backend?**
+- Ensure backend is running on port 8000
+- Check `.env.local` has correct `NEXT_PUBLIC_API_URL`
+
+## Future Plans
+
+- Offline-first with IndexedDB
+- Freemium model with Stripe
+- Mobile app (React Native)
+- Data export/import
 
 ## License
 
@@ -202,4 +271,4 @@ This project is open source and available for personal and commercial use.
 
 ---
 
-Built with Next.js, Zustand, Framer Motion, and Tailwind CSS.
+Built with Next.js, FastAPI, PostgreSQL, and Google OAuth.

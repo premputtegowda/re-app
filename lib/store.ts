@@ -6,24 +6,42 @@ import { toast } from 'sonner';
 import type { HoursEntry, Category, Property, HoursFilter } from '@/types';
 import { toTotalMinutes } from '@/utils/calculations';
 import { getCurrentTimestamp } from '@/utils/dateUtils';
+import { api } from './api';
 
-// Default categories
-const DEFAULT_CATEGORIES: Category[] = [
-  { id: 'cat-1', name: 'Property Management', color: '#3B82F6', createdAt: getCurrentTimestamp() },
-  { id: 'cat-2', name: 'Maintenance & Repairs', color: '#10B981', createdAt: getCurrentTimestamp() },
-  { id: 'cat-3', name: 'Tenant Relations', color: '#F59E0B', createdAt: getCurrentTimestamp() },
-  { id: 'cat-4', name: 'Financial Records', color: '#8B5CF6', createdAt: getCurrentTimestamp() },
-  { id: 'cat-5', name: 'Property Inspections', color: '#EC4899', createdAt: getCurrentTimestamp() },
-];
-
-// Default properties
-const DEFAULT_PROPERTIES: Property[] = [
-  { id: 'prop-1', name: 'Property 1', address: '123 Main St', createdAt: getCurrentTimestamp() },
-];
-
-// Generate unique ID
+// Generate unique ID (fallback for offline mode)
 const generateId = (prefix: string) =>
   `${prefix}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+// Transform backend entry to frontend format
+const transformEntry = (backendEntry: any): HoursEntry => ({
+  id: backendEntry.id,
+  date: backendEntry.date,
+  hours: backendEntry.hours,
+  minutes: backendEntry.minutes,
+  totalMinutes: backendEntry.total_minutes,
+  category: backendEntry.category_id,
+  property: backendEntry.property_id,
+  description: backendEntry.description,
+  type: backendEntry.type === 'non-material' ? 'non-material' : 'material',
+  createdAt: backendEntry.created_at,
+  updatedAt: backendEntry.updated_at,
+});
+
+// Transform backend category to frontend format
+const transformCategory = (backendCategory: any): Category => ({
+  id: backendCategory.id,
+  name: backendCategory.name,
+  color: backendCategory.color,
+  createdAt: backendCategory.created_at,
+});
+
+// Transform backend property to frontend format
+const transformProperty = (backendProperty: any): Property => ({
+  id: backendProperty.id,
+  name: backendProperty.name,
+  address: backendProperty.address,
+  createdAt: backendProperty.created_at,
+});
 
 // Store interface
 interface AppStore {
@@ -34,21 +52,22 @@ interface AppStore {
   filter: HoursFilter;
   isLoading: boolean;
   error: string | null;
+  isSynced: boolean;
 
   // Entry actions
-  addEntry: (entry: Omit<HoursEntry, 'id' | 'totalMinutes' | 'createdAt' | 'updatedAt'>) => void;
-  updateEntry: (entry: HoursEntry) => void;
-  deleteEntry: (id: string) => void;
+  addEntry: (entry: Omit<HoursEntry, 'id' | 'totalMinutes' | 'createdAt' | 'updatedAt'>) => Promise<void>;
+  updateEntry: (entry: HoursEntry) => Promise<void>;
+  deleteEntry: (id: string) => Promise<void>;
 
   // Category actions
-  addCategory: (category: Omit<Category, 'id' | 'createdAt'>) => void;
-  updateCategory: (category: Category) => void;
-  deleteCategory: (id: string) => void;
+  addCategory: (category: Omit<Category, 'id' | 'createdAt'>) => Promise<void>;
+  updateCategory: (category: Category) => Promise<void>;
+  deleteCategory: (id: string) => Promise<void>;
 
   // Property actions
-  addProperty: (property: Omit<Property, 'id' | 'createdAt'>) => void;
-  updateProperty: (property: Property) => void;
-  deleteProperty: (id: string) => void;
+  addProperty: (property: Omit<Property, 'id' | 'createdAt'>) => Promise<void>;
+  updateProperty: (property: Property) => Promise<void>;
+  deleteProperty: (id: string) => Promise<void>;
 
   // Filter actions
   setFilter: (filter: HoursFilter) => void;
@@ -57,6 +76,10 @@ interface AppStore {
   // Loading/Error actions
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
+
+  // Sync actions
+  syncFromBackend: () => Promise<void>;
+  clearData: () => void;
 }
 
 export const useStore = create<AppStore>()(
@@ -64,97 +87,207 @@ export const useStore = create<AppStore>()(
     (set, get) => ({
       // Initial state
       entries: [],
-      categories: DEFAULT_CATEGORIES,
-      properties: DEFAULT_PROPERTIES,
+      categories: [],
+      properties: [],
       filter: {},
       isLoading: false,
       error: null,
+      isSynced: false,
 
       // Entry actions
-      addEntry: (entry) => {
+      addEntry: async (entry) => {
+        set({ isLoading: true });
         try {
-          const newEntry: HoursEntry = {
-            ...entry,
-            id: generateId('entry'),
-            totalMinutes: toTotalMinutes(entry.hours, entry.minutes),
-            createdAt: getCurrentTimestamp(),
-            updatedAt: getCurrentTimestamp(),
-          };
-          set((state) => ({ entries: [...state.entries, newEntry] }));
+          const response = await api.createEntry({
+            date: entry.date,
+            hours: entry.hours,
+            minutes: entry.minutes,
+            category_id: entry.category,
+            property_id: entry.property,
+            entry_type: entry.type,
+            description: entry.description,
+          });
+
+          const newEntry = transformEntry(response);
+          set((state) => ({
+            entries: [...state.entries, newEntry],
+            isLoading: false,
+          }));
           toast.success('Hours entry added successfully');
         } catch (error) {
-          console.error('Error adding entry:', error);
-          toast.error('Failed to add entry');
+          set({ isLoading: false });
+          const message = error instanceof Error ? error.message : 'Failed to add entry';
+          toast.error(message);
+          throw error;
         }
       },
 
-      updateEntry: (entry) => {
-        const updatedEntry: HoursEntry = {
-          ...entry,
-          totalMinutes: toTotalMinutes(entry.hours, entry.minutes),
-          updatedAt: getCurrentTimestamp(),
-        };
-        set((state) => ({
-          entries: state.entries.map((e) => (e.id === entry.id ? updatedEntry : e)),
-        }));
-        toast.success('Hours entry updated successfully');
+      updateEntry: async (entry) => {
+        set({ isLoading: true });
+        try {
+          const response = await api.updateEntry(entry.id, {
+            date: entry.date,
+            hours: entry.hours,
+            minutes: entry.minutes,
+            category_id: entry.category,
+            property_id: entry.property,
+            entry_type: entry.type,
+            description: entry.description,
+          });
+
+          const updatedEntry = transformEntry(response);
+          set((state) => ({
+            entries: state.entries.map((e) => (e.id === entry.id ? updatedEntry : e)),
+            isLoading: false,
+          }));
+          toast.success('Hours entry updated successfully');
+        } catch (error) {
+          set({ isLoading: false });
+          const message = error instanceof Error ? error.message : 'Failed to update entry';
+          toast.error(message);
+          throw error;
+        }
       },
 
-      deleteEntry: (id) => {
-        set((state) => ({
-          entries: state.entries.filter((e) => e.id !== id),
-        }));
-        toast.info('Hours entry deleted');
+      deleteEntry: async (id) => {
+        set({ isLoading: true });
+        try {
+          await api.deleteEntry(id);
+          set((state) => ({
+            entries: state.entries.filter((e) => e.id !== id),
+            isLoading: false,
+          }));
+          toast.info('Hours entry deleted');
+        } catch (error) {
+          set({ isLoading: false });
+          const message = error instanceof Error ? error.message : 'Failed to delete entry';
+          toast.error(message);
+          throw error;
+        }
       },
 
       // Category actions
-      addCategory: (category) => {
-        const newCategory: Category = {
-          ...category,
-          id: generateId('cat'),
-          createdAt: getCurrentTimestamp(),
-        };
-        set((state) => ({ categories: [...state.categories, newCategory] }));
-        toast.success('Category added successfully');
+      addCategory: async (category) => {
+        set({ isLoading: true });
+        try {
+          const response = await api.createCategory({
+            name: category.name,
+            color: category.color,
+          });
+
+          const newCategory = transformCategory(response);
+          set((state) => ({
+            categories: [...state.categories, newCategory],
+            isLoading: false,
+          }));
+          toast.success('Category added successfully');
+        } catch (error) {
+          set({ isLoading: false });
+          const message = error instanceof Error ? error.message : 'Failed to add category';
+          toast.error(message);
+          throw error;
+        }
       },
 
-      updateCategory: (category) => {
-        set((state) => ({
-          categories: state.categories.map((c) => (c.id === category.id ? category : c)),
-        }));
-        toast.success('Category updated successfully');
+      updateCategory: async (category) => {
+        set({ isLoading: true });
+        try {
+          const response = await api.updateCategory(category.id, {
+            name: category.name,
+            color: category.color,
+          });
+
+          const updatedCategory = transformCategory(response);
+          set((state) => ({
+            categories: state.categories.map((c) => (c.id === category.id ? updatedCategory : c)),
+            isLoading: false,
+          }));
+          toast.success('Category updated successfully');
+        } catch (error) {
+          set({ isLoading: false });
+          const message = error instanceof Error ? error.message : 'Failed to update category';
+          toast.error(message);
+          throw error;
+        }
       },
 
-      deleteCategory: (id) => {
-        set((state) => ({
-          categories: state.categories.filter((c) => c.id !== id),
-        }));
-        toast.info('Category deleted');
+      deleteCategory: async (id) => {
+        set({ isLoading: true });
+        try {
+          await api.deleteCategory(id);
+          set((state) => ({
+            categories: state.categories.filter((c) => c.id !== id),
+            isLoading: false,
+          }));
+          toast.info('Category deleted');
+        } catch (error) {
+          set({ isLoading: false });
+          const message = error instanceof Error ? error.message : 'Failed to delete category';
+          toast.error(message);
+          throw error;
+        }
       },
 
       // Property actions
-      addProperty: (property) => {
-        const newProperty: Property = {
-          ...property,
-          id: generateId('prop'),
-          createdAt: getCurrentTimestamp(),
-        };
-        set((state) => ({ properties: [...state.properties, newProperty] }));
-        toast.success('Property added successfully');
+      addProperty: async (property) => {
+        set({ isLoading: true });
+        try {
+          const response = await api.createProperty({
+            name: property.name,
+            address: property.address,
+          });
+
+          const newProperty = transformProperty(response);
+          set((state) => ({
+            properties: [...state.properties, newProperty],
+            isLoading: false,
+          }));
+          toast.success('Property added successfully');
+        } catch (error) {
+          set({ isLoading: false });
+          const message = error instanceof Error ? error.message : 'Failed to add property';
+          toast.error(message);
+          throw error;
+        }
       },
 
-      updateProperty: (property) => {
-        set((state) => ({
-          properties: state.properties.map((p) => (p.id === property.id ? property : p)),
-        }));
-        toast.success('Property updated successfully');
+      updateProperty: async (property) => {
+        set({ isLoading: true });
+        try {
+          const response = await api.updateProperty(property.id, {
+            name: property.name,
+            address: property.address,
+          });
+
+          const updatedProperty = transformProperty(response);
+          set((state) => ({
+            properties: state.properties.map((p) => (p.id === property.id ? updatedProperty : p)),
+            isLoading: false,
+          }));
+          toast.success('Property updated successfully');
+        } catch (error) {
+          set({ isLoading: false });
+          const message = error instanceof Error ? error.message : 'Failed to update property';
+          toast.error(message);
+          throw error;
+        }
       },
 
-      deleteProperty: (id) => {
-        set((state) => ({
-          properties: state.properties.filter((p) => p.id !== id),
-        }));
-        toast.info('Property deleted');
+      deleteProperty: async (id) => {
+        set({ isLoading: true });
+        try {
+          await api.deleteProperty(id);
+          set((state) => ({
+            properties: state.properties.filter((p) => p.id !== id),
+            isLoading: false,
+          }));
+          toast.info('Property deleted');
+        } catch (error) {
+          set({ isLoading: false });
+          const message = error instanceof Error ? error.message : 'Failed to delete property';
+          toast.error(message);
+          throw error;
+        }
       },
 
       // Filter actions
@@ -174,6 +307,45 @@ export const useStore = create<AppStore>()(
       setError: (error) => {
         set({ error });
       },
+
+      // Sync from backend
+      syncFromBackend: async () => {
+        set({ isLoading: true, error: null });
+        try {
+          const [categoriesRes, propertiesRes, entriesRes] = await Promise.all([
+            api.getCategories(),
+            api.getProperties(),
+            api.getEntries(),
+          ]);
+
+          set({
+            categories: categoriesRes.map(transformCategory),
+            properties: propertiesRes.map(transformProperty),
+            entries: entriesRes.map(transformEntry),
+            isLoading: false,
+            isSynced: true,
+          });
+        } catch (error) {
+          set({
+            isLoading: false,
+            error: error instanceof Error ? error.message : 'Failed to sync data',
+          });
+          throw error;
+        }
+      },
+
+      // Clear all data (on logout)
+      clearData: () => {
+        set({
+          entries: [],
+          categories: [],
+          properties: [],
+          filter: {},
+          isLoading: false,
+          error: null,
+          isSynced: false,
+        });
+      },
     }),
     {
       name: 'reps-storage',
@@ -182,6 +354,7 @@ export const useStore = create<AppStore>()(
         entries: state.entries,
         categories: state.categories,
         properties: state.properties,
+        isSynced: state.isSynced,
       }),
     }
   )
