@@ -1,3 +1,20 @@
+// Auth types
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  picture_url: string | null;
+  is_admin: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AuthState {
+  user: User | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+}
+
 // Core data types
 export interface HoursEntry {
   id: string;
@@ -5,8 +22,8 @@ export interface HoursEntry {
   hours: number;
   minutes: number;
   totalMinutes: number; // Calculated field: hours * 60 + minutes
-  category: string;
-  property: string;
+  category: string; // category_id
+  property: string; // property_id
   description: string;
   type: 'material' | 'non-material';
   createdAt: string; // ISO timestamp

@@ -1,0 +1,739 @@
+================================================================================
+REPS TRACKER BACKEND DEVELOPMENT PLAN
+Python-based API for Real Estate Professional Status Hours Tracking
+================================================================================
+
+CURRENT STATE ANALYSIS
+----------------------
+- Frontend: Next.js 14 (App Router), TypeScript, Zustand, Tailwind CSS
+- Storage: Browser localStorage (no persistence across devices)
+- Auth: None
+- Data: HoursEntry, Category, Property entities
+
+GOAL
+----
+Build a Python backend API to:
+- Enable user authentication and multi-device sync
+- Persist data in a proper database
+- Allow future features (reports, sharing, multi-user)
+- Support freemium model (future release)
+
+================================================================================
+1. CORE TECHNICAL CHALLENGES
+================================================================================
+
+1.1 DATA MIGRATION
+------------------
+Challenge: Users have existing data in localStorage that must not be lost.
+Solution:
+  - Implement a one-time migration endpoint POST /api/migrate
+  - Frontend detects if user has localStorage data + no server data
+  - Bulk upload localStorage entries after first login
+  - Mark migration complete to prevent duplicates
+
+1.2 OFFLINE-FIRST SYNC
+----------------------
+Challenge: App should work offline (current behavior) but sync when online.
+Solution:
+  - Keep Zustand + localStorage as primary (optimistic UI)
+  - Background sync to server when online
+  - Conflict resolution: "last write wins" with updatedAt timestamps
+  - Queue failed requests for retry
+
+1.3 API LATENCY
+---------------
+Challenge: Current app is instant (localStorage). Server calls add latency.
+Solution:
+  - Optimistic updates: UI updates immediately, syncs in background
+  - Batch operations: sync multiple changes in single request
+  - Use WebSockets or polling for real-time sync (optional, phase 2)
+
+1.4 AUTHENTICATION
+------------------
+Challenge: Secure user identification without complexity.
+Solution:
+  - Google OAuth for authentication (MVP)
+  - JWT tokens (access + refresh token pattern) issued after Google auth
+  - Email/password login deferred to post-MVP
+
+1.5 GOOGLE OAUTH IMPLEMENTATION
+-------------------------------
+
+Overview:
+  - Use Authorization Code Flow (most secure for web apps)
+  - Google handles password security, 2FA, account recovery
+  - We only store Google user ID and profile info (no passwords)
+
+Setup Requirements:
+  1. Create project in Google Cloud Console
+  2. Enable Google+ API / People API
+  3. Configure OAuth consent screen
+  4. Create OAuth 2.0 credentials (Client ID + Secret)
+  5. Set authorized redirect URI: https://yourapp.com/api/auth/google/callback
+
+OAuth Flow:
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │ 1. User clicks "Sign in with Google" button on frontend                 │
+  │    ↓                                                                    │
+  │ 2. Frontend redirects to Google OAuth URL with:                         │
+  │    - client_id, redirect_uri, scope (email, profile), state (CSRF)      │
+  │    ↓                                                                    │
+  │ 3. User authenticates with Google (enters credentials on Google)        │
+  │    ↓                                                                    │
+  │ 4. Google redirects back to our callback URL with authorization code    │
+  │    ↓                                                                    │
+  │ 5. Backend exchanges code for access_token + id_token                   │
+  │    POST https://oauth2.googleapis.com/token                             │
+  │    ↓                                                                    │
+  │ 6. Backend extracts user info from id_token (JWT):                      │
+  │    - email, name, picture, google_id (sub claim)                        │
+  │    ↓                                                                    │
+  │ 7. Backend creates/updates user in database                             │
+  │    ↓                                                                    │
+  │ 8. Backend issues our own JWT tokens (access + refresh)                 │
+  │    ↓                                                                    │
+  │ 9. Redirect to frontend with tokens (or set httpOnly cookie)            │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+User Creation Logic (MVP - Google Only):
+  - If Google ID exists → log in existing user
+  - If Google ID not found → create new account with Google profile
+
+Frontend Implementation:
+  Option A: Redirect Flow (simpler)
+    - Button redirects to: /api/auth/google/authorize
+    - Backend redirects to Google
+    - Callback redirects back to frontend with token
+
+  Option B: Popup Flow (better UX)
+    - Use @react-oauth/google package
+    - Google popup handles auth
+    - Returns credential to frontend
+    - Frontend sends credential to backend for verification
+
+Environment Variables Required:
+  GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+  GOOGLE_CLIENT_SECRET=your-client-secret
+  GOOGLE_REDIRECT_URI=https://yourapp.com/api/auth/google/callback
+
+================================================================================
+2. DATA COLLECTION REQUIREMENTS
+================================================================================
+
+2.1 DATABASE SCHEMA
+-------------------
+
+Users Table:
+  - id: UUID (primary key)
+  - email: VARCHAR(255) UNIQUE NOT NULL
+  - name: VARCHAR(100) NOT NULL
+  - picture_url: VARCHAR(500) NULL (profile picture from Google)
+  - google_id: VARCHAR(255) UNIQUE NOT NULL (Google's unique user ID)
+  - created_at: TIMESTAMP
+  - updated_at: TIMESTAMP
+
+  # Future (post-MVP):
+  # - password_hash: VARCHAR(255) NULL     # For email/password login
+  # - auth_provider: ENUM('email','google','both')
+  # - tier: ENUM('free', 'pro') DEFAULT 'free'  # For freemium model
+  # - is_complimentary: BOOLEAN DEFAULT FALSE   # Admin-granted free Pro access
+  # - complimentary_reason: VARCHAR(255) NULL   # Why granted (for tracking)
+  # - complimentary_granted_by: UUID NULL       # Admin who granted it
+  # - complimentary_granted_at: TIMESTAMP NULL
+  # - is_admin: BOOLEAN DEFAULT FALSE           # Can access admin panel
+
+Categories Table:
+  - id: UUID (primary key)
+  - user_id: UUID (foreign key -> Users)
+  - name: VARCHAR(50) NOT NULL
+  - color: VARCHAR(7) NOT NULL (hex color)
+  - created_at: TIMESTAMP
+  - updated_at: TIMESTAMP
+  - UNIQUE(user_id, name)
+
+Properties Table:
+  - id: UUID (primary key)
+  - user_id: UUID (foreign key -> Users)
+  - name: VARCHAR(100) NOT NULL
+  - address: VARCHAR(200) NULL
+  - created_at: TIMESTAMP
+  - updated_at: TIMESTAMP
+  - UNIQUE(user_id, name)
+
+HoursEntries Table:
+  - id: UUID (primary key)
+  - user_id: UUID (foreign key -> Users)
+  - category_id: UUID (foreign key -> Categories)
+  - property_id: UUID (foreign key -> Properties)
+  - date: DATE NOT NULL
+  - hours: INTEGER NOT NULL
+  - minutes: INTEGER NOT NULL
+  - total_minutes: INTEGER NOT NULL (computed)
+  - type: ENUM('material', 'non-material') NOT NULL
+  - description: TEXT NOT NULL
+  - created_at: TIMESTAMP
+  - updated_at: TIMESTAMP
+  - INDEX(user_id, date)
+
+RefreshTokens Table:
+  - id: UUID (primary key)
+  - user_id: UUID (foreign key -> Users)
+  - token_hash: VARCHAR(255) NOT NULL
+  - expires_at: TIMESTAMP NOT NULL
+  - created_at: TIMESTAMP
+
+2.2 API ENDPOINTS
+-----------------
+
+Authentication (Google OAuth - MVP):
+  GET    /api/auth/google/authorize  - Redirect to Google OAuth
+  GET    /api/auth/google/callback   - Handle Google OAuth callback
+  POST   /api/auth/google/token      - Exchange Google credential for JWT (popup flow)
+  POST   /api/auth/refresh           - Refresh access token
+  POST   /api/auth/logout            - Invalidate refresh token
+  GET    /api/auth/me                - Get current user
+  DELETE /api/auth/me                - Delete account and all data
+
+  # Future (post-MVP):
+  # POST /api/auth/register         - Email/password registration
+  # POST /api/auth/login            - Email/password login
+  # POST /api/auth/google/link      - Link Google to email account
+
+Categories:
+  GET    /api/categories           - List user's categories
+  POST   /api/categories           - Create category
+  PUT    /api/categories/:id       - Update category
+  DELETE /api/categories/:id       - Delete category (if not in use)
+
+Properties:
+  GET    /api/properties           - List user's properties
+  POST   /api/properties           - Create property
+  PUT    /api/properties/:id       - Update property
+  DELETE /api/properties/:id       - Delete property (if not in use)
+
+Hours Entries:
+  GET    /api/entries              - List entries (with pagination, filters)
+  POST   /api/entries              - Create entry
+  PUT    /api/entries/:id          - Update entry
+  DELETE /api/entries/:id          - Delete entry
+  POST   /api/entries/bulk         - Bulk create (for migration)
+
+Analytics:
+  GET    /api/analytics/summary    - Total hours, week, month stats
+  GET    /api/analytics/by-category - Hours grouped by category
+  GET    /api/analytics/by-property - Hours grouped by property
+  GET    /api/analytics/monthly    - Monthly trend data
+
+Sync:
+  POST   /api/sync                 - Sync local changes (batch)
+  GET    /api/sync/status          - Check last sync timestamp
+
+Export:
+  GET    /api/export/csv           - Download entries as CSV
+
+================================================================================
+3. PRIVACY AND DATA SECURITY
+================================================================================
+
+3.1 AUTHENTICATION SECURITY
+---------------------------
+- Passwords hashed with bcrypt (cost factor 12)
+- JWT access tokens: short-lived (15 minutes)
+- JWT refresh tokens: longer-lived (7 days), stored in httpOnly cookie
+- Refresh tokens stored hashed in database (revocable)
+- Rate limiting on auth endpoints (5 attempts per minute)
+
+3.2 DATA PROTECTION
+-------------------
+- All API endpoints require authentication (except auth routes)
+- Users can only access their own data (user_id filter on all queries)
+- Input validation on all endpoints (Pydantic models)
+- SQL injection prevention via ORM (SQLAlchemy)
+- XSS prevention: API returns JSON only, no HTML rendering
+
+3.3 TRANSPORT SECURITY
+----------------------
+- HTTPS only in production (enforce via HSTS header)
+- CORS configured for frontend domain only
+- Secure cookie flags: httpOnly, secure, sameSite=strict
+
+3.4 DATA PRIVACY
+----------------
+- Minimal data collection (only what's needed for functionality)
+- No tracking or analytics beyond what user explicitly logs
+- User can export all their data (GDPR compliance)
+- User can delete account and all associated data
+- No data sharing with third parties
+
+3.5 ENVIRONMENT SECURITY
+------------------------
+- Secrets in environment variables (never in code)
+- Database credentials rotated periodically
+- API keys for OAuth stored securely
+- Logging excludes sensitive data (passwords, tokens)
+
+================================================================================
+4. USER EXPERIENCE FLOW
+================================================================================
+
+4.1 FIRST-TIME USER (NEW)
+-------------------------
+1. User opens app -> sees login/register screen
+2. User registers with email/password or Google OAuth
+3. App creates account with default categories
+4. User starts logging hours immediately
+5. Data syncs to server automatically
+
+4.2 FIRST-TIME USER (EXISTING LOCAL DATA)
+------------------------------------------
+1. User opens app -> sees login/register screen
+2. App detects localStorage has existing data
+3. After login, app prompts: "Migrate existing data?"
+4. User confirms -> bulk upload to server
+5. localStorage cleared (or kept as cache)
+6. App continues normally with server sync
+
+4.3 RETURNING USER
+------------------
+1. User opens app
+2. Token in storage -> auto-login (refresh if needed)
+3. Background sync: fetch latest from server
+4. User interacts normally
+5. Changes sync in background
+
+4.4 OFFLINE USAGE
+-----------------
+1. User opens app without internet
+2. App works normally (localStorage)
+3. Changes queued for sync
+4. When online, background sync executes
+5. Conflicts resolved by timestamp
+
+4.5 MULTI-DEVICE
+----------------
+1. User logs in on second device
+2. Full data pulled from server
+3. Both devices sync independently
+4. Real-time sync optional (WebSockets, phase 2)
+
+================================================================================
+5. EDGE CASES AND ERROR HANDLING
+================================================================================
+
+5.1 AUTHENTICATION ERRORS (Google OAuth - MVP)
+----------------------------------------------
+| Error                  | HTTP Code | User Message                        |
+|------------------------|-----------|-------------------------------------|
+| OAuth state mismatch   | 400       | "Authentication failed. Try again." |
+| Google token invalid   | 401       | "Google sign-in failed. Try again." |
+| Google token expired   | 401       | "Google session expired. Try again."|
+| JWT token expired      | 401       | (Auto-refresh, if fails -> login)   |
+| JWT token invalid      | 401       | "Session expired. Please log in."   |
+| Rate limited           | 429       | "Too many attempts. Try again."     |
+
+5.2 DATA VALIDATION ERRORS
+--------------------------
+| Error                  | HTTP Code | User Message                        |
+|------------------------|-----------|-------------------------------------|
+| Missing required field | 422       | "{field} is required"               |
+| Invalid date format    | 422       | "Date must be YYYY-MM-DD"           |
+| Future date            | 422       | "Cannot log hours for future dates" |
+| Zero time              | 422       | "Time must be greater than 0"       |
+| Name too long          | 422       | "Name must be under X characters"   |
+| Duplicate name         | 409       | "A {type} with this name exists"    |
+
+5.3 BUSINESS LOGIC ERRORS
+-------------------------
+| Error                  | HTTP Code | User Message                        |
+|------------------------|-----------|-------------------------------------|
+| Category in use        | 409       | "Cannot delete: used in X entries"  |
+| Property in use        | 409       | "Cannot delete: used in X entries"  |
+| Entry not found        | 404       | "Entry not found"                   |
+| Not owner              | 403       | "You don't have access to this"     |
+
+5.4 SYNC CONFLICTS
+------------------
+Strategy: Last Write Wins
+- Compare updatedAt timestamps
+- Server version wins if server.updatedAt > local.updatedAt
+- Local version wins if local.updatedAt > server.updatedAt
+- For deletes: if deleted on server, remove locally (soft delete)
+
+5.5 NETWORK ERRORS
+------------------
+| Scenario               | Handling                                   |
+|------------------------|--------------------------------------------|
+| No internet            | Queue changes, retry when online           |
+| Server timeout         | Retry with exponential backoff (max 3)     |
+| Server 500             | Show error toast, queue for retry          |
+| Server unreachable     | Continue offline, sync later               |
+
+================================================================================
+6. DEPLOYMENT AND MAINTENANCE STRATEGY
+================================================================================
+
+6.1 TECHNOLOGY STACK
+--------------------
+Backend:
+  - Framework: FastAPI (Python 3.11+)
+  - ORM: SQLAlchemy 2.0 with async support
+  - Database: PostgreSQL 15
+  - Migrations: Alembic
+  - Auth: python-jose (JWT), passlib (bcrypt)
+  - OAuth: authlib or google-auth (Google OAuth2)
+  - HTTP Client: httpx (async HTTP for OAuth token exchange)
+  - Validation: Pydantic v2
+  - CORS: FastAPI middleware
+  - Testing: pytest, pytest-asyncio
+
+Infrastructure:
+  - Container: Docker
+  - Orchestration: Docker Compose (dev), Kubernetes (prod optional)
+  - Reverse Proxy: Nginx or Caddy
+  - SSL: Let's Encrypt (Certbot)
+
+6.2 PROJECT STRUCTURE
+---------------------
+backend/
+├── app/
+│   ├── __init__.py
+│   ├── main.py              # FastAPI app entry point
+│   ├── config.py            # Settings from env vars
+│   ├── database.py          # Database connection
+│   ├── models/              # SQLAlchemy models
+│   │   ├── user.py
+│   │   ├── category.py
+│   │   ├── property.py
+│   │   └── entry.py
+│   ├── schemas/             # Pydantic request/response models
+│   │   ├── user.py
+│   │   ├── category.py
+│   │   ├── property.py
+│   │   └── entry.py
+│   ├── routers/             # API route handlers
+│   │   ├── auth.py
+│   │   ├── categories.py
+│   │   ├── properties.py
+│   │   ├── entries.py
+│   │   └── analytics.py
+│   ├── services/            # Business logic
+│   │   ├── oauth.py         # Google OAuth + JWT logic
+│   │   └── sync.py          # Data sync logic
+│   ├── dependencies.py      # Dependency injection
+│   └── utils/
+│       ├── security.py      # JWT, password hashing
+│       └── exceptions.py    # Custom exceptions
+├── alembic/                 # Database migrations
+├── tests/                   # Test suite
+├── requirements.txt
+├── Dockerfile
+├── docker-compose.yml
+└── .env.example
+
+6.3 DEPLOYMENT OPTIONS
+----------------------
+
+Option A: Railway/Render (Recommended for MVP)
+  - One-click deploy from GitHub
+  - Managed PostgreSQL add-on
+  - Auto-scaling, SSL included
+  - Cost: ~$5-20/month
+
+Option B: VPS (DigitalOcean, Linode)
+  - More control, lower cost at scale
+  - Docker Compose deployment
+  - Manual SSL setup (Certbot)
+  - Cost: ~$5-10/month
+
+Option C: AWS/GCP (Enterprise)
+  - ECS/Cloud Run for containers
+  - RDS/Cloud SQL for database
+  - More complex, more scalable
+  - Cost: Variable, potentially higher
+
+6.4 CI/CD PIPELINE
+------------------
+GitHub Actions workflow:
+  1. On push to main:
+     - Run linting (ruff, black)
+     - Run tests (pytest)
+     - Build Docker image
+     - Push to container registry
+     - Deploy to staging
+  2. On release tag:
+     - Deploy to production
+
+6.5 MONITORING & LOGGING
+------------------------
+- Logging: structlog (JSON format) -> stdout
+- Log aggregation: Loki or CloudWatch
+- Metrics: Prometheus + Grafana (optional)
+- Error tracking: Sentry
+- Uptime monitoring: UptimeRobot or similar
+
+6.6 BACKUP STRATEGY
+-------------------
+- Database: Daily automated backups (7-day retention)
+- Point-in-time recovery enabled
+- Backup testing: Monthly restore drill
+
+6.7 MAINTENANCE TASKS
+---------------------
+- Dependency updates: Monthly (Dependabot)
+- Security patches: Immediate
+- Database vacuuming: Automatic (PostgreSQL)
+- Log rotation: Automatic
+- Token cleanup: Cron job to remove expired refresh tokens
+
+================================================================================
+IMPLEMENTATION PHASES
+================================================================================
+
+PHASE 1: CORE API + GOOGLE AUTH (Week 1-2)
+------------------------------------------
+- FastAPI project setup with Docker
+- Database models and migrations (Alembic)
+- Google OAuth authentication:
+  * Authorization redirect endpoint
+  * Callback handler (code → token exchange)
+  * Popup flow endpoint (credential verification)
+  * JWT access + refresh token issuance
+- CRUD endpoints for categories, properties, entries
+- Unit tests for auth and CRUD
+
+PHASE 2: FRONTEND INTEGRATION + INDEXEDDB (Week 3)
+--------------------------------------------------
+- Add API client to Next.js app (axios or fetch wrapper)
+- Auth UI components:
+  * Login page with "Sign in with Google" button
+  * Protected route wrapper (redirect to login if not authenticated)
+  * User profile display (name, picture from Google)
+  * Logout functionality
+- IndexedDB migration (Dexie.js):
+  * Install Dexie.js: npm install dexie
+  * Create database schema with indexes
+  * Custom Zustand storage adapter for IndexedDB
+  * Migrate existing localStorage data to IndexedDB
+  * Add syncQueue table for offline changes
+- Replace localStorage with IndexedDB + API calls
+- Optimistic updates with background sync
+- Auth state in Zustand store
+
+PHASE 3: SYNC & OFFLINE (Week 4)
+--------------------------------
+- Sync engine implementation:
+  * Queue changes in IndexedDB syncQueue table
+  * Background sync when online (navigator.onLine)
+  * Retry failed requests with exponential backoff
+- Conflict resolution (last write wins by updatedAt)
+- localStorage → IndexedDB migration UI (one-time)
+- Analytics endpoints integration
+
+PHASE 4: POLISH & DEPLOY (Week 5)
+---------------------------------
+- Rate limiting
+- Input sanitization
+- Error handling polish
+- Deployment setup (Docker, Railway/Render)
+- Environment configuration
+- Documentation
+
+================================================================================
+FRONTEND AUTH CHANGES REQUIRED (MVP - Google Only)
+================================================================================
+
+New Components:
+  components/Auth/
+  ├── LoginPage.tsx          # "Sign in with Google" button only
+  ├── GoogleButton.tsx       # Styled Google sign-in button
+  ├── AuthGuard.tsx          # Redirect to login if not authenticated
+  └── UserMenu.tsx           # Profile picture, name, logout
+
+New Dependencies:
+  npm install @react-oauth/google   # Google OAuth React components
+  npm install dexie                 # IndexedDB wrapper for offline storage
+
+Zustand Store Updates (lib/store.ts):
+  - Add: user, isAuthenticated, accessToken, refreshToken
+  - Add: login(), logout(), setUser(), refreshAuth() actions
+  - Add: API client with automatic token refresh
+  - Replace persist localStorage adapter with IndexedDB adapter
+
+IndexedDB Schema (lib/db.ts):
+  ```typescript
+  import Dexie, { Table } from 'dexie';
+
+  export interface DBEntry {
+    id: string;
+    date: string;
+    hours: number;
+    minutes: number;
+    totalMinutes: number;
+    categoryId: string;
+    propertyId: string;
+    type: 'material' | 'non-material';
+    description: string;
+    createdAt: string;
+    updatedAt: string;
+    syncStatus: 'synced' | 'pending' | 'failed';
+  }
+
+  export interface DBCategory {
+    id: string;
+    name: string;
+    color: string;
+    createdAt: string;
+    updatedAt: string;
+    syncStatus: 'synced' | 'pending' | 'failed';
+  }
+
+  export interface DBProperty {
+    id: string;
+    name: string;
+    address?: string;
+    createdAt: string;
+    updatedAt: string;
+    syncStatus: 'synced' | 'pending' | 'failed';
+  }
+
+  export interface DBSyncQueueItem {
+    id?: number;  // auto-increment
+    action: 'create' | 'update' | 'delete';
+    entityType: 'entry' | 'category' | 'property';
+    entityId: string;
+    data?: object;
+    timestamp: string;
+    retryCount: number;
+  }
+
+  export class RepsDatabase extends Dexie {
+    entries!: Table<DBEntry>;
+    categories!: Table<DBCategory>;
+    properties!: Table<DBProperty>;
+    syncQueue!: Table<DBSyncQueueItem>;
+
+    constructor() {
+      super('reps-tracker');
+      this.version(1).stores({
+        entries: 'id, date, categoryId, propertyId, type, updatedAt, syncStatus',
+        categories: 'id, name, syncStatus',
+        properties: 'id, name, syncStatus',
+        syncQueue: '++id, entityType, entityId, timestamp'
+      });
+    }
+  }
+
+  export const db = new RepsDatabase();
+  ```
+
+IndexedDB Benefits:
+  - Indexed queries: entries by date range, category, property
+  - syncStatus field tracks what needs syncing
+  - syncQueue persists offline changes across browser restarts
+  - 50MB+ storage vs 5MB localStorage limit
+  - Async operations don't block UI
+
+New Pages/Views:
+  - Login view (shown when not authenticated)
+  - Update app/page.tsx to check auth state before showing app
+
+Environment Variables (Frontend):
+  NEXT_PUBLIC_API_URL=http://localhost:8000
+  NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+
+================================================================================
+FUTURE: FREEMIUM MODEL (Post-MVP)
+================================================================================
+
+TIER STRUCTURE
+--------------
+Free Tier:
+  - Up to 2 properties
+  - Up to 5 categories
+  - 12 months of history
+  - Basic analytics (dashboard)
+  - CSV export
+
+Pro Tier ($X/month):
+  - Unlimited properties
+  - Unlimited categories
+  - Unlimited history
+  - Advanced analytics (custom reports)
+  - PDF export with summaries
+  - Priority support
+
+Complimentary Pro (Admin-granted):
+  - Full Pro features at no cost
+  - Granted by admin to specific users
+  - No expiration (until revoked)
+  - Use cases: beta testers, partners, special users
+
+DATABASE ADDITIONS (Future)
+---------------------------
+Subscriptions Table:
+  - id: UUID (primary key)
+  - user_id: UUID (foreign key -> Users)
+  - stripe_customer_id: VARCHAR(255)
+  - stripe_subscription_id: VARCHAR(255)
+  - tier: ENUM('free', 'pro') DEFAULT 'free'
+  - status: ENUM('active', 'canceled', 'past_due', 'trialing')
+  - current_period_start: TIMESTAMP
+  - current_period_end: TIMESTAMP
+  - created_at: TIMESTAMP
+  - updated_at: TIMESTAMP
+
+Users Table Addition:
+  - tier: ENUM('free', 'pro') DEFAULT 'free'  # Denormalized for quick access
+
+API ENDPOINTS (Future)
+----------------------
+Billing:
+  POST   /api/billing/checkout      - Create Stripe checkout session
+  POST   /api/billing/portal        - Create Stripe customer portal link
+  POST   /api/billing/webhook       - Handle Stripe webhooks
+  GET    /api/billing/subscription  - Get current subscription status
+
+Admin (requires is_admin=true):
+  GET    /api/admin/users           - List all users (paginated, searchable)
+  GET    /api/admin/users/:id       - Get user details
+  POST   /api/admin/users/:id/comp  - Grant complimentary Pro access
+  DELETE /api/admin/users/:id/comp  - Revoke complimentary access
+  GET    /api/admin/stats           - System stats (user count, revenue, etc.)
+
+IMPLEMENTATION NOTES
+--------------------
+- Payment Provider: Stripe (checkout, customer portal, webhooks)
+- Enforce limits in API middleware (check tier before create operations)
+- Grace period for downgrades (don't delete data, just restrict access)
+- Webhook events to handle: checkout.session.completed,
+  customer.subscription.updated, customer.subscription.deleted,
+  invoice.payment_failed
+
+LIMIT ENFORCEMENT
+-----------------
+Middleware checks before create operations:
+  - POST /api/properties → check property count < tier limit
+  - POST /api/categories → check category count < tier limit
+  - GET /api/entries → filter by date if free tier (last 12 months)
+
+Access level resolution (in order):
+  1. If is_complimentary=true → Pro access (no limits)
+  2. If tier='pro' and subscription active → Pro access
+  3. Else → Free tier limits apply
+
+Return 402 Payment Required with upgrade prompt when limit reached.
+
+================================================================================
+NEXT STEPS
+================================================================================
+1. Set up Google Cloud Console project and OAuth credentials
+2. Set up backend project structure (backend/ directory)
+3. Create database models and run migrations
+4. Implement Google OAuth endpoints
+5. Build CRUD API endpoints
+6. Add Google sign-in to frontend
+7. Connect frontend to backend API
+8. Test full auth flow
+
+Ready to proceed with Phase 1 implementation.
+================================================================================
