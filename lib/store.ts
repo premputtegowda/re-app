@@ -104,7 +104,7 @@ export const useStore = create<AppStore>()(
             minutes: entry.minutes,
             category_id: entry.category,
             property_id: entry.property,
-            entry_type: entry.type,
+            type: entry.type,
             description: entry.description,
           });
 
@@ -131,7 +131,7 @@ export const useStore = create<AppStore>()(
             minutes: entry.minutes,
             category_id: entry.category,
             property_id: entry.property,
-            entry_type: entry.type,
+            type: entry.type,
             description: entry.description,
           });
 

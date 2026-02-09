@@ -261,7 +261,7 @@ export const api = {
     minutes: number;
     category_id: string;
     property_id: string;
-    entry_type: string;
+    type: string;
     description: string;
   }) {
     const response = await authFetch('/api/entries', {
@@ -283,7 +283,7 @@ export const api = {
       minutes?: number;
       category_id?: string;
       property_id?: string;
-      entry_type?: string;
+      type?: string;
       description?: string;
     }
   ) {
@@ -315,7 +315,7 @@ export const api = {
       minutes: number;
       category_id: string;
       property_id: string;
-      entry_type: string;
+      type: string;
       description: string;
     }>
   ) {

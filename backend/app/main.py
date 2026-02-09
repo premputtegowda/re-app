@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -13,18 +14,38 @@ from app.routers import (
     analytics_router,
 )
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 settings = get_settings()
+
+# Track database connection status
+db_connected = False
+db_error = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Create tables if they don't exist
+    global db_connected, db_error
+    # Startup: Try to create tables if they don't exist
     # In production, use Alembic migrations instead
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    try:
+        logger.info("Attempting database connection...")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        db_connected = True
+        logger.info("Database connection successful!")
+    except Exception as e:
+        db_error = str(e)
+        logger.error(f"Database connection failed: {e}")
+        # Don't fail startup - let the app run for debugging
     yield
     # Shutdown
-    await engine.dispose()
+    try:
+        await engine.dispose()
+    except Exception:
+        pass
 
 
 app = FastAPI(
@@ -58,4 +79,4 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy"}
+    return "OK"
