@@ -270,7 +270,10 @@ export const api = {
     });
     if (!response.ok) {
       const error = await response.json();
-      throw new ApiError(response.status, error.detail || 'Failed to create entry');
+      const message = Array.isArray(error.detail)
+        ? error.detail.map((e: { msg: string }) => e.msg).join(', ')
+        : error.detail || 'Failed to create entry';
+      throw new ApiError(response.status, message);
     }
     return response.json();
   },
@@ -293,7 +296,11 @@ export const api = {
     });
     if (!response.ok) {
       const error = await response.json();
-      throw new ApiError(response.status, error.detail || 'Failed to update entry');
+      console.log('Update error response:', JSON.stringify(error, null, 2));
+      const message = Array.isArray(error.detail)
+        ? error.detail.map((e: { msg: string; loc?: string[] }) => `${e.loc?.join('.')}: ${e.msg}`).join(', ')
+        : error.detail || 'Failed to update entry';
+      throw new ApiError(response.status, message);
     }
     return response.json();
   },
