@@ -125,7 +125,7 @@ export const useStore = create<AppStore>()(
       updateEntry: async (entry) => {
         set({ isLoading: true });
         try {
-          const response = await api.updateEntry(entry.id, {
+          const updateData = {
             date: entry.date,
             hours: entry.hours,
             minutes: entry.minutes,
@@ -133,7 +133,9 @@ export const useStore = create<AppStore>()(
             property_id: entry.property,
             type: entry.type,
             description: entry.description,
-          });
+          };
+          console.log('Updating entry with:', JSON.stringify(updateData, null, 2));
+          const response = await api.updateEntry(entry.id, updateData);
 
           const updatedEntry = transformEntry(response);
           set((state) => ({
