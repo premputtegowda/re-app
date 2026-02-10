@@ -1,5 +1,5 @@
-from datetime import datetime, date
-from typing import Optional
+from datetime import datetime, date as DateType
+from typing import Optional, Union
 from uuid import UUID
 from enum import Enum
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -11,7 +11,7 @@ class EntryType(str, Enum):
 
 
 class EntryBase(BaseModel):
-    date: date
+    date: DateType
     hours: int = Field(..., ge=0, le=24)
     minutes: int = Field(..., ge=0, le=59)
     category_id: UUID
@@ -21,8 +21,8 @@ class EntryBase(BaseModel):
 
     @field_validator("date")
     @classmethod
-    def validate_date_not_future(cls, v: date) -> date:
-        if v > date.today():
+    def validate_date_not_future(cls, v: DateType) -> DateType:
+        if v > DateType.today():
             raise ValueError("Cannot log hours for future dates")
         return v
 
@@ -38,7 +38,7 @@ class EntryCreate(EntryBase):
 
 
 class EntryUpdate(BaseModel):
-    date: Optional[date] = None
+    date: Union[DateType, None] = None
     hours: Optional[int] = Field(None, ge=0, le=24)
     minutes: Optional[int] = Field(None, ge=0, le=59)
     category_id: Optional[UUID] = None
@@ -46,18 +46,11 @@ class EntryUpdate(BaseModel):
     type: Optional[EntryType] = None
     description: Optional[str] = Field(None, min_length=1, max_length=500)
 
-    @field_validator("date")
-    @classmethod
-    def validate_date_not_future(cls, v: Optional[date]) -> Optional[date]:
-        if v is not None and v > date.today():
-            raise ValueError("Cannot log hours for future dates")
-        return v
-
 
 class EntryResponse(BaseModel):
     id: UUID
     user_id: UUID
-    date: date
+    date: DateType
     hours: int
     minutes: int
     total_minutes: int
@@ -73,8 +66,8 @@ class EntryResponse(BaseModel):
 
 
 class EntryFilter(BaseModel):
-    date_from: Optional[date] = None
-    date_to: Optional[date] = None
+    date_from: Optional[DateType] = None
+    date_to: Optional[DateType] = None
     category_id: Optional[UUID] = None
     property_id: Optional[UUID] = None
     type: Optional[EntryType] = None
