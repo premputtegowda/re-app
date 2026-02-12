@@ -148,11 +148,14 @@ async def test_property(test_db: AsyncSession, test_user: User) -> Property:
 @pytest.fixture
 def mock_google_verify():
     """Mock Google OAuth token verification."""
-    with patch("app.services.oauth.verify_google_token") as mock:
-        mock.return_value = {
-            "email": "newuser@example.com",
-            "name": "New User",
-            "picture": "https://example.com/new_picture.jpg",
-            "google_id": "google_new_123",
-        }
+    # Patch where the function is used (in the router), not where it's defined
+    with patch("app.routers.auth.verify_google_token") as mock:
+        async def mock_verify(*args, **kwargs):
+            return {
+                "email": "newuser@example.com",
+                "name": "New User",
+                "picture": "https://example.com/new_picture.jpg",
+                "google_id": "google_new_123",
+            }
+        mock.side_effect = mock_verify
         yield mock

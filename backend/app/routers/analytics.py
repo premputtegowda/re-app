@@ -203,9 +203,14 @@ async def get_monthly(
     today = date.today()
     start_date = (today.replace(day=1) - timedelta(days=months * 30)).replace(day=1)
 
+    # Use extract for database-agnostic year/month grouping
+    year_col = extract('year', Entry.date)
+    month_col = extract('month', Entry.date)
+
     result = await db.execute(
         select(
-            func.to_char(Entry.date, 'YYYY-MM').label("month"),
+            year_col.label("year"),
+            month_col.label("month_num"),
             func.coalesce(func.sum(Entry.total_minutes), 0).label("total_minutes"),
             func.count(Entry.id).label("entries_count"),
         )
@@ -213,13 +218,13 @@ async def get_monthly(
             Entry.user_id == current_user.id,
             Entry.date >= start_date,
         )
-        .group_by(func.to_char(Entry.date, 'YYYY-MM'))
-        .order_by(func.to_char(Entry.date, 'YYYY-MM'))
+        .group_by(year_col, month_col)
+        .order_by(year_col, month_col)
     )
 
     return [
         MonthlyData(
-            month=row.month,
+            month=f"{int(row.year)}-{int(row.month_num):02d}",
             total_minutes=row.total_minutes,
             total_hours=round(row.total_minutes / 60, 2),
             entries_count=row.entries_count,
