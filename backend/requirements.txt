@@ -28,3 +28,7 @@ aiosqlite==0.19.0
 # Utilities
 python-dotenv==1.0.0
 requests==2.32.5
+
+# Email and Scheduling
+APScheduler==3.10.4
+aiosmtplib==3.0.1

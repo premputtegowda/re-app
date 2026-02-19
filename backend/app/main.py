@@ -12,7 +12,9 @@ from app.routers import (
     properties_router,
     entries_router,
     analytics_router,
+    email_router,
 )
+from app.services.scheduler import create_scheduler
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -40,8 +42,17 @@ async def lifespan(app: FastAPI):
         db_error = str(e)
         logger.error(f"Database connection failed: {e}")
         # Don't fail startup - let the app run for debugging
+
+    scheduler = create_scheduler()
+    if settings.smtp_enabled:
+        scheduler.start()
+        logger.info("APScheduler started")
+
     yield
+
     # Shutdown
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
     try:
         await engine.dispose()
     except Exception:
@@ -70,6 +81,7 @@ app.include_router(categories_router, prefix="/api")
 app.include_router(properties_router, prefix="/api")
 app.include_router(entries_router, prefix="/api")
 app.include_router(analytics_router, prefix="/api")
+app.include_router(email_router, prefix="/api")
 
 
 @app.get("/")
