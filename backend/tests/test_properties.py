@@ -50,7 +50,7 @@ async def test_create_duplicate_property(
         headers=auth_headers,
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 409
     assert "already exists" in response.json()["detail"].lower()
 
 
@@ -132,3 +132,126 @@ async def test_property_isolation(
 
     # Admin should not see another user's property
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_property_not_found(
+    async_client: AsyncClient, auth_headers: dict
+):
+    """Test getting non-existent property returns 404."""
+    import uuid
+    response = await async_client.get(
+        f"/api/properties/{uuid.uuid4()}",
+        headers=auth_headers,
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_property_not_found(
+    async_client: AsyncClient, auth_headers: dict
+):
+    """Test updating non-existent property returns 404."""
+    import uuid
+    response = await async_client.put(
+        f"/api/properties/{uuid.uuid4()}",
+        json={"name": "Updated"},
+        headers=auth_headers,
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_property_not_found(
+    async_client: AsyncClient, auth_headers: dict
+):
+    """Test deleting non-existent property returns 404."""
+    import uuid
+    response = await async_client.delete(
+        f"/api/properties/{uuid.uuid4()}",
+        headers=auth_headers,
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_create_property_short_name(
+    async_client: AsyncClient, auth_headers: dict
+):
+    """Test creating property with too short name fails."""
+    response = await async_client.post(
+        "/api/properties",
+        json={"name": "A"},
+        headers=auth_headers,
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_property_unauthorized(async_client: AsyncClient):
+    """Test property endpoints require authentication."""
+    response = await async_client.get("/api/properties")
+    assert response.status_code in [401, 403]
+
+
+@pytest.mark.asyncio
+async def test_update_property_duplicate_name(
+    async_client: AsyncClient, test_user: User, auth_headers: dict
+):
+    """Test updating property to duplicate name fails."""
+    # Create first property
+    await async_client.post(
+        "/api/properties",
+        json={"name": "First Property"},
+        headers=auth_headers,
+    )
+
+    # Create second property
+    create_response = await async_client.post(
+        "/api/properties",
+        json={"name": "Second Property"},
+        headers=auth_headers,
+    )
+    second_id = create_response.json()["id"]
+
+    # Try to update second to have first's name
+    response = await async_client.put(
+        f"/api/properties/{second_id}",
+        json={"name": "First Property"},
+        headers=auth_headers,
+    )
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_delete_property_with_entries(
+    async_client: AsyncClient,
+    test_category,
+    test_property: Property,
+    auth_headers: dict,
+):
+    """Test deleting property with entries fails."""
+    from datetime import date
+
+    # Create an entry using the property
+    await async_client.post(
+        "/api/entries",
+        json={
+            "date": str(date.today()),
+            "hours": 1,
+            "minutes": 0,
+            "category_id": str(test_category.id),
+            "property_id": str(test_property.id),
+            "type": "material",
+            "description": "Test entry",
+        },
+        headers=auth_headers,
+    )
+
+    # Try to delete the property
+    response = await async_client.delete(
+        f"/api/properties/{test_property.id}",
+        headers=auth_headers,
+    )
+    assert response.status_code == 409
+    assert "entries" in response.json()["detail"].lower()

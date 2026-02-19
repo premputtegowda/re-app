@@ -22,7 +22,7 @@ async def test_create_entry(
             "minutes": 30,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "material",
+            "type": "material",
             "description": "Test work entry",
         },
         headers=auth_headers,
@@ -35,7 +35,7 @@ async def test_create_entry(
     assert data["total_minutes"] == 150  # 2*60 + 30
     assert data["category_id"] == str(test_category.id)
     assert data["property_id"] == str(test_property.id)
-    assert data["entry_type"] == "material"
+    assert data["type"] == "material"
 
 
 @pytest.mark.asyncio
@@ -55,7 +55,7 @@ async def test_create_entry_non_material(
             "minutes": 0,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "non-material",
+            "type": "non-material",
             "description": "Non-material work",
         },
         headers=auth_headers,
@@ -63,7 +63,7 @@ async def test_create_entry_non_material(
 
     assert response.status_code == 201
     data = response.json()
-    assert data["entry_type"] == "non-material"
+    assert data["type"] == "non-material"
 
 
 @pytest.mark.asyncio
@@ -85,7 +85,7 @@ async def test_create_entry_future_date(
             "minutes": 0,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "material",
+            "type": "material",
             "description": "Future entry",
         },
         headers=auth_headers,
@@ -112,7 +112,7 @@ async def test_list_entries(
             "minutes": 0,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "material",
+            "type": "material",
             "description": "List test entry",
         },
         headers=auth_headers,
@@ -144,7 +144,7 @@ async def test_list_entries_with_date_filter(
             "minutes": 0,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "material",
+            "type": "material",
             "description": "Today's entry",
         },
         headers=auth_headers,
@@ -176,7 +176,7 @@ async def test_get_entry(
             "minutes": 0,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "material",
+            "type": "material",
             "description": "Get test entry",
         },
         headers=auth_headers,
@@ -209,7 +209,7 @@ async def test_update_entry(
             "minutes": 0,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "material",
+            "type": "material",
             "description": "Original description",
         },
         headers=auth_headers,
@@ -224,7 +224,7 @@ async def test_update_entry(
             "minutes": 30,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "material",
+            "type": "material",
             "description": "Updated description",
         },
         headers=auth_headers,
@@ -253,7 +253,7 @@ async def test_delete_entry(
             "minutes": 0,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "material",
+            "type": "material",
             "description": "To delete",
         },
         headers=auth_headers,
@@ -290,7 +290,7 @@ async def test_bulk_create_entries(
             "minutes": 0,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "material",
+            "type": "material",
             "description": "Bulk entry 1",
         },
         {
@@ -299,17 +299,227 @@ async def test_bulk_create_entries(
             "minutes": 0,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "non-material",
+            "type": "non-material",
             "description": "Bulk entry 2",
         },
     ]
 
     response = await async_client.post(
         "/api/entries/bulk",
-        json={"entries": entries},
+        json=entries,
         headers=auth_headers,
     )
 
     assert response.status_code == 201
     data = response.json()
-    assert data["created"] == 2
+    assert len(data) == 2
+
+
+@pytest.mark.asyncio
+async def test_create_entry_invalid_category(
+    async_client: AsyncClient,
+    test_property: Property,
+    auth_headers: dict,
+):
+    """Test creating entry with invalid category fails."""
+    import uuid
+    response = await async_client.post(
+        "/api/entries",
+        json={
+            "date": str(date.today()),
+            "hours": 1,
+            "minutes": 0,
+            "category_id": str(uuid.uuid4()),  # Non-existent
+            "property_id": str(test_property.id),
+            "type": "material",
+            "description": "Invalid category",
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_create_entry_invalid_property(
+    async_client: AsyncClient,
+    test_category: Category,
+    auth_headers: dict,
+):
+    """Test creating entry with invalid property fails."""
+    import uuid
+    response = await async_client.post(
+        "/api/entries",
+        json={
+            "date": str(date.today()),
+            "hours": 1,
+            "minutes": 0,
+            "category_id": str(test_category.id),
+            "property_id": str(uuid.uuid4()),  # Non-existent
+            "type": "material",
+            "description": "Invalid property",
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_create_entry_zero_time(
+    async_client: AsyncClient,
+    test_category: Category,
+    test_property: Property,
+    auth_headers: dict,
+):
+    """Test creating entry with zero time fails."""
+    response = await async_client.post(
+        "/api/entries",
+        json={
+            "date": str(date.today()),
+            "hours": 0,
+            "minutes": 0,
+            "category_id": str(test_category.id),
+            "property_id": str(test_property.id),
+            "type": "material",
+            "description": "Zero time",
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_entry_not_found(
+    async_client: AsyncClient,
+    auth_headers: dict,
+):
+    """Test getting non-existent entry returns 404."""
+    import uuid
+    response = await async_client.get(
+        f"/api/entries/{uuid.uuid4()}",
+        headers=auth_headers,
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_entry_not_found(
+    async_client: AsyncClient,
+    test_category: Category,
+    test_property: Property,
+    auth_headers: dict,
+):
+    """Test updating non-existent entry returns 404."""
+    import uuid
+    response = await async_client.put(
+        f"/api/entries/{uuid.uuid4()}",
+        json={
+            "hours": 1,
+            "minutes": 0,
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_entry_zero_time(
+    async_client: AsyncClient,
+    test_category: Category,
+    test_property: Property,
+    auth_headers: dict,
+):
+    """Test updating entry to zero time fails."""
+    create_response = await async_client.post(
+        "/api/entries",
+        json={
+            "date": str(date.today()),
+            "hours": 1,
+            "minutes": 0,
+            "category_id": str(test_category.id),
+            "property_id": str(test_property.id),
+            "type": "material",
+            "description": "Test",
+        },
+        headers=auth_headers,
+    )
+    entry_id = create_response.json()["id"]
+
+    response = await async_client.put(
+        f"/api/entries/{entry_id}",
+        json={"hours": 0, "minutes": 0},
+        headers=auth_headers,
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_delete_entry_not_found(
+    async_client: AsyncClient,
+    auth_headers: dict,
+):
+    """Test deleting non-existent entry returns 404."""
+    import uuid
+    response = await async_client.delete(
+        f"/api/entries/{uuid.uuid4()}",
+        headers=auth_headers,
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_list_entries_with_filters(
+    async_client: AsyncClient,
+    test_category: Category,
+    test_property: Property,
+    auth_headers: dict,
+):
+    """Test listing entries with various filters."""
+    # Create an entry
+    await async_client.post(
+        "/api/entries",
+        json={
+            "date": str(date.today()),
+            "hours": 1,
+            "minutes": 0,
+            "category_id": str(test_category.id),
+            "property_id": str(test_property.id),
+            "type": "material",
+            "description": "Searchable test entry",
+        },
+        headers=auth_headers,
+    )
+
+    # Test with category filter
+    response = await async_client.get(
+        f"/api/entries?category_id={test_category.id}",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+
+    # Test with property filter
+    response = await async_client.get(
+        f"/api/entries?property_id={test_property.id}",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+
+    # Test with type filter
+    response = await async_client.get(
+        "/api/entries?type=material",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+
+    # Test with search filter
+    response = await async_client.get(
+        "/api/entries?search=Searchable",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+
+    # Test with pagination
+    response = await async_client.get(
+        "/api/entries?page=1&limit=5",
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
