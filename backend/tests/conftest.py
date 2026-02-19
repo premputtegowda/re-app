@@ -1,13 +1,59 @@
 import asyncio
+import sys
 from typing import AsyncGenerator, Generator
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 import uuid
+
+# ---------------------------------------------------------------------------
+# Stub optional packages before any app module is imported.
+# If the real packages are installed later, setdefault won't override them.
+# ---------------------------------------------------------------------------
+for _mod in (
+    "apscheduler",
+    "apscheduler.schedulers",
+    "apscheduler.schedulers.asyncio",
+    "aiosmtplib",
+):
+    sys.modules.setdefault(_mod, MagicMock())
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.pool import StaticPool
+
+# ---------------------------------------------------------------------------
+# Patch SQLite type compiler to handle PostgreSQL-specific column types.
+# Models use postgresql.UUID and postgresql.ENUM which SQLite doesn't know.
+# This is test-only infrastructure — production uses PostgreSQL natively.
+# ---------------------------------------------------------------------------
+from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler as _STC
+from sqlalchemy.dialects.postgresql import UUID as _PG_UUID, ENUM as _PG_ENUM
+
+
+def _sqlite_visit_UUID(self, type_, **kw):  # noqa: N802
+    return "VARCHAR(36)"
+
+
+def _sqlite_visit_ENUM(self, type_, **kw):  # noqa: N802
+    return "VARCHAR(50)"
+
+
+_STC.visit_UUID = _sqlite_visit_UUID  # type: ignore[attr-defined]
+_STC.visit_ENUM = _sqlite_visit_ENUM  # type: ignore[attr-defined]
+
+# Suppress CREATE TYPE / DROP TYPE DDL for PostgreSQL ENUM on non-PG dialects.
+_pg_enum_create_orig = _PG_ENUM.create
+
+
+def _pg_enum_create_safe(self, bind=None, checkfirst=True):
+    dialect_name = getattr(getattr(bind, "dialect", None), "name", None)
+    if dialect_name != "postgresql":
+        return
+    return _pg_enum_create_orig(self, bind=bind, checkfirst=checkfirst)
+
+
+_PG_ENUM.create = _pg_enum_create_safe  # type: ignore[method-assign]
 
 from app.database import Base, get_db
 from app.main import app
