@@ -1,15 +1,10 @@
 'use client';
 
-import { Clock, Menu, X, LogOut } from 'lucide-react';
+import { Clock, LogOut } from 'lucide-react';
 import { useAuthStore } from '@/lib/authStore';
 import { useStore } from '@/lib/store';
 
-interface HeaderProps {
-  onMenuToggle: () => void;
-  isMobileMenuOpen: boolean;
-}
-
-export function Header({ onMenuToggle, isMobileMenuOpen }: HeaderProps) {
+export function Header() {
   const { user, logout } = useAuthStore();
   const { clearData } = useStore();
 
@@ -67,12 +62,13 @@ export function Header({ onMenuToggle, isMobileMenuOpen }: HeaderProps) {
               <span>Logout</span>
             </button>
 
-            {/* Mobile menu button */}
+            {/* Logout button (mobile) */}
             <button
-              onClick={onMenuToggle}
-              className="lg:hidden p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors text-slate-700 dark:text-slate-200"
+              onClick={handleLogout}
+              className="md:hidden p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors text-slate-600 dark:text-slate-400"
+              title="Logout"
             >
-              {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+              <LogOut size={20} />
             </button>
           </div>
         </div>

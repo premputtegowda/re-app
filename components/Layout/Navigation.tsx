@@ -6,26 +6,19 @@ import type { ViewMode } from '@/types';
 interface NavigationProps {
   currentView: ViewMode;
   onViewChange: (view: ViewMode) => void;
-  isMobileMenuOpen: boolean;
-  onMenuClose: () => void;
 }
 
-export function Navigation({ currentView, onViewChange, isMobileMenuOpen, onMenuClose }: NavigationProps) {
+export function Navigation({ currentView, onViewChange }: NavigationProps) {
   const navItems = [
-    { id: 'dashboard' as ViewMode, label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'entry' as ViewMode, label: 'Add Hours', icon: PlusCircle },
-    { id: 'list' as ViewMode, label: 'View Hours', icon: List },
+    { id: 'dashboard' as ViewMode, label: 'Home', icon: LayoutDashboard },
+    { id: 'entry' as ViewMode, label: 'Add', icon: PlusCircle },
+    { id: 'list' as ViewMode, label: 'List', icon: List },
     { id: 'settings' as ViewMode, label: 'Settings', icon: Settings },
   ];
 
-  const handleNavClick = (view: ViewMode) => {
-    onViewChange(view);
-    onMenuClose();
-  };
-
   return (
     <>
-      {/* Desktop Navigation */}
+      {/* Desktop sidebar */}
       <nav className="hidden lg:block bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 w-64 fixed left-0 top-16 bottom-0 overflow-y-auto">
         <div className="p-4 space-y-1">
           {navItems.map((item) => {
@@ -35,7 +28,7 @@ export function Navigation({ currentView, onViewChange, isMobileMenuOpen, onMenu
             return (
               <button
                 key={item.id}
-                onClick={() => handleNavClick(item.id)}
+                onClick={() => onViewChange(item.id)}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
                   isActive
                     ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 font-medium'
@@ -43,7 +36,7 @@ export function Navigation({ currentView, onViewChange, isMobileMenuOpen, onMenu
                 }`}
               >
                 <Icon size={20} />
-                <span>{item.label}</span>
+                <span>{item.label === 'Add' ? 'Add Hours' : item.label === 'List' ? 'View Hours' : item.label}</span>
               </button>
             );
           })}
@@ -56,14 +49,14 @@ export function Navigation({ currentView, onViewChange, isMobileMenuOpen, onMenu
           </h3>
           <div className="space-y-1">
             <button
-              onClick={() => handleNavClick('settings')}
+              onClick={() => onViewChange('settings')}
               className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-sm"
             >
               <Tag size={18} />
               <span>Manage Categories</span>
             </button>
             <button
-              onClick={() => handleNavClick('settings')}
+              onClick={() => onViewChange('settings')}
               className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-sm"
             >
               <Folder size={18} />
@@ -73,41 +66,30 @@ export function Navigation({ currentView, onViewChange, isMobileMenuOpen, onMenu
         </div>
       </nav>
 
-      {/* Mobile Navigation */}
-      {isMobileMenuOpen && (
-        <>
-          {/* Backdrop */}
-          <div
-            className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
-            onClick={onMenuClose}
-          />
+      {/* Mobile bottom tab bar */}
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 z-40">
+        <div className="flex">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = currentView === item.id;
 
-          {/* Menu */}
-          <nav className="fixed left-0 top-16 bottom-0 w-64 bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 z-50 lg:hidden overflow-y-auto">
-            <div className="p-4 space-y-1">
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = currentView === item.id;
-
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => handleNavClick(item.id)}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                      isActive
-                        ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 font-medium'
-                        : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'
-                    }`}
-                  >
-                    <Icon size={20} />
-                    <span>{item.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </nav>
-        </>
-      )}
+            return (
+              <button
+                key={item.id}
+                onClick={() => onViewChange(item.id)}
+                className={`flex-1 flex flex-col items-center justify-center py-2 gap-1 transition-colors ${
+                  isActive
+                    ? 'text-primary-600 dark:text-primary-400'
+                    : 'text-slate-500 dark:text-slate-400'
+                }`}
+              >
+                <Icon size={22} />
+                <span className="text-xs font-medium">{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
     </>
   );
 }

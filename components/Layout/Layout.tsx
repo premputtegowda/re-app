@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import { Header } from './Header';
 import { Navigation } from './Navigation';
 import type { ViewMode } from '@/types';
@@ -12,30 +12,15 @@ interface LayoutProps {
 }
 
 export function Layout({ children, currentView, onViewChange }: LayoutProps) {
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-
-  const handleMenuToggle = () => {
-    setIsMobileMenuOpen(!isMobileMenuOpen);
-  };
-
-  const handleMenuClose = () => {
-    setIsMobileMenuOpen(false);
-  };
-
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
-      <Header onMenuToggle={handleMenuToggle} isMobileMenuOpen={isMobileMenuOpen} />
+      <Header />
 
-      <Navigation
-        currentView={currentView}
-        onViewChange={onViewChange}
-        isMobileMenuOpen={isMobileMenuOpen}
-        onMenuClose={handleMenuClose}
-      />
+      <Navigation currentView={currentView} onViewChange={onViewChange} />
 
-      {/* Main content */}
-      <main className="lg:ml-64 pt-4">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-8">
+      {/* Main content — bottom padding accounts for mobile tab bar */}
+      <main className="lg:ml-64 pt-4 pb-20 lg:pb-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           {children}
         </div>
       </main>
