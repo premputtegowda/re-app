@@ -1,6 +1,6 @@
 'use client';
 
-import { LayoutDashboard, List, PlusCircle, Settings, Folder, Tag } from 'lucide-react';
+import { LayoutDashboard, List, PlusCircle, Settings, Folder, Tag, Calculator } from 'lucide-react';
 import type { ViewMode } from '@/types';
 
 interface NavigationProps {
@@ -13,6 +13,7 @@ export function Navigation({ currentView, onViewChange }: NavigationProps) {
     { id: 'dashboard' as ViewMode, label: 'Home', icon: LayoutDashboard },
     { id: 'entry' as ViewMode, label: 'Add', icon: PlusCircle },
     { id: 'list' as ViewMode, label: 'List', icon: List },
+    { id: 'cashOnCash' as ViewMode, label: 'CoC', icon: Calculator },
     { id: 'settings' as ViewMode, label: 'Settings', icon: Settings },
   ];
 
