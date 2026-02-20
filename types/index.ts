@@ -181,7 +181,8 @@ export interface CoCCostItem {
 
 export interface CoCUnitMixEntry {
   id: string;
-  type: string;      // e.g. "Studio", "1 Bed / 1 Bath"
+  beds: number;
+  baths: number;
   count: number;
   rentMonthly: number;
 }
@@ -190,6 +191,8 @@ export interface CoCAcquisition {
   propertyAddress: string;
   propertyType: CoCPropertyType;
   units: number;
+  sfrBeds: number;
+  sfrBaths: number;
   unitMix: CoCUnitMixEntry[];   // when non-empty, overrides units + grossRentMonthly
   purchasePrice: number;
   arv: number;

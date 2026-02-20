@@ -41,6 +41,8 @@ const DEFAULT_ACQUISITION: CoCAcquisition = {
   propertyAddress: '',
   propertyType: 'sfr',
   units: 1,
+  sfrBeds: 3,
+  sfrBaths: 2,
   unitMix: [],
   purchasePrice: 300000,
   arv: 350000,

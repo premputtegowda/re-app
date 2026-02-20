@@ -5,33 +5,18 @@ import { Input } from '@/components/UI/Input';
 import { formatCurrency } from '@/utils/cashOnCashCalc';
 import type { CoCAcquisition, CoCUnitMixEntry } from '@/types';
 
-// ── Unit type presets ─────────────────────────────────────────────────────────
-
-const UNIT_TYPE_OPTIONS = [
-  'Studio',
-  '1 Bed / 1 Bath',
-  '1 Bed / 2 Bath',
-  '2 Bed / 1 Bath',
-  '2 Bed / 2 Bath',
-  '3 Bed / 2 Bath',
-  '4 Bed / 2 Bath',
-];
-
 const newUnitEntry = (): CoCUnitMixEntry => ({
   id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-  type: '1 Bed / 1 Bath',
+  beds: 1,
+  baths: 1,
   count: 1,
   rentMonthly: 0,
 });
 
-// ── Props ─────────────────────────────────────────────────────────────────────
-
 interface StepPropertyProps {
-  data: Pick<CoCAcquisition, 'propertyAddress' | 'propertyType' | 'units' | 'unitMix'>;
+  data: Pick<CoCAcquisition, 'propertyAddress' | 'propertyType' | 'units' | 'sfrBeds' | 'sfrBaths' | 'unitMix'>;
   onChange: (field: keyof CoCAcquisition, value: unknown) => void;
 }
-
-// ── Component ─────────────────────────────────────────────────────────────────
 
 export function StepProperty({ data, onChange }: StepPropertyProps) {
   const totalUnits = data.unitMix.reduce((sum, e) => sum + e.count, 0);
@@ -43,7 +28,7 @@ export function StepProperty({ data, onChange }: StepPropertyProps) {
   const updateUnitEntry = (
     id: string,
     field: keyof Omit<CoCUnitMixEntry, 'id'>,
-    value: string | number
+    value: number
   ) =>
     onChange(
       'unitMix',
@@ -82,7 +67,6 @@ export function StepProperty({ data, onChange }: StepPropertyProps) {
                 type="button"
                 onClick={() => {
                   onChange('propertyType', type);
-                  // Reset unit mix when switching back to SFR
                   if (type === 'sfr') onChange('unitMix', []);
                 }}
                 className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all ${
@@ -102,11 +86,43 @@ export function StepProperty({ data, onChange }: StepPropertyProps) {
         </div>
       </div>
 
-      {/* SFR — single unit, no mix needed */}
+      {/* SFR — beds & baths */}
       {data.propertyType === 'sfr' && (
-        <p className="text-xs text-slate-400 dark:text-slate-500">
-          Enter monthly rent in the Operations step.
-        </p>
+        <div>
+          <p className="label mb-2">Unit Details</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 block">
+                Bedrooms
+              </label>
+              <input
+                type="number"
+                className="input text-sm"
+                min={0}
+                max={20}
+                value={data.sfrBeds}
+                onChange={(e) => onChange('sfrBeds', Number(e.target.value))}
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 block">
+                Bathrooms
+              </label>
+              <input
+                type="number"
+                className="input text-sm"
+                min={0}
+                max={20}
+                step={0.5}
+                value={data.sfrBaths}
+                onChange={(e) => onChange('sfrBaths', Number(e.target.value))}
+              />
+            </div>
+          </div>
+          <p className="text-xs text-slate-400 dark:text-slate-500 mt-2">
+            Enter monthly rent in the Operations step.
+          </p>
+        </div>
       )}
 
       {/* MFR — unit mix */}
@@ -124,9 +140,12 @@ export function StepProperty({ data, onChange }: StepPropertyProps) {
           {data.unitMix.length > 0 && (
             <div className="space-y-2">
               {/* Column headers */}
-              <div className="grid grid-cols-[1fr_64px_112px_32px] gap-2 px-0.5">
-                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                  Unit Type
+              <div className="grid grid-cols-[56px_56px_56px_1fr_32px] gap-2 px-0.5">
+                <span className="text-xs font-medium text-slate-500 dark:text-slate-400 text-center">
+                  Beds
+                </span>
+                <span className="text-xs font-medium text-slate-500 dark:text-slate-400 text-center">
+                  Baths
                 </span>
                 <span className="text-xs font-medium text-slate-500 dark:text-slate-400 text-center">
                   Count
@@ -140,20 +159,30 @@ export function StepProperty({ data, onChange }: StepPropertyProps) {
               {data.unitMix.map((entry) => (
                 <div
                   key={entry.id}
-                  className="grid grid-cols-[1fr_64px_112px_32px] gap-2 items-center"
+                  className="grid grid-cols-[56px_56px_56px_1fr_32px] gap-2 items-center"
                 >
-                  {/* Unit type select */}
-                  <select
-                    className="input text-sm"
-                    value={entry.type}
-                    onChange={(e) => updateUnitEntry(entry.id, 'type', e.target.value)}
-                  >
-                    {UNIT_TYPE_OPTIONS.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {opt}
-                      </option>
-                    ))}
-                  </select>
+                  {/* Beds */}
+                  <input
+                    type="number"
+                    className="input text-sm text-center"
+                    min={0}
+                    max={20}
+                    placeholder="0"
+                    value={entry.beds === 0 ? '' : entry.beds}
+                    onChange={(e) => updateUnitEntry(entry.id, 'beds', Number(e.target.value))}
+                  />
+
+                  {/* Baths */}
+                  <input
+                    type="number"
+                    className="input text-sm text-center"
+                    min={0}
+                    max={20}
+                    step={0.5}
+                    placeholder="0"
+                    value={entry.baths === 0 ? '' : entry.baths}
+                    onChange={(e) => updateUnitEntry(entry.id, 'baths', Number(e.target.value))}
+                  />
 
                   {/* Count */}
                   <input
@@ -189,12 +218,10 @@ export function StepProperty({ data, onChange }: StepPropertyProps) {
               ))}
 
               {/* Totals row */}
-              {data.unitMix.length > 0 && (
-                <div className="flex justify-between pt-1.5 border-t border-slate-100 dark:border-slate-700 text-sm font-semibold text-slate-900 dark:text-white">
-                  <span>{totalUnits} units total</span>
-                  <span>{formatCurrency(totalRent)} / mo</span>
-                </div>
-              )}
+              <div className="flex justify-between pt-1.5 border-t border-slate-100 dark:border-slate-700 text-sm font-semibold text-slate-900 dark:text-white">
+                <span>{totalUnits} units total</span>
+                <span>{formatCurrency(totalRent)} / mo</span>
+              </div>
             </div>
           )}
 
