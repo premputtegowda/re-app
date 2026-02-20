@@ -1,24 +1,39 @@
 'use client';
 
 import { Input } from '@/components/UI/Input';
-import type { CoCOperations } from '@/types';
+import { formatCurrency } from '@/utils/cashOnCashCalc';
+import type { CoCOperations, CoCUnitMixEntry } from '@/types';
 
 interface StepOperationsProps {
   data: CoCOperations;
   onChange: (field: keyof CoCOperations, value: number) => void;
+  unitMix: CoCUnitMixEntry[];
 }
 
-export function StepOperations({ data, onChange }: StepOperationsProps) {
+export function StepOperations({ data, onChange, unitMix }: StepOperationsProps) {
+  const hasUnitMix = unitMix.length > 0;
+  const unitMixRent = unitMix.reduce((sum, e) => sum + e.count * e.rentMonthly, 0);
+
   return (
     <div className="space-y-4">
-      <Input
-        label="Gross Rent / Month / Unit ($)"
-        type="number"
-        fullWidth
-        min={0}
-        value={data.grossRentMonthly}
-        onChange={(e) => onChange('grossRentMonthly', Number(e.target.value))}
-      />
+      {/* Rent input — hidden when unit mix provides rent */}
+      {hasUnitMix ? (
+        <div className="rounded-lg bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 p-3 text-sm text-primary-700 dark:text-primary-300">
+          Gross rent is driven by your unit mix:{' '}
+          <span className="font-semibold">{formatCurrency(unitMixRent)}/mo</span>. Update it on
+          the Property step.
+        </div>
+      ) : (
+        <Input
+          label="Gross Rent / Month / Unit ($)"
+          type="number"
+          fullWidth
+          min={0}
+          value={data.grossRentMonthly}
+          onChange={(e) => onChange('grossRentMonthly', Number(e.target.value))}
+        />
+      )}
+
       <div className="grid grid-cols-2 gap-4">
         <Input
           label="Vacancy Rate (%)"
@@ -42,6 +57,7 @@ export function StepOperations({ data, onChange }: StepOperationsProps) {
           helperText="% of effective gross income"
         />
       </div>
+
       <div className="grid grid-cols-2 gap-4">
         <Input
           label="Property Mgmt (%)"

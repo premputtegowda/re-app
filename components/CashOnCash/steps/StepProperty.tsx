@@ -1,17 +1,61 @@
 'use client';
 
+import { Home, Building2, Plus, Trash2 } from 'lucide-react';
 import { Input } from '@/components/UI/Input';
-import { Select } from '@/components/UI/Select';
-import type { CoCAcquisition } from '@/types';
+import { formatCurrency } from '@/utils/cashOnCashCalc';
+import type { CoCAcquisition, CoCUnitMixEntry } from '@/types';
+
+// ── Unit type presets ─────────────────────────────────────────────────────────
+
+const UNIT_TYPE_OPTIONS = [
+  'Studio',
+  '1 Bed / 1 Bath',
+  '1 Bed / 2 Bath',
+  '2 Bed / 1 Bath',
+  '2 Bed / 2 Bath',
+  '3 Bed / 2 Bath',
+  '4 Bed / 2 Bath',
+];
+
+const newUnitEntry = (): CoCUnitMixEntry => ({
+  id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+  type: '1 Bed / 1 Bath',
+  count: 1,
+  rentMonthly: 0,
+});
+
+// ── Props ─────────────────────────────────────────────────────────────────────
 
 interface StepPropertyProps {
-  data: Pick<CoCAcquisition, 'propertyAddress' | 'propertyType' | 'units'>;
-  onChange: (field: keyof CoCAcquisition, value: string | number) => void;
+  data: Pick<CoCAcquisition, 'propertyAddress' | 'propertyType' | 'units' | 'unitMix'>;
+  onChange: (field: keyof CoCAcquisition, value: unknown) => void;
 }
 
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export function StepProperty({ data, onChange }: StepPropertyProps) {
+  const totalUnits = data.unitMix.reduce((sum, e) => sum + e.count, 0);
+  const totalRent = data.unitMix.reduce((sum, e) => sum + e.count * e.rentMonthly, 0);
+
+  const addUnitEntry = () =>
+    onChange('unitMix', [...data.unitMix, newUnitEntry()]);
+
+  const updateUnitEntry = (
+    id: string,
+    field: keyof Omit<CoCUnitMixEntry, 'id'>,
+    value: string | number
+  ) =>
+    onChange(
+      'unitMix',
+      data.unitMix.map((e) => (e.id === id ? { ...e, [field]: value } : e))
+    );
+
+  const removeUnitEntry = (id: string) =>
+    onChange('unitMix', data.unitMix.filter((e) => e.id !== id));
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
+      {/* Address */}
       <Input
         label="Property Address"
         type="text"
@@ -20,28 +64,150 @@ export function StepProperty({ data, onChange }: StepPropertyProps) {
         value={data.propertyAddress}
         onChange={(e) => onChange('propertyAddress', e.target.value)}
       />
-      <div className="grid grid-cols-2 gap-4">
-        <Select
-          label="Property Type"
-          fullWidth
-          value={data.propertyType}
-          onChange={(e) => onChange('propertyType', e.target.value)}
-          options={[
-            { value: 'sfr', label: 'Single Family (SFR)' },
-            { value: 'mfr', label: 'Multi-Family (MFR)' },
-          ]}
-        />
-        {data.propertyType === 'mfr' && (
-          <Input
-            label="Number of Units"
-            type="number"
-            fullWidth
-            min={2}
-            value={data.units}
-            onChange={(e) => onChange('units', Number(e.target.value))}
-          />
-        )}
+
+      {/* Property type — icon buttons */}
+      <div>
+        <p className="label">Property Type</p>
+        <div className="grid grid-cols-2 gap-3">
+          {(
+            [
+              { type: 'sfr', Icon: Home, title: 'Single Family', sub: 'SFR' },
+              { type: 'mfr', Icon: Building2, title: 'Multi-Family', sub: 'MFR' },
+            ] as const
+          ).map(({ type, Icon, title, sub }) => {
+            const isActive = data.propertyType === type;
+            return (
+              <button
+                key={type}
+                type="button"
+                onClick={() => {
+                  onChange('propertyType', type);
+                  // Reset unit mix when switching back to SFR
+                  if (type === 'sfr') onChange('unitMix', []);
+                }}
+                className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all ${
+                  isActive
+                    ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300'
+                    : 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-primary-300 dark:hover:border-primary-700 hover:bg-slate-50 dark:hover:bg-slate-800'
+                }`}
+              >
+                <Icon size={28} strokeWidth={isActive ? 2 : 1.5} />
+                <div className="text-center">
+                  <p className="text-sm font-semibold leading-tight">{title}</p>
+                  <p className="text-xs opacity-70">{sub}</p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </div>
+
+      {/* SFR — single unit, no mix needed */}
+      {data.propertyType === 'sfr' && (
+        <p className="text-xs text-slate-400 dark:text-slate-500">
+          Enter monthly rent in the Operations step.
+        </p>
+      )}
+
+      {/* MFR — unit mix */}
+      {data.propertyType === 'mfr' && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Unit Mix</p>
+            {totalUnits > 0 && (
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                {totalUnits} units · {formatCurrency(totalRent)}/mo
+              </span>
+            )}
+          </div>
+
+          {data.unitMix.length > 0 && (
+            <div className="space-y-2">
+              {/* Column headers */}
+              <div className="grid grid-cols-[1fr_64px_112px_32px] gap-2 px-0.5">
+                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                  Unit Type
+                </span>
+                <span className="text-xs font-medium text-slate-500 dark:text-slate-400 text-center">
+                  Count
+                </span>
+                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                  Rent / mo ($)
+                </span>
+                <span />
+              </div>
+
+              {data.unitMix.map((entry) => (
+                <div
+                  key={entry.id}
+                  className="grid grid-cols-[1fr_64px_112px_32px] gap-2 items-center"
+                >
+                  {/* Unit type select */}
+                  <select
+                    className="input text-sm"
+                    value={entry.type}
+                    onChange={(e) => updateUnitEntry(entry.id, 'type', e.target.value)}
+                  >
+                    {UNIT_TYPE_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* Count */}
+                  <input
+                    type="number"
+                    className="input text-sm text-center"
+                    min={1}
+                    value={entry.count === 0 ? '' : entry.count}
+                    onChange={(e) => updateUnitEntry(entry.id, 'count', Number(e.target.value))}
+                  />
+
+                  {/* Rent per month */}
+                  <input
+                    type="number"
+                    className="input text-sm"
+                    min={0}
+                    placeholder="0"
+                    value={entry.rentMonthly === 0 ? '' : entry.rentMonthly}
+                    onChange={(e) =>
+                      updateUnitEntry(entry.id, 'rentMonthly', Number(e.target.value))
+                    }
+                  />
+
+                  {/* Remove */}
+                  <button
+                    type="button"
+                    onClick={() => removeUnitEntry(entry.id)}
+                    className="flex items-center justify-center w-8 h-8 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                    aria-label="Remove unit type"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+
+              {/* Totals row */}
+              {data.unitMix.length > 0 && (
+                <div className="flex justify-between pt-1.5 border-t border-slate-100 dark:border-slate-700 text-sm font-semibold text-slate-900 dark:text-white">
+                  <span>{totalUnits} units total</span>
+                  <span>{formatCurrency(totalRent)} / mo</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={addUnitEntry}
+            className="flex items-center gap-1.5 text-sm text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-medium transition-colors"
+          >
+            <Plus size={15} />
+            Add unit type
+          </button>
+        </div>
+      )}
     </div>
   );
 }

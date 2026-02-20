@@ -41,6 +41,7 @@ const DEFAULT_ACQUISITION: CoCAcquisition = {
   propertyAddress: '',
   propertyType: 'sfr',
   units: 1,
+  unitMix: [],
   purchasePrice: 300000,
   arv: 350000,
   downPaymentPct: 20,
@@ -227,7 +228,13 @@ export function CashOnCash() {
       case 2:
         return <StepRenovation data={acquisition} onChange={updateAcquisition} />;
       case 3:
-        return <StepOperations data={operations} onChange={updateOperations} />;
+        return (
+          <StepOperations
+            data={operations}
+            onChange={updateOperations}
+            unitMix={acquisition.unitMix}
+          />
+        );
       case 4:
         return (
           <StepRefinance

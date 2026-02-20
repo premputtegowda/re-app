@@ -79,6 +79,15 @@ export function projectScenario(scenario: CoCScenario): CoCResult {
 
   const totalInvested = equityDeployed + lostOpportunityCost;
 
+  // Unit mix overrides individual units + grossRentMonthly when populated
+  const hasUnitMix = acquisition.unitMix.length > 0;
+  const effectiveUnits = hasUnitMix
+    ? acquisition.unitMix.reduce((sum, e) => sum + e.count, 0)
+    : acquisition.units;
+  const baseMonthlyRent = hasUnitMix
+    ? acquisition.unitMix.reduce((sum, e) => sum + e.count * e.rentMonthly, 0)
+    : operations.grossRentMonthly * acquisition.units;
+
   const ioPeriodYears = Math.floor(acquisition.ioPeriodMonths / 12);
   const loanTermMonths = acquisition.loanTermYears * 12;
   const amortTermMonths = loanTermMonths - acquisition.ioPeriodMonths;
@@ -101,10 +110,7 @@ export function projectScenario(scenario: CoCScenario): CoCResult {
 
   for (let year = 1; year <= acquisition.projectionYears; year++) {
     const grossRent =
-      operations.grossRentMonthly *
-      acquisition.units *
-      12 *
-      Math.pow(1 + operations.annualRentGrowthPct / 100, year - 1);
+      baseMonthlyRent * 12 * Math.pow(1 + operations.annualRentGrowthPct / 100, year - 1);
 
     const effectiveRent = grossRent * (1 - operations.vacancyRatePct / 100);
     const opex = effectiveRent * ((operations.opexPct + operations.propertyMgmtPct) / 100);
