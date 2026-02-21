@@ -34,16 +34,33 @@ export function StepFinancing({ data, onChange }: StepFinancingProps) {
           value={data.purchasePrice || ''}
           onChange={(e) => onChange('purchasePrice', Number(e.target.value))}
         />
-        <Input
-          label="After Repair Value ($)"
-          type="number"
-          fullWidth
-          min={0}
-          placeholder="e.g. 420,000"
-          value={data.arv || ''}
-          onChange={(e) => onChange('arv', Number(e.target.value))}
-          helperText="ARV after renovation"
-        />
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+              Estimated Market Value ($)
+            </label>
+            {data.purchasePrice > 0 && data.arv !== data.purchasePrice && (
+              <button
+                type="button"
+                onClick={() => onChange('arv', data.purchasePrice)}
+                className="text-xs text-primary-600 dark:text-primary-400 hover:underline"
+              >
+                Same as purchase price
+              </button>
+            )}
+          </div>
+          <input
+            type="number"
+            className="input"
+            min={0}
+            placeholder="e.g. 420,000"
+            value={data.arv || ''}
+            onChange={(e) => onChange('arv', Number(e.target.value))}
+          />
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            Used for equity &amp; refi calculations. No renovation? Set to current market value.
+          </p>
+        </div>
       </div>
 
       <Input
