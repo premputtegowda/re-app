@@ -109,8 +109,8 @@ function validateStep(
     if (acquisition.arv <= 0) errs.push('ARV must be greater than 0');
     if (acquisition.downPaymentPct < 0 || acquisition.downPaymentPct > 100)
       errs.push('Down payment must be between 0% and 100%');
-    if (acquisition.projectionYears < 1 || acquisition.projectionYears > 10)
-      errs.push('Projection horizon must be 1–10 years');
+    if (acquisition.projectionYears < 1 || acquisition.projectionYears > 30)
+      errs.push('Projection horizon must be 1–30 years');
     return errs;
   }
   if (step === 3) {

@@ -1,7 +1,6 @@
 'use client';
 
 import { Input } from '@/components/UI/Input';
-import { Select } from '@/components/UI/Select';
 import type { CoCAcquisition } from '@/types';
 
 type FinancingFields = Pick<
@@ -23,11 +22,6 @@ interface StepFinancingProps {
 }
 
 export function StepFinancing({ data, onChange }: StepFinancingProps) {
-  const projectionOptions = Array.from({ length: 10 }, (_, i) => ({
-    value: String(i + 1),
-    label: `${i + 1} ${i + 1 === 1 ? 'year' : 'years'}`,
-  }));
-
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
@@ -126,12 +120,16 @@ export function StepFinancing({ data, onChange }: StepFinancingProps) {
         helperText="Leave blank for a fully amortizing loan"
       />
 
-      <Select
-        label="Projection Horizon"
+      <Input
+        label="Projection Horizon (years)"
+        type="number"
         fullWidth
-        value={String(data.projectionYears)}
+        min={1}
+        max={30}
+        placeholder="5"
+        value={data.projectionYears || ''}
         onChange={(e) => onChange('projectionYears', Number(e.target.value))}
-        options={projectionOptions}
+        helperText="How many years to model (1–30)"
       />
     </div>
   );
