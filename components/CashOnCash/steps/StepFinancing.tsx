@@ -36,7 +36,8 @@ export function StepFinancing({ data, onChange }: StepFinancingProps) {
           type="number"
           fullWidth
           min={0}
-          value={data.purchasePrice}
+          placeholder="e.g. 350,000"
+          value={data.purchasePrice || ''}
           onChange={(e) => onChange('purchasePrice', Number(e.target.value))}
         />
         <Input
@@ -44,7 +45,8 @@ export function StepFinancing({ data, onChange }: StepFinancingProps) {
           type="number"
           fullWidth
           min={0}
-          value={data.arv}
+          placeholder="e.g. 420,000"
+          value={data.arv || ''}
           onChange={(e) => onChange('arv', Number(e.target.value))}
           helperText="ARV after renovation"
         />
@@ -57,7 +59,8 @@ export function StepFinancing({ data, onChange }: StepFinancingProps) {
         min={0}
         max={100}
         step={0.5}
-        value={data.downPaymentPct}
+        placeholder="e.g. 20"
+        value={data.downPaymentPct || ''}
         onChange={(e) => onChange('downPaymentPct', Number(e.target.value))}
       />
 
@@ -69,7 +72,8 @@ export function StepFinancing({ data, onChange }: StepFinancingProps) {
           min={0}
           max={10}
           step={0.1}
-          value={data.closingCostsPct}
+          placeholder="e.g. 2"
+          value={data.closingCostsPct || ''}
           onChange={(e) => onChange('closingCostsPct', Number(e.target.value))}
           helperText="% of purchase price"
         />
@@ -80,7 +84,8 @@ export function StepFinancing({ data, onChange }: StepFinancingProps) {
           min={0}
           max={10}
           step={0.25}
-          value={data.points}
+          placeholder="0"
+          value={data.points || ''}
           onChange={(e) => onChange('points', Number(e.target.value))}
           helperText="1 point = 1% of loan"
         />
@@ -94,7 +99,8 @@ export function StepFinancing({ data, onChange }: StepFinancingProps) {
           min={0}
           max={30}
           step={0.125}
-          value={data.interestRate}
+          placeholder="e.g. 7.0"
+          value={data.interestRate || ''}
           onChange={(e) => onChange('interestRate', Number(e.target.value))}
         />
         <Input
@@ -103,7 +109,8 @@ export function StepFinancing({ data, onChange }: StepFinancingProps) {
           fullWidth
           min={1}
           max={40}
-          value={data.loanTermYears}
+          placeholder="e.g. 30"
+          value={data.loanTermYears || ''}
           onChange={(e) => onChange('loanTermYears', Number(e.target.value))}
         />
       </div>
@@ -113,9 +120,10 @@ export function StepFinancing({ data, onChange }: StepFinancingProps) {
         type="number"
         fullWidth
         min={0}
-        value={data.ioPeriodMonths}
+        placeholder="0"
+        value={data.ioPeriodMonths || ''}
         onChange={(e) => onChange('ioPeriodMonths', Number(e.target.value))}
-        helperText="Enter 0 for a fully amortizing loan"
+        helperText="Leave blank for a fully amortizing loan"
       />
 
       <Select

@@ -16,7 +16,6 @@ export function StepOperations({ data, onChange, unitMix }: StepOperationsProps)
 
   return (
     <div className="space-y-4">
-      {/* Rent input — hidden when unit mix provides rent */}
       {hasUnitMix ? (
         <div className="rounded-lg bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 p-3 text-sm text-primary-700 dark:text-primary-300">
           Gross rent is driven by your unit mix:{' '}
@@ -29,7 +28,8 @@ export function StepOperations({ data, onChange, unitMix }: StepOperationsProps)
           type="number"
           fullWidth
           min={0}
-          value={data.grossRentMonthly}
+          placeholder="e.g. 2,000"
+          value={data.grossRentMonthly || ''}
           onChange={(e) => onChange('grossRentMonthly', Number(e.target.value))}
         />
       )}
@@ -42,7 +42,8 @@ export function StepOperations({ data, onChange, unitMix }: StepOperationsProps)
           min={0}
           max={100}
           step={0.5}
-          value={data.vacancyRatePct}
+          placeholder="e.g. 5"
+          value={data.vacancyRatePct || ''}
           onChange={(e) => onChange('vacancyRatePct', Number(e.target.value))}
         />
         <Input
@@ -52,7 +53,8 @@ export function StepOperations({ data, onChange, unitMix }: StepOperationsProps)
           min={0}
           max={100}
           step={1}
-          value={data.opexPct}
+          placeholder="e.g. 30"
+          value={data.opexPct || ''}
           onChange={(e) => onChange('opexPct', Number(e.target.value))}
           helperText="% of effective gross income"
         />
@@ -66,7 +68,8 @@ export function StepOperations({ data, onChange, unitMix }: StepOperationsProps)
           min={0}
           max={30}
           step={0.5}
-          value={data.propertyMgmtPct}
+          placeholder="e.g. 8"
+          value={data.propertyMgmtPct || ''}
           onChange={(e) => onChange('propertyMgmtPct', Number(e.target.value))}
           helperText="% of effective gross income"
         />
@@ -77,7 +80,8 @@ export function StepOperations({ data, onChange, unitMix }: StepOperationsProps)
           min={-10}
           max={20}
           step={0.5}
-          value={data.annualRentGrowthPct}
+          placeholder="e.g. 3"
+          value={data.annualRentGrowthPct || ''}
           onChange={(e) => onChange('annualRentGrowthPct', Number(e.target.value))}
         />
       </div>

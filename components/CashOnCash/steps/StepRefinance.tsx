@@ -51,7 +51,8 @@ export function StepRefinance({ data, projectionYears, onChange }: StepRefinance
               min={0}
               max={100}
               step={1}
-              value={data.newLTV}
+              placeholder="e.g. 75"
+              value={data.newLTV || ''}
               onChange={(e) => onChange('newLTV', Number(e.target.value))}
             />
             <Input
@@ -61,7 +62,8 @@ export function StepRefinance({ data, projectionYears, onChange }: StepRefinance
               min={0}
               max={30}
               step={0.125}
-              value={data.newInterestRate}
+              placeholder="e.g. 6.5"
+              value={data.newInterestRate || ''}
               onChange={(e) => onChange('newInterestRate', Number(e.target.value))}
             />
           </div>
@@ -71,7 +73,8 @@ export function StepRefinance({ data, projectionYears, onChange }: StepRefinance
             fullWidth
             min={1}
             max={40}
-            value={data.newLoanTermYears}
+            placeholder="e.g. 30"
+            value={data.newLoanTermYears || ''}
             onChange={(e) => onChange('newLoanTermYears', Number(e.target.value))}
           />
         </div>

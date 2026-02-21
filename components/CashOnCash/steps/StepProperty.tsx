@@ -100,7 +100,8 @@ export function StepProperty({ data, onChange }: StepPropertyProps) {
                 className="input text-sm"
                 min={0}
                 max={20}
-                value={data.sfrBeds}
+                placeholder="e.g. 3"
+                value={data.sfrBeds || ''}
                 onChange={(e) => onChange('sfrBeds', Number(e.target.value))}
               />
             </div>
@@ -114,7 +115,8 @@ export function StepProperty({ data, onChange }: StepPropertyProps) {
                 min={0}
                 max={20}
                 step={0.5}
-                value={data.sfrBaths}
+                placeholder="e.g. 2"
+                value={data.sfrBaths || ''}
                 onChange={(e) => onChange('sfrBaths', Number(e.target.value))}
               />
             </div>
