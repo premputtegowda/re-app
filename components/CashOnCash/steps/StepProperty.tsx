@@ -2,7 +2,6 @@
 
 import { Home, Building2, Plus, Trash2 } from 'lucide-react';
 import { Input } from '@/components/UI/Input';
-import { formatCurrency } from '@/utils/cashOnCashCalc';
 import type { CoCAcquisition, CoCUnitMixEntry } from '@/types';
 
 const newUnitEntry = (): CoCUnitMixEntry => ({
@@ -20,7 +19,6 @@ interface StepPropertyProps {
 
 export function StepProperty({ data, onChange }: StepPropertyProps) {
   const totalUnits = data.unitMix.reduce((sum, e) => sum + e.count, 0);
-  const totalRent = data.unitMix.reduce((sum, e) => sum + e.count * e.rentMonthly, 0);
 
   const addUnitEntry = () =>
     onChange('unitMix', [...data.unitMix, newUnitEntry()]);
@@ -134,7 +132,7 @@ export function StepProperty({ data, onChange }: StepPropertyProps) {
             <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Unit Mix</p>
             {totalUnits > 0 && (
               <span className="text-xs text-slate-500 dark:text-slate-400">
-                {totalUnits} units · {formatCurrency(totalRent)}/mo
+                {totalUnits} units
               </span>
             )}
           </div>
@@ -142,7 +140,7 @@ export function StepProperty({ data, onChange }: StepPropertyProps) {
           {data.unitMix.length > 0 && (
             <div className="space-y-2">
               {/* Column headers */}
-              <div className="grid grid-cols-[56px_56px_56px_1fr_32px] gap-2 px-0.5">
+              <div className="grid grid-cols-[1fr_1fr_1fr_32px] gap-2 px-0.5">
                 <span className="text-xs font-medium text-slate-500 dark:text-slate-400 text-center">
                   Beds
                 </span>
@@ -152,16 +150,13 @@ export function StepProperty({ data, onChange }: StepPropertyProps) {
                 <span className="text-xs font-medium text-slate-500 dark:text-slate-400 text-center">
                   Count
                 </span>
-                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                  Rent / mo ($)
-                </span>
                 <span />
               </div>
 
               {data.unitMix.map((entry) => (
                 <div
                   key={entry.id}
-                  className="grid grid-cols-[56px_56px_56px_1fr_32px] gap-2 items-center"
+                  className="grid grid-cols-[1fr_1fr_1fr_32px] gap-2 items-center"
                 >
                   {/* Beds */}
                   <input
@@ -191,20 +186,9 @@ export function StepProperty({ data, onChange }: StepPropertyProps) {
                     type="number"
                     className="input text-sm text-center"
                     min={1}
+                    placeholder="1"
                     value={entry.count === 0 ? '' : entry.count}
                     onChange={(e) => updateUnitEntry(entry.id, 'count', Number(e.target.value))}
-                  />
-
-                  {/* Rent per month */}
-                  <input
-                    type="number"
-                    className="input text-sm"
-                    min={0}
-                    placeholder="0"
-                    value={entry.rentMonthly === 0 ? '' : entry.rentMonthly}
-                    onChange={(e) =>
-                      updateUnitEntry(entry.id, 'rentMonthly', Number(e.target.value))
-                    }
                   />
 
                   {/* Remove */}
@@ -220,9 +204,8 @@ export function StepProperty({ data, onChange }: StepPropertyProps) {
               ))}
 
               {/* Totals row */}
-              <div className="flex justify-between pt-1.5 border-t border-slate-100 dark:border-slate-700 text-sm font-semibold text-slate-900 dark:text-white">
+              <div className="pt-1.5 border-t border-slate-100 dark:border-slate-700 text-sm font-semibold text-slate-900 dark:text-white">
                 <span>{totalUnits} units total</span>
-                <span>{formatCurrency(totalRent)} / mo</span>
               </div>
             </div>
           )}

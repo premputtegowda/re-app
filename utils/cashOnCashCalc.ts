@@ -79,14 +79,13 @@ export function projectScenario(scenario: CoCScenario): CoCResult {
 
   const totalInvested = equityDeployed + lostOpportunityCost;
 
-  // Unit mix overrides individual units + grossRentMonthly when populated
   const hasUnitMix = acquisition.unitMix.length > 0;
   const effectiveUnits = hasUnitMix
     ? acquisition.unitMix.reduce((sum, e) => sum + e.count, 0)
     : acquisition.units;
-  const baseMonthlyRent = hasUnitMix
-    ? acquisition.unitMix.reduce((sum, e) => sum + e.count * e.rentMonthly, 0)
-    : operations.grossRentMonthly * acquisition.units;
+  // grossRentMonthly is always the source of truth — for MFR with unit mix it is
+  // pre-synced from the unit mix total in the UI so users can still override it.
+  const baseMonthlyRent = operations.grossRentMonthly;
 
   const ioPeriodYears = Math.floor(acquisition.ioPeriodMonths / 12);
   const loanTermMonths = acquisition.loanTermYears * 12;

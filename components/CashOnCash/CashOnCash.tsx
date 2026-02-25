@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Calculator, RefreshCw } from 'lucide-react';
 import { Card } from '@/components/UI/Card';
 import { Button } from '@/components/UI/Button';
@@ -115,7 +115,11 @@ function validateStep(
   }
   if (step === 3) {
     const errs: string[] = [];
-    if (operations.grossRentMonthly <= 0) errs.push('Gross rent must be greater than 0');
+    const effectiveRent =
+      acquisition.unitMix.length > 0
+        ? acquisition.unitMix.reduce((sum, e) => sum + e.count * e.rentMonthly, 0)
+        : operations.grossRentMonthly;
+    if (effectiveRent <= 0) errs.push('Gross rent must be greater than 0');
     if (operations.vacancyRatePct < 0 || operations.vacancyRatePct > 100)
       errs.push('Vacancy rate must be between 0% and 100%');
     return errs;
@@ -141,6 +145,15 @@ export function CashOnCash() {
 
   const { addScenario } = useCoCStore();
   const resultsRef = useRef<HTMLDivElement>(null);
+
+  // Keep grossRentMonthly in sync with unit mix total for MFR
+  useEffect(() => {
+    if (acquisition.propertyType === 'mfr' && acquisition.unitMix.length > 0) {
+      const total = acquisition.unitMix.reduce((sum, e) => sum + e.count * e.rentMonthly, 0);
+      setOperations((prev) => ({ ...prev, grossRentMonthly: total }));
+    }
+  }, [acquisition.unitMix, acquisition.propertyType]);
+
 
   const currentResult = scenarioResults[activeType] ?? null;
 
@@ -175,10 +188,14 @@ export function CashOnCash() {
   };
 
   const handleCalculate = () => {
+    const effectiveRent =
+      acquisition.unitMix.length > 0
+        ? acquisition.unitMix.reduce((sum, e) => sum + e.count * e.rentMonthly, 0)
+        : operations.grossRentMonthly;
     const errs = [
       ...(acquisition.purchasePrice <= 0 ? ['Purchase price must be greater than 0'] : []),
       ...(acquisition.arv <= 0 ? ['ARV must be greater than 0'] : []),
-      ...(operations.grossRentMonthly <= 0 ? ['Gross rent must be greater than 0'] : []),
+      ...(effectiveRent <= 0 ? ['Gross rent must be greater than 0'] : []),
     ];
     if (errs.length > 0) {
       setErrors(errs);
@@ -234,7 +251,9 @@ export function CashOnCash() {
           <StepOperations
             data={operations}
             onChange={updateOperations}
+            propertyType={acquisition.propertyType}
             unitMix={acquisition.unitMix}
+            onUnitMixChange={(mix) => updateAcquisition('unitMix', mix)}
           />
         );
       case 4:

@@ -2,25 +2,68 @@
 
 import { Input } from '@/components/UI/Input';
 import { formatCurrency } from '@/utils/cashOnCashCalc';
-import type { CoCOperations, CoCUnitMixEntry } from '@/types';
+import type { CoCOperations, CoCPropertyType, CoCUnitMixEntry } from '@/types';
 
 interface StepOperationsProps {
   data: CoCOperations;
   onChange: (field: keyof CoCOperations, value: number) => void;
+  propertyType: CoCPropertyType;
   unitMix: CoCUnitMixEntry[];
+  onUnitMixChange: (unitMix: CoCUnitMixEntry[]) => void;
 }
 
-export function StepOperations({ data, onChange, unitMix }: StepOperationsProps) {
+export function StepOperations({ data, onChange, propertyType, unitMix, onUnitMixChange }: StepOperationsProps) {
+  const isMfr = propertyType === 'mfr';
   const hasUnitMix = unitMix.length > 0;
-  const unitMixRent = unitMix.reduce((sum, e) => sum + e.count * e.rentMonthly, 0);
+  const totalUnits = unitMix.reduce((sum, e) => sum + e.count, 0);
+  const totalRent = unitMix.reduce((sum, e) => sum + e.count * e.rentMonthly, 0);
+
+  const updateUnitRent = (id: string, rentMonthly: number) =>
+    onUnitMixChange(unitMix.map((e) => (e.id === id ? { ...e, rentMonthly } : e)));
+
+  const unitLabel = (e: CoCUnitMixEntry) => {
+    const beds = e.beds === 0 ? 'Studio' : `${e.beds}BR`;
+    const baths = `${e.baths}BA`;
+    return `${beds} / ${baths}`;
+  };
 
   return (
     <div className="space-y-4">
-      {hasUnitMix ? (
-        <div className="rounded-lg bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 p-3 text-sm text-primary-700 dark:text-primary-300">
-          Gross rent is driven by your unit mix:{' '}
-          <span className="font-semibold">{formatCurrency(unitMixRent)}/mo</span>. Update it on
-          the Property step.
+      {isMfr && hasUnitMix ? (
+        <div className="space-y-2">
+          <p className="label">Rent by Unit Type</p>
+
+          {/* Column headers */}
+          <div className="grid grid-cols-[1fr_48px_1fr] gap-2 px-0.5">
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Unit Type</span>
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400 text-center">Count</span>
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Rent / mo ($)</span>
+          </div>
+
+          {unitMix.map((entry) => (
+            <div key={entry.id} className="grid grid-cols-[1fr_48px_1fr] gap-2 items-center">
+              <span className="text-sm text-slate-700 dark:text-slate-300 font-medium">
+                {unitLabel(entry)}
+              </span>
+              <span className="text-sm text-slate-500 dark:text-slate-400 text-center">
+                ×{entry.count}
+              </span>
+              <input
+                type="number"
+                className="input text-sm"
+                min={0}
+                placeholder="0"
+                value={entry.rentMonthly === 0 ? '' : entry.rentMonthly}
+                onChange={(e) => updateUnitRent(entry.id, Number(e.target.value))}
+              />
+            </div>
+          ))}
+
+          {/* Totals row */}
+          <div className="flex justify-between pt-1.5 border-t border-slate-100 dark:border-slate-700 text-sm font-semibold text-slate-900 dark:text-white">
+            <span>{totalUnits} units total</span>
+            <span>{formatCurrency(totalRent)} / mo</span>
+          </div>
         </div>
       ) : (
         <Input
