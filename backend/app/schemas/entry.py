@@ -1,8 +1,9 @@
 from datetime import datetime, date as DateType
-from typing import Optional, Union
+from typing import List, Optional, Union
 from uuid import UUID
 from enum import Enum
 from pydantic import BaseModel, Field, field_validator, model_validator
+from app.schemas.attachment import AttachmentResponse
 
 
 class EntryType(str, Enum):
@@ -61,6 +62,7 @@ class EntryResponse(BaseModel):
     type: EntryType
     description: str
     notes: str | None = None
+    attachments: List[AttachmentResponse] = []
     created_at: datetime
     updated_at: datetime
 

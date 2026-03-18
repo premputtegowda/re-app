@@ -27,6 +27,7 @@ export interface HoursEntry {
   description: string;
   notes?: string; // Optional notes / evidence text
   type: 'material' | 'non-material';
+  attachments?: Attachment[];
   createdAt: string; // ISO timestamp
   updatedAt: string; // ISO timestamp
 }
@@ -103,12 +104,12 @@ export interface ClassificationResult {
   audit_tip: string;
 }
 
-// Attachment stored in user's Google Drive
+// Attachment stored in user's Google Drive or linked manually
 export interface Attachment {
   id: string;
   entry_id: string;
-  gdrive_file_id: string;
-  gdrive_view_url: string;
+  file_ref: string;
+  attachment_url: string;
   original_filename: string;
   content_type: string;
   file_size: number;

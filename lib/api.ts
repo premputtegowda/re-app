@@ -307,6 +307,38 @@ export const api = {
     return response.json();
   },
 
+  // Attachments
+  async createAttachment(
+    entryId: string,
+    data: {
+      file_ref: string;
+      attachment_url: string;
+      original_filename: string;
+      content_type: string;
+      file_size: number;
+    }
+  ) {
+    const response = await authFetch(`/api/entries/${entryId}/attachments`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new ApiError(response.status, error.detail || 'Failed to save attachment');
+    }
+    return response.json();
+  },
+
+  async deleteAttachment(entryId: string, attachmentId: string) {
+    const response = await authFetch(`/api/entries/${entryId}/attachments/${attachmentId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new ApiError(response.status, error.detail || 'Failed to delete attachment');
+    }
+  },
+
   async deleteEntry(id: string) {
     const response = await authFetch(`/api/entries/${id}`, {
       method: 'DELETE',

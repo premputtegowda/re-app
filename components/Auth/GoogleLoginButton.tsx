@@ -85,10 +85,6 @@ export default function GoogleLoginButton({
       }
     };
     document.body.appendChild(script);
-
-    return () => {
-      document.body.removeChild(script);
-    };
   }, [handleCredentialResponse]);
 
   if (isLoading) {

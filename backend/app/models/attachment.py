@@ -21,8 +21,8 @@ class Attachment(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
     )
-    gdrive_file_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    gdrive_view_url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    file_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    attachment_url: Mapped[str] = mapped_column(String(1000), nullable=False)
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
     content_type: Mapped[str] = mapped_column(String(100), nullable=False)
     file_size: Mapped[int] = mapped_column(Integer, nullable=False)

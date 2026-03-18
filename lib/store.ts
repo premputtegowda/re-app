@@ -24,6 +24,7 @@ const transformEntry = (backendEntry: any): HoursEntry => ({
   description: backendEntry.description,
   notes: backendEntry.notes ?? undefined,
   type: backendEntry.type === 'non-material' ? 'non-material' : 'material',
+  attachments: backendEntry.attachments ?? [],
   createdAt: backendEntry.created_at,
   updatedAt: backendEntry.updated_at,
 });
@@ -59,6 +60,7 @@ interface AppStore {
   addEntry: (entry: Omit<HoursEntry, 'id' | 'totalMinutes' | 'createdAt' | 'updatedAt'>) => Promise<HoursEntry>;
   updateEntry: (entry: HoursEntry) => Promise<void>;
   deleteEntry: (id: string) => Promise<void>;
+  patchEntryAttachments: (entryId: string, attachments: import('@/types').Attachment[]) => void;
 
   // Category actions
   addCategory: (category: Omit<Category, 'id' | 'createdAt'>) => Promise<void>;
@@ -169,6 +171,14 @@ export const useStore = create<AppStore>()(
           toast.error(message);
           throw error;
         }
+      },
+
+      patchEntryAttachments: (entryId, attachments) => {
+        set((state) => ({
+          entries: state.entries.map((e) =>
+            e.id === entryId ? { ...e, attachments } : e
+          ),
+        }));
       },
 
       // Category actions

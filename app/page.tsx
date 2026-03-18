@@ -10,12 +10,16 @@ import { Settings } from '@/components/Settings/Settings';
 import { LoginPage } from '@/components/Auth';
 import { useAuthStore } from '@/lib/authStore';
 import { useStore } from '@/lib/store';
+import { useDriveStore } from '@/lib/driveStore';
+import { DriveConsentModal } from '@/components/Settings/DriveConsentModal';
 import type { ViewMode } from '@/types';
 
 export default function Home() {
   const [currentView, setCurrentView] = useState<ViewMode>('dashboard');
   const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
   const syncFromBackend = useStore((s) => s.syncFromBackend);
+  const drivePermission = useDriveStore((s) => s.permission);
+  const [showDriveConsent, setShowDriveConsent] = useState(false);
 
   // Check authentication on mount
   useEffect(() => {
@@ -28,6 +32,10 @@ export default function Home() {
       syncFromBackend().catch((error) => {
         console.error('Failed to sync data:', error);
       });
+      // Show Drive consent prompt once for new users
+      if (drivePermission === 'unknown') {
+        setShowDriveConsent(true);
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
@@ -76,6 +84,9 @@ export default function Home() {
       <Layout currentView={currentView} onViewChange={setCurrentView}>
         {renderView()}
       </Layout>
+      {showDriveConsent && (
+        <DriveConsentModal onClose={() => setShowDriveConsent(false)} />
+      )}
       <Toaster position="top-right" richColors closeButton />
     </>
   );

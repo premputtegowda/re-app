@@ -10,6 +10,8 @@ from app.config import Settings, get_settings
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import User, Entry, Category, Property
+from app.models.attachment import Attachment
+from sqlalchemy.orm import selectinload
 from app.models.entry import EntryType as ModelEntryType
 from app.schemas import EntryCreate, EntryUpdate, EntryResponse
 from app.schemas.entry import EntryType, EntryFilter
@@ -94,7 +96,7 @@ async def list_entries(
     limit: int = Query(20, ge=1, le=100),
 ):
     """List entries with optional filters and pagination."""
-    query = select(Entry).where(Entry.user_id == current_user.id)
+    query = select(Entry).options(selectinload(Entry.attachments)).where(Entry.user_id == current_user.id)
 
     # Apply filters
     if date_from:
@@ -146,9 +148,11 @@ async def create_entry(
     )
     db.add(entry)
     await db.commit()
-    await db.refresh(entry)
 
-    return entry
+    result = await db.execute(
+        select(Entry).options(selectinload(Entry.attachments)).where(Entry.id == entry.id)
+    )
+    return result.scalar_one()
 
 
 @router.post("/bulk", response_model=List[EntryResponse], status_code=status.HTTP_201_CREATED)
@@ -203,7 +207,7 @@ async def get_entry(
 ):
     """Get a specific entry by ID."""
     result = await db.execute(
-        select(Entry).where(
+        select(Entry).options(selectinload(Entry.attachments)).where(
             Entry.id == entry_id,
             Entry.user_id == current_user.id,
         )
@@ -279,9 +283,11 @@ async def update_entry(
         )
 
     await db.commit()
-    await db.refresh(entry)
 
-    return entry
+    result = await db.execute(
+        select(Entry).options(selectinload(Entry.attachments)).where(Entry.id == entry.id)
+    )
+    return result.scalar_one()
 
 
 @router.delete("/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)

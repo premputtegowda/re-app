@@ -4,8 +4,8 @@ from pydantic import BaseModel
 
 
 class AttachmentCreate(BaseModel):
-    gdrive_file_id: str
-    gdrive_view_url: str
+    file_ref: str
+    attachment_url: str
     original_filename: str
     content_type: str
     file_size: int
@@ -14,8 +14,8 @@ class AttachmentCreate(BaseModel):
 class AttachmentResponse(BaseModel):
     id: UUID
     entry_id: UUID
-    gdrive_file_id: str
-    gdrive_view_url: str
+    file_ref: str
+    attachment_url: str
     original_filename: str
     content_type: str
     file_size: int

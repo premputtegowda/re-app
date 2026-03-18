@@ -117,6 +117,7 @@ Respond with valid JSON only — no markdown fences, no extra text."""
             model_name="gemini-2.5-flash",
             generation_config=genai.types.GenerationConfig(
                 response_mime_type="application/json",
+                temperature=0,
             ),
         )
 

@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react';
 import {
   Edit2, Trash2, Calendar, Clock, Home, FileText, Loader2, Paperclip,
   AlertCircle, X, Brain, ShieldCheck, Sparkles, RotateCcw, Lightbulb, Pencil,
+  Upload, Link, CheckCircle2, ExternalLink, Download,
 } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { useAttachmentStore } from '@/lib/attachmentStore';
@@ -15,9 +16,13 @@ import type { HoursEntry, ClassificationResult } from '@/types';
 import { formatDate } from '@/utils/dateUtils';
 import { formatDuration } from '@/utils/calculations';
 import { getCachedClassification, setCachedClassification } from '@/utils/classificationCache';
+import { labelFromUrl, dropboxDownloadUrl } from '@/utils/attachmentUtils';
+import { requestDriveToken, uploadFileToDrive } from '@/lib/driveApi';
+import { useDriveStore } from '@/lib/driveStore';
 
 const QUICK_HOURS = [1, 2, 3, 4, 6, 8];
 const QUICK_MINUTES = [15, 30, 45];
+const EMPTY_ATTACHMENTS: import('@/lib/attachmentStore').PendingAttachment[] = [];
 const CATEGORY_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#0ea5e9'];
 
 function SummaryBar({
@@ -63,11 +68,43 @@ export function HoursListItem({ entry }: HoursListItemProps) {
   const categories = useStore((s) => s.categories);
   const properties = useStore((s) => s.properties);
   const updateEntry = useStore((s) => s.updateEntry);
+  const patchEntryAttachments = useStore((s) => s.patchEntryAttachments);
   const deleteEntry = useStore((s) => s.deleteEntry);
   const addCategory = useStore((s) => s.addCategory);
-  const entryFiles = useAttachmentStore((s) => s.files[entry.id]);
-  const addAttachmentFiles = useAttachmentStore((s) => s.addFiles);
-  const removeAttachmentFile = useAttachmentStore((s) => s.removeFile);
+  const ATTACH_KEY = `edit-${entry.id}`;
+  const drivePermission = useDriveStore((s) => s.permission);
+  const setPermission = useDriveStore((s) => s.setPermission);
+  const pendingAttachments = useAttachmentStore((s) => s.attachments[ATTACH_KEY] ?? EMPTY_ATTACHMENTS);
+  const addFiles = useAttachmentStore((s) => s.addFiles);
+  const addLink = useAttachmentStore((s) => s.addLink);
+  const updateAttachment = useAttachmentStore((s) => s.updateAttachment);
+  const removeAttachment = useAttachmentStore((s) => s.removeAttachment);
+  const clearAttachKey = useAttachmentStore((s) => s.clearKey);
+
+  const handleAddFiles = async (files: File[]) => {
+    addFiles(ATTACH_KEY, files);
+    const currentCount = pendingAttachments.length;
+    const token = await requestDriveToken();
+    for (let i = 0; i < files.length; i++) {
+      const idx = currentCount + i;
+      if (!token) {
+        updateAttachment(ATTACH_KEY, idx, { status: 'error', errorMsg: 'Drive token expired. Reconnect in Settings.' });
+        continue;
+      }
+      updateAttachment(ATTACH_KEY, idx, { status: 'uploading' });
+      try {
+        const result = await uploadFileToDrive(files[i], token);
+        updateAttachment(ATTACH_KEY, idx, { status: 'uploaded', driveFileId: result.fileId, driveViewUrl: result.viewUrl, errorMsg: '' });
+      } catch (e) {
+        updateAttachment(ATTACH_KEY, idx, { status: 'error', errorMsg: e instanceof Error ? e.message : 'Upload failed' });
+      }
+    }
+  };
+
+  const handleConnectDrive = async () => {
+    const token = await requestDriveToken();
+    if (token) setPermission('granted');
+  };
 
   // ── Modal visibility ──
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -100,6 +137,26 @@ export function HoursListItem({ entry }: HoursListItemProps) {
   const [useRefinedDescription, setUseRefinedDescription] = useState(false);
   const [refinedDescription, setRefinedDescription] = useState('');
   const [originalAiDescription, setOriginalAiDescription] = useState('');
+
+  // ── Attachments ──
+  const [deletingAttachmentIds, setDeletingAttachmentIds] = useState<Set<string>>(new Set());
+  const [deletedAttachmentIds, setDeletedAttachmentIds] = useState<Set<string>>(new Set());
+
+  const handleDeleteSavedAttachment = async (attachmentId: string) => {
+    setDeletingAttachmentIds((prev) => new Set(prev).add(attachmentId));
+    try {
+      await api.deleteAttachment(entry.id, attachmentId);
+      setDeletedAttachmentIds((prev) => new Set(prev).add(attachmentId));
+    } catch {
+      setErrors([{ field: 'general', message: 'Failed to delete attachment' }]);
+    } finally {
+      setDeletingAttachmentIds((prev) => {
+        const next = new Set(prev);
+        next.delete(attachmentId);
+        return next;
+      });
+    }
+  };
 
   // ── Misc ──
   const [isSaving, setIsSaving] = useState(false);
@@ -178,6 +235,7 @@ export function HoursListItem({ entry }: HoursListItemProps) {
     setEditingSection(null);
     setIsCreatingCategory(false);
     setErrors([]);
+    setDeletedAttachmentIds(new Set());
     setIsEditModalOpen(true);
   };
 
@@ -304,6 +362,33 @@ export function HoursListItem({ entry }: HoursListItemProps) {
         description: activeDescription,
         type: selectedType,
       });
+
+      // Save any new attachments with Drive URLs or manual URLs
+      const attachsToSave = pendingAttachments.filter(
+        (a) => a.driveViewUrl.trim() || a.manualUrl.trim()
+      );
+      if (attachsToSave.length > 0) {
+        const results = await Promise.allSettled(
+          attachsToSave.map((a) =>
+            api.createAttachment(entry.id, {
+              file_ref: a.driveFileId || 'manual',
+              attachment_url: a.driveViewUrl || a.manualUrl,
+              original_filename: a.label || a.manualUrl,
+              content_type: a.file?.type || 'application/octet-stream',
+              file_size: a.file?.size ?? 0,
+            })
+          )
+        );
+        const saved = results
+          .filter((r): r is PromiseFulfilledResult<import('@/types').Attachment> => r.status === 'fulfilled')
+          .map((r) => r.value);
+        if (saved.length > 0) {
+          // Merge newly saved attachments with existing ones (minus any deleted)
+          const existing = (entry.attachments ?? []).filter((a) => !deletedAttachmentIds.has(a.id));
+          patchEntryAttachments(entry.id, [...existing, ...saved]);
+        }
+      }
+      clearAttachKey(ATTACH_KEY);
       setIsEditModalOpen(false);
     } catch {
       setErrors([{ field: 'general', message: 'Failed to save changes' }]);
@@ -358,11 +443,45 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                 <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">{entry.description}</p>
               </div>
             )}
-            {(entryFiles?.length ?? 0) > 0 && (
-              <span className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 rounded-full px-2 py-0.5">
-                <Paperclip size={10} />
-                {entryFiles!.length} file{entryFiles!.length !== 1 ? 's' : ''}
-              </span>
+            {(entry.attachments ?? []).filter((a) => !deletedAttachmentIds.has(a.id)).length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {(entry.attachments ?? []).filter((a) => !deletedAttachmentIds.has(a.id)).map((a) => (
+                  a.attachment_url ? (
+                    <span key={a.id} className="inline-flex items-center gap-0.5">
+                      <a
+                        href={a.attachment_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Open file"
+                        className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-l-full pl-2 pr-1.5 py-0.5 transition-colors max-w-[140px]"
+                      >
+                        <Paperclip size={10} className="shrink-0" />
+                        <span className="truncate">{a.original_filename}</span>
+                        <ExternalLink size={9} className="shrink-0 opacity-60" />
+                      </a>
+                      {dropboxDownloadUrl(a.attachment_url) && (
+                        <a
+                          href={dropboxDownloadUrl(a.attachment_url)!}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Download file"
+                          className="inline-flex items-center px-1.5 py-0.5 text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-r-full border-l border-blue-200 dark:border-blue-800 transition-colors"
+                        >
+                          <Download size={9} />
+                        </a>
+                      )}
+                    </span>
+                  ) : (
+                    <span
+                      key={a.id}
+                      className="inline-flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 rounded-full px-2 py-0.5 max-w-[160px]"
+                    >
+                      <Paperclip size={10} className="shrink-0" />
+                      <span className="truncate">{a.original_filename}</span>
+                    </span>
+                  )
+                ))}
+              </div>
             )}
           </div>
           <div className="flex gap-1 shrink-0">
@@ -832,47 +951,170 @@ export function HoursListItem({ entry }: HoursListItemProps) {
               {/* Attachments */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
-                  Attach supporting documents
+                  Supporting documents
                 </label>
                 <div className="space-y-2">
-                  <label className="flex items-center gap-2 px-4 py-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors cursor-pointer w-full justify-center text-sm">
-                    <Paperclip size={16} />
-                    Add files
-                    <input
-                      type="file"
-                      multiple
-                      className="hidden"
-                      onChange={(e) => {
-                        if (e.target.files) addAttachmentFiles(entry.id, Array.from(e.target.files));
-                      }}
-                    />
-                  </label>
-                  {(entryFiles?.length ?? 0) > 0 && (
-                    <ul className="space-y-1">
-                      {entryFiles!.map((f, i) => (
-                        <li key={i} className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-700/50 rounded-lg px-3 py-2">
-                          <Paperclip size={12} className="shrink-0 text-slate-400" />
-                          <span className="flex-1 truncate text-xs">{f.name}</span>
-                          <span className="text-xs text-slate-400 shrink-0">
-                            {f.size < 1024 * 1024
-                              ? `${(f.size / 1024).toFixed(0)} KB`
-                              : `${(f.size / (1024 * 1024)).toFixed(1)} MB`}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => removeAttachmentFile(entry.id, i)}
-                            className="text-slate-400 hover:text-red-500 transition-colors shrink-0"
-                          >
-                            <X size={13} />
-                          </button>
+                  {/* Existing saved attachments */}
+                  {(entry.attachments ?? []).filter((a) => !deletedAttachmentIds.has(a.id)).length > 0 && (
+                    <ul className="space-y-1.5">
+                      {(entry.attachments ?? [])
+                        .filter((a) => !deletedAttachmentIds.has(a.id))
+                        .map((a) => (
+                          <li key={a.id} className="flex items-center gap-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg px-3 py-2">
+                            <Paperclip size={12} className="shrink-0 text-slate-400" />
+                            {a.attachment_url ? (
+                              <a
+                                href={a.attachment_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="Open file"
+                                className="flex-1 min-w-0 flex items-center gap-1 text-xs text-primary-600 dark:text-primary-400 hover:underline"
+                              >
+                                <span className="truncate">{a.original_filename}</span>
+                                <ExternalLink size={10} className="shrink-0 opacity-60" />
+                              </a>
+                            ) : (
+                              <span className="flex-1 truncate text-xs text-slate-700 dark:text-slate-300">
+                                {a.original_filename}
+                              </span>
+                            )}
+                            {a.attachment_url && dropboxDownloadUrl(a.attachment_url) && (
+                              <a
+                                href={dropboxDownloadUrl(a.attachment_url)!}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="Download"
+                                className="text-slate-400 hover:text-primary-500 transition-colors shrink-0"
+                              >
+                                <Download size={13} />
+                              </a>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSavedAttachment(a.id)}
+                              disabled={deletingAttachmentIds.has(a.id)}
+                              className="text-slate-400 hover:text-red-500 transition-colors shrink-0 disabled:opacity-50"
+                            >
+                              {deletingAttachmentIds.has(a.id)
+                                ? <Loader2 size={13} className="animate-spin" />
+                                : <X size={13} />}
+                            </button>
+                          </li>
+                        ))}
+                    </ul>
+                  )}
+                  {/* New pending attachments */}
+                  {pendingAttachments.length > 0 && (
+                    <ul className="space-y-2">
+                      {pendingAttachments.map((a, i) => (
+                        <li key={i} className="bg-slate-50 dark:bg-slate-700/50 rounded-lg px-3 py-2 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <Paperclip size={12} className="shrink-0 text-slate-400" />
+                            {a.file ? (
+                              <>
+                                <span className="flex-1 truncate text-xs text-slate-700 dark:text-slate-300">{a.label}</span>
+                                <span className="text-xs text-slate-400 shrink-0">
+                                  {a.file.size < 1024 * 1024
+                                    ? `${(a.file.size / 1024).toFixed(0)} KB`
+                                    : `${(a.file.size / (1024 * 1024)).toFixed(1)} MB`}
+                                </span>
+                              </>
+                            ) : (
+                              <input
+                                type="text"
+                                placeholder="Label (e.g. Receipt, Photo)"
+                                value={a.label}
+                                onChange={(e) => updateAttachment(ATTACH_KEY, i, { label: e.target.value })}
+                                className="flex-1 text-xs border border-slate-300 dark:border-slate-600 rounded px-2 py-1 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary-400"
+                              />
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => removeAttachment(ATTACH_KEY, i)}
+                              className="text-slate-400 hover:text-red-500 transition-colors shrink-0"
+                            >
+                              <X size={13} />
+                            </button>
+                          </div>
+                          {a.file ? (
+                            <span className="flex items-center gap-1 text-xs">
+                              {a.status === 'uploading' && (
+                                <><Loader2 size={12} className="animate-spin text-primary-500" /><span className="text-slate-400">Uploading to Drive…</span></>
+                              )}
+                              {a.status === 'uploaded' && (
+                                <><CheckCircle2 size={12} className="text-green-500" /><span className="text-green-600 dark:text-green-400">Saved to Drive</span></>
+                              )}
+                              {a.status === 'error' && (
+                                <span className="text-red-500">{a.errorMsg}</span>
+                              )}
+                            </span>
+                          ) : (
+                            <div className="space-y-1.5">
+                              <input
+                                type="url"
+                                placeholder="Paste a link (Dropbox, iCloud, OneDrive…)"
+                                value={a.manualUrl}
+                                onChange={(e) => {
+                                  const url = e.target.value;
+                                  const patch: Record<string, string> = { manualUrl: url };
+                                  if (!a.label || a.label === labelFromUrl(a.manualUrl)) {
+                                    patch.label = labelFromUrl(url);
+                                  }
+                                  updateAttachment(ATTACH_KEY, i, patch);
+                                }}
+                                className="w-full text-xs border border-slate-300 dark:border-slate-600 rounded px-2 py-1 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary-400"
+                              />
+                              {a.errorMsg && (
+                                <p className="text-xs text-red-500">{a.errorMsg}</p>
+                              )}
+                            </div>
+                          )}
                         </li>
                       ))}
                     </ul>
                   )}
-                  {classificationResult?.audit_tip && (
-                    <p className="text-xs text-slate-400">
-                      Follow the audit tip above — attach the recommended docs here.
-                    </p>
+                  {drivePermission === 'granted' ? (
+                    <div className="flex gap-2">
+                      <label className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors cursor-pointer justify-center text-sm">
+                        <Paperclip size={14} />
+                        Attach file
+                        <input
+                          type="file"
+                          multiple
+                          className="hidden"
+                          onChange={(e) => {
+                            if (e.target.files) handleAddFiles(Array.from(e.target.files));
+                          }}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => addLink(ATTACH_KEY)}
+                        className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors justify-center text-sm"
+                      >
+                        <Link size={14} />
+                        Paste link
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={handleConnectDrive}
+                        className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors justify-center text-sm"
+                      >
+                        <Upload size={14} />
+                        Connect Google Drive to Attach file
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => addLink(ATTACH_KEY)}
+                        className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors justify-center text-sm"
+                      >
+                        <Link size={14} />
+                        Paste link
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>

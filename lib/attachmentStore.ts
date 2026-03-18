@@ -2,40 +2,87 @@
 
 import { create } from 'zustand';
 
-/**
- * In-memory store for files attached to entries.
- * NOT persisted — File objects can't be serialized to localStorage.
- * Files survive navigation within a session but are cleared on page refresh.
- */
+export type AttachmentStatus = 'idle' | 'uploading' | 'uploaded' | 'error';
+
+export interface PendingAttachment {
+  file: File | null;       // null for link-only entries
+  label: string;           // display name — filename for file picks, user-typed for link-only
+  status: AttachmentStatus;
+  driveFileId: string;
+  driveViewUrl: string;
+  manualUrl: string;
+  errorMsg: string;
+}
+
 interface AttachmentStore {
-  files: Record<string, File[]>; // entryId → files
-  addFiles: (entryId: string, newFiles: File[]) => void;
-  removeFile: (entryId: string, index: number) => void;
-  clearEntry: (entryId: string) => void;
+  attachments: Record<string, PendingAttachment[]>;
+
+  addFiles: (key: string, files: File[]) => void;
+  addLink: (key: string) => void;
+  updateAttachment: (key: string, index: number, patch: Partial<PendingAttachment>) => void;
+  removeAttachment: (key: string, index: number) => void;
+  clearKey: (key: string) => void;
 }
 
 export const useAttachmentStore = create<AttachmentStore>((set) => ({
-  files: {},
+  attachments: {},
 
-  addFiles: (entryId, newFiles) =>
+  addFiles: (key, files) =>
     set((state) => ({
-      files: {
-        ...state.files,
-        [entryId]: [...(state.files[entryId] ?? []), ...newFiles],
+      attachments: {
+        ...state.attachments,
+        [key]: [
+          ...(state.attachments[key] ?? []),
+          ...files.map((file) => ({
+            file,
+            label: file.name,
+            status: 'idle' as AttachmentStatus,
+            driveFileId: '',
+            driveViewUrl: '',
+            manualUrl: '',
+            errorMsg: '',
+          })),
+        ],
       },
     })),
 
-  removeFile: (entryId, index) =>
+  addLink: (key) =>
     set((state) => ({
-      files: {
-        ...state.files,
-        [entryId]: (state.files[entryId] ?? []).filter((_, i) => i !== index),
+      attachments: {
+        ...state.attachments,
+        [key]: [
+          ...(state.attachments[key] ?? []),
+          {
+            file: null,
+            label: '',
+            status: 'idle' as AttachmentStatus,
+            driveFileId: '',
+            driveViewUrl: '',
+            manualUrl: '',
+            errorMsg: '',
+          },
+        ],
       },
     })),
 
-  clearEntry: (entryId) =>
+  updateAttachment: (key, index, patch) =>
     set((state) => {
-      const { [entryId]: _removed, ...rest } = state.files;
-      return { files: rest };
+      const list = [...(state.attachments[key] ?? [])];
+      list[index] = { ...list[index], ...patch };
+      return { attachments: { ...state.attachments, [key]: list } };
+    }),
+
+  removeAttachment: (key, index) =>
+    set((state) => ({
+      attachments: {
+        ...state.attachments,
+        [key]: (state.attachments[key] ?? []).filter((_, i) => i !== index),
+      },
+    })),
+
+  clearKey: (key) =>
+    set((state) => {
+      const { [key]: _removed, ...rest } = state.attachments;
+      return { attachments: rest };
     }),
 }));

@@ -2,10 +2,12 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Clock, Home, FileText, CheckCircle, Loader2, AlertCircle, Brain, Lightbulb, ShieldCheck, Paperclip, X, Sparkles, RotateCcw, Pencil } from 'lucide-react';
+import { Clock, Home, FileText, CheckCircle, Loader2, AlertCircle, Brain, Lightbulb, ShieldCheck, Paperclip, X, Sparkles, RotateCcw, Pencil, Upload, Link, CheckCircle2 } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { api } from '@/lib/api';
-import { useAttachmentStore } from '@/lib/attachmentStore';
+import { useAttachmentStore, type PendingAttachment } from '@/lib/attachmentStore';
+import { requestDriveToken, uploadFileToDrive } from '@/lib/driveApi';
+import { useDriveStore } from '@/lib/driveStore';
 import { Button } from '@/components/UI/Button';
 import { Input } from '@/components/UI/Input';
 import { Card } from '@/components/UI/Card';
@@ -13,9 +15,11 @@ import { validateHoursEntry, getFieldError } from '@/utils/validationUtils';
 import { getTodayDate } from '@/utils/dateUtils';
 import type { HoursEntryFormData, ClassificationResult } from '@/types';
 import { getCachedClassification, setCachedClassification } from '@/utils/classificationCache';
+import { labelFromUrl } from '@/utils/attachmentUtils';
 
 const QUICK_HOURS = [1, 2, 3, 4, 6, 8];
 const QUICK_MINUTES = [15, 30, 45];
+const EMPTY_ATTACHMENTS: import('@/lib/attachmentStore').PendingAttachment[] = [];
 
 interface TimeFormBodyProps {
   formData: HoursEntryFormData;
@@ -133,6 +137,7 @@ export function ChatLikeEntry() {
   const categories = useStore((s) => s.categories);
   const addEntry = useStore((s) => s.addEntry);
   const addCategory = useStore((s) => s.addCategory);
+  const patchEntryAttachments = useStore((s) => s.patchEntryAttachments);
 
   const [step, setStep] = useState(1);
   const [editingStep, setEditingStep] = useState<number | null>(null);
@@ -157,9 +162,40 @@ export function ChatLikeEntry() {
   // The pristine AI output — frozen after classification, never edited by user
   const [originalAiDescription, setOriginalAiDescription] = useState('');
   // Pending file attachments
-  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const ATTACH_KEY = 'pending-entry';
+  const drivePermission = useDriveStore((s) => s.permission);
+  const setPermission = useDriveStore((s) => s.setPermission);
+  const pendingAttachments = useAttachmentStore((s) => s.attachments[ATTACH_KEY] ?? EMPTY_ATTACHMENTS);
+  const addFiles = useAttachmentStore((s) => s.addFiles);
+  const addLink = useAttachmentStore((s) => s.addLink);
+  const updateAttachment = useAttachmentStore((s) => s.updateAttachment);
+  const removeAttachment = useAttachmentStore((s) => s.removeAttachment);
+  const clearAttachKey = useAttachmentStore((s) => s.clearKey);
 
-  const addAttachmentFiles = useAttachmentStore((s) => s.addFiles);
+  const handleAddFiles = async (files: File[]) => {
+    addFiles(ATTACH_KEY, files);
+    const currentCount = pendingAttachments.length;
+    const token = await requestDriveToken();
+    for (let i = 0; i < files.length; i++) {
+      const idx = currentCount + i;
+      if (!token) {
+        updateAttachment(ATTACH_KEY, idx, { status: 'error', errorMsg: 'Drive token expired. Reconnect in Settings.' });
+        continue;
+      }
+      updateAttachment(ATTACH_KEY, idx, { status: 'uploading' });
+      try {
+        const result = await uploadFileToDrive(files[i], token);
+        updateAttachment(ATTACH_KEY, idx, { status: 'uploaded', driveFileId: result.fileId, driveViewUrl: result.viewUrl, errorMsg: '' });
+      } catch (e) {
+        updateAttachment(ATTACH_KEY, idx, { status: 'error', errorMsg: e instanceof Error ? e.message : 'Upload failed' });
+      }
+    }
+  };
+
+  const handleConnectDrive = async () => {
+    const token = await requestDriveToken();
+    if (token) setPermission('granted');
+  };
 
   // Derived: AI recommended category name (existing or suggested new)
   const aiCategoryName = classificationResult?.category_name ?? classificationResult?.suggested_new_category ?? '';
@@ -236,7 +272,7 @@ export function ChatLikeEntry() {
         setUseRefinedDescription(true);
         setRefinedDescription('');
         setOriginalAiDescription('');
-        setPendingFiles([]);
+        clearAttachKey(ATTACH_KEY);
         setEditingStep(null);
         setIsCreatingCategory(false);
       }, 2000);
@@ -435,11 +471,31 @@ export function ChatLikeEntry() {
     try {
       const createdEntry = await addEntry(finalFormData);
 
-      // Save attached files to in-memory store (included in Audit Bundle export)
-      if (pendingFiles.length > 0) {
-        addAttachmentFiles(createdEntry.id, pendingFiles);
+      // Save attachments that have a Drive URL or manual URL
+      const attachsToSave = pendingAttachments.filter(
+        (a) => a.driveViewUrl.trim() || a.manualUrl.trim()
+      );
+      if (attachsToSave.length > 0) {
+        const results = await Promise.allSettled(
+          attachsToSave.map((a) =>
+            api.createAttachment(createdEntry.id, {
+              file_ref: a.driveFileId || 'manual',
+              attachment_url: a.driveViewUrl || a.manualUrl,
+              original_filename: a.label || a.manualUrl,
+              content_type: a.file?.type || 'application/octet-stream',
+              file_size: a.file?.size ?? 0,
+            })
+          )
+        );
+        const saved = results
+          .filter((r): r is PromiseFulfilledResult<import('@/types').Attachment> => r.status === 'fulfilled')
+          .map((r) => r.value);
+        if (saved.length > 0) {
+          patchEntryAttachments(createdEntry.id, saved);
+        }
       }
 
+      clearAttachKey(ATTACH_KEY);
       setShowSuccess(true);
     } catch (err) {
       setErrors([{ field: 'general', message: String(err instanceof Error ? err.message : err) }]);
@@ -1074,48 +1130,86 @@ export function ChatLikeEntry() {
                       Attach supporting documents
                     </label>
                     <div className="space-y-2">
-                      <label className="flex items-center gap-2 px-4 py-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors cursor-pointer w-full justify-center text-sm">
-                        <Paperclip size={16} />
-                        Add files
-                        <input
-                          type="file"
-                          multiple
-                          className="hidden"
-                          onChange={(e) => {
-                            if (e.target.files) {
-                              setPendingFiles((prev) => [...prev, ...Array.from(e.target.files!)]);
-                            }
-                          }}
-                        />
-                      </label>
-                      {pendingFiles.length > 0 && (
-                        <ul className="space-y-1">
-                          {pendingFiles.map((f, i) => (
-                            <li
-                              key={i}
-                              className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-700/50 rounded-lg px-3 py-2"
-                            >
-                              <Paperclip size={12} className="shrink-0 text-slate-400" />
-                              <span className="flex-1 truncate">{f.name}</span>
-                              <span className="text-xs text-slate-400 shrink-0">
-                                {f.size < 1024 * 1024
-                                  ? `${(f.size / 1024).toFixed(0)} KB`
-                                  : `${(f.size / (1024 * 1024)).toFixed(1)} MB`}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => setPendingFiles((prev) => prev.filter((_, idx) => idx !== i))}
-                                className="text-slate-400 hover:text-red-500 transition-colors shrink-0"
-                              >
-                                <X size={14} />
-                              </button>
+                      {/* Pending attachment rows */}
+                      {pendingAttachments.length > 0 && (
+                        <ul className="space-y-2">
+                          {pendingAttachments.map((a, i) => (
+                            <li key={i} className="bg-slate-50 dark:bg-slate-700/50 rounded-lg px-3 py-2 space-y-1.5">
+                              <div className="flex items-center gap-2">
+                                <Paperclip size={12} className="shrink-0 text-slate-400" />
+                                {a.file ? (
+                                  <>
+                                    <span className="flex-1 truncate text-xs text-slate-700 dark:text-slate-300">{a.label}</span>
+                                    <span className="text-xs text-slate-400 shrink-0">
+                                      {a.file.size < 1024 * 1024
+                                        ? `${(a.file.size / 1024).toFixed(0)} KB`
+                                        : `${(a.file.size / (1024 * 1024)).toFixed(1)} MB`}
+                                    </span>
+                                    {a.status === 'uploading' && <Loader2 size={12} className="animate-spin text-primary-500 shrink-0" />}
+                                    {a.status === 'uploaded' && <CheckCircle2 size={12} className="text-green-500 shrink-0" />}
+                                  </>
+                                ) : (
+                                  <input
+                                    type="text"
+                                    placeholder="Label (e.g. Receipt, Photo)"
+                                    value={a.label}
+                                    onChange={(e) => updateAttachment(ATTACH_KEY, i, { label: e.target.value })}
+                                    className="flex-1 text-xs border border-slate-300 dark:border-slate-600 rounded px-2 py-1 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary-400"
+                                  />
+                                )}
+                                <button type="button" onClick={() => removeAttachment(ATTACH_KEY, i)} className="text-slate-400 hover:text-red-500 transition-colors shrink-0">
+                                  <X size={14} />
+                                </button>
+                              </div>
+                              {/* Link-only: URL field */}
+                              {!a.file && (
+                                <input
+                                  type="url"
+                                  placeholder="Paste link (Dropbox, iCloud, OneDrive…)"
+                                  value={a.manualUrl}
+                                  onChange={(e) => {
+                                    const url = e.target.value;
+                                    const patch: Record<string, string> = { manualUrl: url };
+                                    if (!a.label || a.label === labelFromUrl(a.manualUrl)) patch.label = labelFromUrl(url);
+                                    updateAttachment(ATTACH_KEY, i, patch);
+                                  }}
+                                  className="w-full text-xs border border-slate-300 dark:border-slate-600 rounded px-2 py-1 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:outline-none focus:border-primary-400"
+                                />
+                              )}
+                              {a.status === 'uploaded' && (
+                                <p className="text-xs text-green-600 dark:text-green-400">Saved to Google Drive</p>
+                              )}
+                              {a.errorMsg && <p className="text-xs text-red-500">{a.errorMsg}</p>}
                             </li>
                           ))}
                         </ul>
                       )}
-                      <p className="text-xs text-slate-400">
-                        Follow the audit tip above — attach the recommended docs here. Files are auto-named and bundled in your monthly export.
-                      </p>
+
+                      {/* Add buttons — vary by Drive connection state */}
+                      {drivePermission === 'granted' ? (
+                        <div className="flex gap-2">
+                          <label className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors cursor-pointer justify-center text-sm">
+                            <Paperclip size={14} />
+                            Attach file
+                            <input type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) handleAddFiles(Array.from(e.target.files)); }} />
+                          </label>
+                          <button type="button" onClick={() => addLink(ATTACH_KEY)} className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors justify-center text-sm">
+                            <Link size={14} />
+                            Paste link
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex gap-2">
+                          <button type="button" onClick={handleConnectDrive} className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors justify-center text-sm">
+                            <Upload size={14} />
+                            Connect Google Drive to Attach file
+                          </button>
+                          <button type="button" onClick={() => addLink(ATTACH_KEY)} className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors justify-center text-sm">
+                            <Link size={14} />
+                            Paste link
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
 

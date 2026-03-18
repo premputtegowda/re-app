@@ -3,6 +3,7 @@
 import { motion } from 'framer-motion';
 import { CategoryManager } from './CategoryManager';
 import { PropertyManager } from './PropertyManager';
+import { DriveSettings } from './DriveSettings';
 
 export function Settings() {
   return (
@@ -30,6 +31,15 @@ export function Settings() {
         className="border-t border-slate-200 dark:border-slate-700 pt-8"
       >
         <PropertyManager />
+      </motion.div>
+
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.3 }}
+        className="border-t border-slate-200 dark:border-slate-700 pt-8"
+      >
+        <DriveSettings />
       </motion.div>
     </div>
   );

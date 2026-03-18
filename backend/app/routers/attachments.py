@@ -39,8 +39,8 @@ async def create_attachment(
     attachment = Attachment(
         entry_id=entry_id,
         user_id=current_user.id,
-        gdrive_file_id=data.gdrive_file_id,
-        gdrive_view_url=data.gdrive_view_url,
+        file_ref=data.file_ref,
+        attachment_url=data.attachment_url,
         original_filename=data.original_filename,
         content_type=data.content_type,
         file_size=data.file_size,
