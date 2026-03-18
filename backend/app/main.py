@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.config import get_settings
 from app.database import engine, Base
@@ -13,6 +14,7 @@ from app.routers import (
     entries_router,
     analytics_router,
     email_router,
+    attachments_router,
 )
 from app.services.scheduler import create_scheduler
 
@@ -36,6 +38,10 @@ async def lifespan(app: FastAPI):
         logger.info("Attempting database connection...")
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            # Add columns that didn't exist when the tables were first created
+            await conn.execute(text(
+                "ALTER TABLE entries ADD COLUMN IF NOT EXISTS notes TEXT"
+            ))
         db_connected = True
         logger.info("Database connection successful!")
     except Exception as e:
@@ -82,6 +88,7 @@ app.include_router(properties_router, prefix="/api")
 app.include_router(entries_router, prefix="/api")
 app.include_router(analytics_router, prefix="/api")
 app.include_router(email_router, prefix="/api")
+app.include_router(attachments_router, prefix="/api")
 
 
 @app.get("/")

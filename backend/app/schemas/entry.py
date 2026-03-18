@@ -17,7 +17,8 @@ class EntryBase(BaseModel):
     category_id: UUID
     property_id: UUID
     type: EntryType
-    description: str = Field(..., min_length=1, max_length=500)
+    description: str = Field(..., min_length=1, max_length=2000)
+    notes: str | None = Field(None, max_length=2000)
 
     @field_validator("date")
     @classmethod
@@ -44,7 +45,8 @@ class EntryUpdate(BaseModel):
     category_id: Optional[UUID] = None
     property_id: Optional[UUID] = None
     type: Optional[EntryType] = None
-    description: Optional[str] = Field(None, min_length=1, max_length=500)
+    description: Optional[str] = Field(None, min_length=1, max_length=2000)
+    notes: Optional[str] = Field(None, max_length=2000)
 
 
 class EntryResponse(BaseModel):
@@ -58,6 +60,7 @@ class EntryResponse(BaseModel):
     property_id: UUID
     type: EntryType
     description: str
+    notes: str | None = None
     created_at: datetime
     updated_at: datetime
 

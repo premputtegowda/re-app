@@ -25,6 +25,7 @@ export interface HoursEntry {
   category: string; // category_id
   property: string; // property_id
   description: string;
+  notes?: string; // Optional notes / evidence text
   type: 'material' | 'non-material';
   createdAt: string; // ISO timestamp
   updatedAt: string; // ISO timestamp
@@ -89,6 +90,31 @@ export interface MonthlyData {
   entryCount: number;
 }
 
+// AI Classification types
+export interface ClassificationResult {
+  refined_title: string;
+  refined_description: string;            // Purpose + Result
+  evidence_note: string;                  // Evidence suggestion → pre-fills Notes field
+  category_name: string | null;           // null when AI suggests a brand-new category
+  suggested_new_category?: string | null; // set when category_name is null
+  type: 'material' | 'non-material';
+  audit_strength: 'high' | 'medium' | 'low';
+  justification: string;
+  audit_tip: string;
+}
+
+// Attachment stored in user's Google Drive
+export interface Attachment {
+  id: string;
+  entry_id: string;
+  gdrive_file_id: string;
+  gdrive_view_url: string;
+  original_filename: string;
+  content_type: string;
+  file_size: number;
+  created_at: string;
+}
+
 // Form types
 export interface HoursEntryFormData {
   date: string;
@@ -97,6 +123,7 @@ export interface HoursEntryFormData {
   category: string;
   property: string;
   description: string;
+  notes?: string;
   type: 'material' | 'non-material';
 }
 

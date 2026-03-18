@@ -4,6 +4,7 @@ from app.routers.properties import router as properties_router
 from app.routers.entries import router as entries_router
 from app.routers.analytics import router as analytics_router
 from app.routers.email import router as email_router
+from app.routers.attachments import router as attachments_router
 
 __all__ = [
     "auth_router",
@@ -12,4 +13,5 @@ __all__ = [
     "entries_router",
     "analytics_router",
     "email_router",
+    "attachments_router",
 ]

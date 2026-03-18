@@ -263,6 +263,7 @@ export const api = {
     property_id: string;
     type: string;
     description: string;
+    notes?: string;
   }) {
     const response = await authFetch('/api/entries', {
       method: 'POST',
@@ -288,6 +289,7 @@ export const api = {
       property_id?: string;
       type?: string;
       description?: string;
+      notes?: string;
     }
   ) {
     const response = await authFetch(`/api/entries/${id}`, {
@@ -314,6 +316,19 @@ export const api = {
       throw new ApiError(response.status, error.detail || 'Failed to delete entry');
     }
   },
+
+  async classifyActivity(description: string) {
+    const response = await authFetch('/api/entries/classify', {
+      method: 'POST',
+      body: JSON.stringify({ description }),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new ApiError(response.status, error.detail || 'Classification failed');
+    }
+    return response.json();
+  },
+
 
   async bulkCreateEntries(
     entries: Array<{

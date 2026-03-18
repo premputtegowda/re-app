@@ -15,20 +15,26 @@ import type { ViewMode } from '@/types';
 export default function Home() {
   const [currentView, setCurrentView] = useState<ViewMode>('dashboard');
   const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
-  const { syncFromBackend } = useStore();
+  const syncFromBackend = useStore((s) => s.syncFromBackend);
 
   // Check authentication on mount
   useEffect(() => {
     checkAuth();
   }, [checkAuth]);
 
-  // Sync data from backend when authenticated
-  const handleLoginSuccess = async () => {
-    try {
-      await syncFromBackend();
-    } catch (error) {
-      console.error('Failed to sync data:', error);
+  // Sync data from backend whenever authenticated (covers both fresh login and page refresh)
+  useEffect(() => {
+    if (isAuthenticated) {
+      syncFromBackend().catch((error) => {
+        console.error('Failed to sync data:', error);
+      });
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
+
+  // Sync data from backend when authenticated (called from LoginPage after Google OAuth)
+  const handleLoginSuccess = async () => {
+    // syncFromBackend is handled by the isAuthenticated effect above
   };
 
   // Show loading spinner while checking auth

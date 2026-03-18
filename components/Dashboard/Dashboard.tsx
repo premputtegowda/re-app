@@ -5,6 +5,7 @@ import { Clock, Calendar, TrendingUp, Activity, PlusCircle } from 'lucide-react'
 import { useStore } from '@/lib/store';
 import { SummaryCard } from './SummaryCard';
 import { CategoryChart, PropertyChart, MonthlyTrendChart, TypeComparisonChart } from './HoursChart';
+import { ExportBundle } from '@/components/Export/ExportBundle';
 import { Card } from '@/components/UI/Card';
 import { Button } from '@/components/UI/Button';
 import { HoursListItem } from '@/components/HoursList/HoursListItem';
@@ -71,6 +72,15 @@ export function Dashboard({ onViewChange }: DashboardProps) {
           </motion.div>
         ))}
       </div>
+
+      {/* Audit Export */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.35 }}
+      >
+        <ExportBundle />
+      </motion.div>
 
       {/* Material vs Non-Material */}
       <motion.div

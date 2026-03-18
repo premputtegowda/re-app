@@ -22,6 +22,7 @@ const transformEntry = (backendEntry: any): HoursEntry => ({
   category: backendEntry.category_id,
   property: backendEntry.property_id,
   description: backendEntry.description,
+  notes: backendEntry.notes ?? undefined,
   type: backendEntry.type === 'non-material' ? 'non-material' : 'material',
   createdAt: backendEntry.created_at,
   updatedAt: backendEntry.updated_at,
@@ -55,7 +56,7 @@ interface AppStore {
   isSynced: boolean;
 
   // Entry actions
-  addEntry: (entry: Omit<HoursEntry, 'id' | 'totalMinutes' | 'createdAt' | 'updatedAt'>) => Promise<void>;
+  addEntry: (entry: Omit<HoursEntry, 'id' | 'totalMinutes' | 'createdAt' | 'updatedAt'>) => Promise<HoursEntry>;
   updateEntry: (entry: HoursEntry) => Promise<void>;
   deleteEntry: (id: string) => Promise<void>;
 
@@ -106,6 +107,7 @@ export const useStore = create<AppStore>()(
             property_id: entry.property,
             type: entry.type,
             description: entry.description,
+            notes: entry.notes,
           });
 
           const newEntry = transformEntry(response);
@@ -114,6 +116,7 @@ export const useStore = create<AppStore>()(
             isLoading: false,
           }));
           toast.success('Hours entry added successfully');
+          return newEntry;
         } catch (error) {
           set({ isLoading: false });
           const message = error instanceof Error ? error.message : 'Failed to add entry';
@@ -133,8 +136,8 @@ export const useStore = create<AppStore>()(
             property_id: entry.property,
             type: entry.type,
             description: entry.description,
+            notes: entry.notes,
           };
-          console.log('Updating entry with:', JSON.stringify(updateData, null, 2));
           const response = await api.updateEntry(entry.id, updateData);
 
           const updatedEntry = transformEntry(response);

@@ -46,8 +46,8 @@ export const validateHoursEntry = (data: HoursEntryFormData): FormValidation => 
   // Validate description (required)
   if (!data.description || data.description.trim() === '') {
     errors.push({ field: 'description', message: 'Description is required' });
-  } else if (data.description.length > 500) {
-    errors.push({ field: 'description', message: 'Description must be 500 characters or less' });
+  } else if (data.description.length > 2000) {
+    errors.push({ field: 'description', message: 'Description must be 2000 characters or less' });
   }
 
   // Validate type

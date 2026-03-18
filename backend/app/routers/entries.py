@@ -2,17 +2,24 @@ from uuid import UUID
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from pydantic import BaseModel
 from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import Settings, get_settings
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import User, Entry, Category, Property
 from app.models.entry import EntryType as ModelEntryType
 from app.schemas import EntryCreate, EntryUpdate, EntryResponse
 from app.schemas.entry import EntryType, EntryFilter
+from app.services.classification import ClassificationResult, get_classifier
 
 router = APIRouter(prefix="/entries", tags=["Entries"])
+
+
+class ClassifyRequest(BaseModel):
+    description: str
 
 
 async def validate_category_and_property(
@@ -47,6 +54,30 @@ async def validate_category_and_property(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Property not found or doesn't belong to user",
         )
+
+
+@router.post("/classify", response_model=ClassificationResult)
+async def classify_activity(
+    data: ClassifyRequest,
+    current_user: User = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+):
+    """Classify an activity description using Gemini AI."""
+    if not settings.gemini_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI classification is not configured",
+        )
+
+    classifier = get_classifier(settings)
+
+    try:
+        return await classifier.classify(data.description)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"AI classification failed: {exc}",
+        ) from exc
 
 
 @router.get("", response_model=List[EntryResponse])
@@ -111,6 +142,7 @@ async def create_entry(
         total_minutes=data.hours * 60 + data.minutes,
         type=ModelEntryType(data.type.value),
         description=data.description,
+        notes=data.notes,
     )
     db.add(entry)
     await db.commit()
@@ -233,6 +265,8 @@ async def update_entry(
         entry.type = ModelEntryType(data.type.value)
     if data.description is not None:
         entry.description = data.description
+    if data.notes is not None:
+        entry.notes = data.notes
 
     # Recalculate total_minutes
     entry.total_minutes = entry.hours * 60 + entry.minutes
