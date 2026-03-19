@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.database import engine
+from app.database import engine, Base
 from app.routers import (
     auth_router,
     categories_router,
@@ -26,7 +26,13 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting up...")
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database tables verified.")
+    except Exception as e:
+        logger.error(f"Database setup failed: {e}")
+
     scheduler = create_scheduler()
     if settings.smtp_enabled:
         scheduler.start()
