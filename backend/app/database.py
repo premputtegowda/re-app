@@ -12,16 +12,10 @@ database_url = settings.database_url.replace(
     "postgres://", "postgresql+asyncpg://", 1
 )
 
-# Determine connection args based on environment
-connect_args = {}
-if "supabase.co" in database_url:
-    connect_args = {"ssl": "require"}
-
 engine = create_async_engine(
     database_url,
     echo=settings.debug,
     future=True,
-    connect_args=connect_args,
 )
 
 async_session_maker = async_sessionmaker(
