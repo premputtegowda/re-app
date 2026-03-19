@@ -14,7 +14,12 @@ from app.config import get_settings
 settings = get_settings()
 config = context.config
 
-config.set_main_option("sqlalchemy.url", settings.database_url)
+database_url = settings.database_url.replace(
+    "postgresql://", "postgresql+asyncpg://", 1
+).replace(
+    "postgres://", "postgresql+asyncpg://", 1
+)
+config.set_main_option("sqlalchemy.url", database_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
