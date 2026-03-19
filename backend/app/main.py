@@ -3,10 +3,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
 
 from app.config import get_settings
-from app.database import engine, Base
+from app.database import engine
 from app.routers import (
     auth_router,
     categories_router,
@@ -25,45 +24,9 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
-# Track database connection status
-db_connected = False
-db_error = None
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global db_connected, db_error
-    # Startup: Try to create tables if they don't exist
-    # In production, use Alembic migrations instead
-    try:
-        logger.info("Attempting database connection...")
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            # Add columns that didn't exist when the tables were first created
-            await conn.execute(text(
-                "ALTER TABLE entries ADD COLUMN IF NOT EXISTS notes TEXT"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users ADD COLUMN IF NOT EXISTS has_complimentary_access BOOLEAN DEFAULT FALSE"
-            ))
-            await conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS access_requests (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    email VARCHAR(255) NOT NULL,
-                    name VARCHAR(100) NOT NULL,
-                    picture_url VARCHAR(500),
-                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
-                    requested_at TIMESTAMP DEFAULT NOW(),
-                    reviewed_at TIMESTAMP
-                )
-            """))
-        db_connected = True
-        logger.info("Database connection successful!")
-    except Exception as e:
-        db_error = str(e)
-        logger.error(f"Database connection failed: {e}")
-        # Don't fail startup - let the app run for debugging
-
+    logger.info("Starting up...")
     scheduler = create_scheduler()
     if settings.smtp_enabled:
         scheduler.start()

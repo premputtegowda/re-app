@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 
 from app.database import Base
-from app.models import User, Category, Property, Entry, RefreshToken
+from app.models import User, Category, Property, Entry, RefreshToken, Attachment, Invitation, AccessRequest
 from app.config import get_settings
 
 settings = get_settings()
