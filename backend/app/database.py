@@ -14,7 +14,7 @@ database_url = settings.database_url.replace(
 
 # Determine connection args based on environment
 connect_args = {}
-if "localhost" not in database_url:
+if "supabase.co" in database_url:
     connect_args = {"ssl": "require"}
 
 engine = create_async_engine(
