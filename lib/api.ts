@@ -417,7 +417,7 @@ export const api = {
     return response.json();
   },
 
-  async adminPatchUser(userId: string, patch: { is_admin?: boolean }) {
+  async adminPatchUser(userId: string, patch: { is_admin?: boolean; has_complimentary_access?: boolean }) {
     const response = await authFetch(`/api/admin/users/${userId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
