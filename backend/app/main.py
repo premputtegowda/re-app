@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -6,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.database import engine, Base
+from app.database import engine
 from app.routers import (
     auth_router,
     categories_router,
@@ -27,30 +26,11 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    scheduler = None
-    try:
-        try:
-            async with engine.begin() as conn:
-                await asyncio.wait_for(
-                    conn.run_sync(Base.metadata.create_all),
-                    timeout=30.0
-                )
-            logger.info("Database tables verified.")
-        except asyncio.TimeoutError:
-            logger.error("Database setup timed out after 30s")
-            raise
-        except Exception as e:
-            logger.error(f"Database setup failed: {e}")
-            raise
-
-        scheduler = create_scheduler()
-        if settings.smtp_enabled:
-            scheduler.start()
-            logger.info("APScheduler started")
-
-    except Exception as e:
-        logger.error(f"Startup failed: {e}")
-        raise
+    # Tables are managed by Alembic migrations — no create_all here.
+    scheduler = create_scheduler()
+    if settings.smtp_enabled:
+        scheduler.start()
+        logger.info("APScheduler started")
 
     yield
 
