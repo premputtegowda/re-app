@@ -6,6 +6,7 @@ Create Date: 2026-03-19
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 from sqlalchemy.dialects import postgresql
 
 revision = "0001"
@@ -15,7 +16,17 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute(sa.text("CREATE TYPE entry_type AS ENUM ('material', 'non-material')"))
+    op.execute(sa.text("""
+        DO $$ BEGIN
+            CREATE TYPE entry_type AS ENUM ('material', 'non-material');
+        EXCEPTION WHEN duplicate_object THEN null;
+        END $$;
+    """))
+
+    existing = inspect(op.get_bind()).get_table_names()
+
+    if "users" in existing:
+        return  # schema already exists, nothing to do
 
     op.create_table(
         "users",
