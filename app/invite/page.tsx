@@ -1,12 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Gift, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import GoogleLoginButton from '@/components/Auth/GoogleLoginButton';
 import { useAuthStore } from '@/lib/authStore';
 
-export default function InvitePage() {
+function InviteContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const token = searchParams.get('token');
@@ -14,13 +14,11 @@ export default function InvitePage() {
   const { checkAuth, isAuthenticated } = useAuthStore();
 
   useEffect(() => {
-    // Resolve auth state so GoogleLoginButton doesn't stay in loading limbo
     checkAuth().finally(() => {
       setStatus(token ? 'valid' : 'invalid');
     });
   }, [token, checkAuth]);
 
-  // Already logged in — send straight to the app
   useEffect(() => {
     if (isAuthenticated) router.push('/');
   }, [isAuthenticated, router]);
@@ -85,5 +83,19 @@ export default function InvitePage() {
         </p>
       </div>
     </div>
+  );
+}
+
+const Spinner = () => (
+  <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900">
+    <Loader2 size={28} className="animate-spin text-primary-500" />
+  </div>
+);
+
+export default function InvitePage() {
+  return (
+    <Suspense fallback={<Spinner />}>
+      <InviteContent />
+    </Suspense>
   );
 }
