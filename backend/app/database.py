@@ -5,18 +5,20 @@ from app.config import get_settings
 
 settings = get_settings()
 
+# Ensure the URL uses the asyncpg driver (Railway provides plain postgresql://)
+database_url = settings.database_url.replace(
+    "postgresql://", "postgresql+asyncpg://", 1
+).replace(
+    "postgres://", "postgresql+asyncpg://", 1
+)
+
 # Determine connection args based on environment
 connect_args = {}
-if "localhost" not in settings.database_url:
-    # For Supabase/production: use simple SSL require mode
-    # Also disable prepared statement cache for pooler compatibility
-    connect_args = {
-        "ssl": "require",
-        "prepared_statement_cache_size": 0,
-    }
+if "localhost" not in database_url:
+    connect_args = {"ssl": "require"}
 
 engine = create_async_engine(
-    settings.database_url,
+    database_url,
     echo=settings.debug,
     future=True,
     connect_args=connect_args,
