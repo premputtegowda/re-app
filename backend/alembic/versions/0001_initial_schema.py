@@ -6,7 +6,6 @@ Create Date: 2026-03-19
 """
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy import inspect
 from sqlalchemy.dialects import postgresql
 
 revision = "0001"
@@ -77,7 +76,7 @@ def upgrade() -> None:
         sa.Column("hours", sa.Integer(), nullable=False),
         sa.Column("minutes", sa.Integer(), nullable=False),
         sa.Column("total_minutes", sa.Integer(), nullable=False),
-        sa.Column("type", sa.Enum("material", "non-material", name="entry_type", create_type=False), nullable=False),
+        sa.Column("type", postgresql.ENUM("material", "non-material", name="entry_type", create_type=False), nullable=False),
         sa.Column("description", sa.Text(), nullable=False),
         sa.Column("notes", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
