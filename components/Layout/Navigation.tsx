@@ -1,7 +1,8 @@
 'use client';
 
-import { LayoutDashboard, List, PlusCircle, Settings, Folder, Tag } from 'lucide-react';
+import { LayoutDashboard, List, PlusCircle, Settings, Folder, Tag, ShieldCheck } from 'lucide-react';
 import type { ViewMode } from '@/types';
+import { useAuthStore } from '@/lib/authStore';
 
 interface NavigationProps {
   currentView: ViewMode;
@@ -9,11 +10,14 @@ interface NavigationProps {
 }
 
 export function Navigation({ currentView, onViewChange }: NavigationProps) {
+  const isAdmin = useAuthStore((s) => s.user?.is_admin ?? false);
+
   const navItems = [
     { id: 'dashboard' as ViewMode, label: 'Home', icon: LayoutDashboard },
     { id: 'entry' as ViewMode, label: 'Add', icon: PlusCircle },
     { id: 'list' as ViewMode, label: 'List', icon: List },
     { id: 'settings' as ViewMode, label: 'Settings', icon: Settings },
+    ...(isAdmin ? [{ id: 'admin' as ViewMode, label: 'Admin', icon: ShieldCheck }] : []),
   ];
 
   return (

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { FileX } from 'lucide-react';
 import { useStore } from '@/lib/store';
@@ -13,7 +13,15 @@ export function HoursList() {
   const entries = useStore((s) => s.entries);
   const filter = useStore((s) => s.filter);
   const setFilter = useStore((s) => s.setFilter);
+  const syncFromBackend = useStore((s) => s.syncFromBackend);
   const [localFilter, setLocalFilter] = useState<HoursFilter>(filter);
+
+  // Refresh entries from backend whenever this view is opened
+  useEffect(() => {
+    syncFromBackend().catch(console.error);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const sortConfig: SortConfig = {
     field: 'date',
     order: 'desc',

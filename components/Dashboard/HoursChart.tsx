@@ -24,11 +24,14 @@ interface CategoryChartProps {
 }
 
 export function CategoryChart({ data }: CategoryChartProps) {
-  const chartData = data.slice(0, 5).map((item) => ({
+  const chartData = data.map((item) => ({
     name: item.categoryName,
     hours: item.totalHours,
     color: item.color,
   }));
+
+  const barHeight = 36;
+  const chartHeight = Math.max(200, chartData.length * barHeight + 20);
 
   return (
     <Card>
@@ -36,13 +39,13 @@ export function CategoryChart({ data }: CategoryChartProps) {
       {chartData.length === 0 ? (
         <p className="text-center text-slate-500 dark:text-slate-400 py-8">No data available</p>
       ) : (
-        <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-            <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-            <YAxis tick={{ fontSize: 12 }} />
-            <Tooltip />
-            <Bar dataKey="hours" radius={[8, 8, 0, 0]}>
+        <ResponsiveContainer width="100%" height={chartHeight}>
+          <BarChart data={chartData} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
+            <XAxis type="number" tick={{ fontSize: 12 }} tickFormatter={(v) => `${v}h`} />
+            <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} width={130} />
+            <Tooltip formatter={(v: number) => [`${v}h`, 'Hours']} />
+            <Bar dataKey="hours" radius={[0, 8, 8, 0]} barSize={22}>
               {chartData.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={entry.color} />
               ))}
@@ -59,11 +62,13 @@ interface PropertyChartProps {
 }
 
 export function PropertyChart({ data }: PropertyChartProps) {
-  const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#14B8A6'];
+  const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#14B8A6', '#F97316', '#06B6D4'];
 
+  const total = data.reduce((sum, item) => sum + item.totalHours, 0);
   const chartData = data.map((item, index) => ({
     name: item.propertyName,
     value: item.totalHours,
+    percent: total > 0 ? (item.totalHours / total) * 100 : 0,
     color: COLORS[index % COLORS.length],
   }));
 
@@ -73,25 +78,43 @@ export function PropertyChart({ data }: PropertyChartProps) {
       {chartData.length === 0 ? (
         <p className="text-center text-slate-500 dark:text-slate-400 py-8">No data available</p>
       ) : (
-        <ResponsiveContainer width="100%" height={300}>
-          <PieChart>
-            <Pie
-              data={chartData}
-              cx="50%"
-              cy="50%"
-              labelLine={false}
-              label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-              outerRadius={80}
-              fill="#8884d8"
-              dataKey="value"
-            >
-              {chartData.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={entry.color} />
-              ))}
-            </Pie>
-            <Tooltip />
-          </PieChart>
-        </ResponsiveContainer>
+        <div className="flex flex-col gap-4">
+          <ResponsiveContainer width="100%" height={220}>
+            <PieChart>
+              <Pie
+                data={chartData}
+                cx="50%"
+                cy="50%"
+                innerRadius={55}
+                outerRadius={90}
+                dataKey="value"
+                paddingAngle={2}
+              >
+                {chartData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.color} />
+                ))}
+              </Pie>
+              <Tooltip formatter={(v: number) => [`${v}h`, 'Hours']} />
+            </PieChart>
+          </ResponsiveContainer>
+
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 max-h-40 overflow-y-auto pr-1">
+            {chartData.map((entry) => (
+              <div key={entry.name} className="flex items-center gap-2 min-w-0">
+                <span
+                  className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: entry.color }}
+                />
+                <span className="text-xs text-slate-600 dark:text-slate-400 truncate flex-1 min-w-0" title={entry.name}>
+                  {entry.name}
+                </span>
+                <span className="text-xs font-medium text-slate-700 dark:text-slate-300 flex-shrink-0">
+                  {entry.percent.toFixed(0)}%
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
     </Card>
   );

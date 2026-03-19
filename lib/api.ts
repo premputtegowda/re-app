@@ -263,6 +263,7 @@ export const api = {
     property_id: string;
     type: string;
     description: string;
+    notes?: string;
   }) {
     const response = await authFetch('/api/entries', {
       method: 'POST',
@@ -288,6 +289,7 @@ export const api = {
       property_id?: string;
       type?: string;
       description?: string;
+      notes?: string;
     }
   ) {
     const response = await authFetch(`/api/entries/${id}`, {
@@ -305,6 +307,38 @@ export const api = {
     return response.json();
   },
 
+  // Attachments
+  async createAttachment(
+    entryId: string,
+    data: {
+      file_ref: string;
+      attachment_url: string;
+      original_filename: string;
+      content_type: string;
+      file_size: number;
+    }
+  ) {
+    const response = await authFetch(`/api/entries/${entryId}/attachments`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new ApiError(response.status, error.detail || 'Failed to save attachment');
+    }
+    return response.json();
+  },
+
+  async deleteAttachment(entryId: string, attachmentId: string) {
+    const response = await authFetch(`/api/entries/${entryId}/attachments/${attachmentId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new ApiError(response.status, error.detail || 'Failed to delete attachment');
+    }
+  },
+
   async deleteEntry(id: string) {
     const response = await authFetch(`/api/entries/${id}`, {
       method: 'DELETE',
@@ -314,6 +348,19 @@ export const api = {
       throw new ApiError(response.status, error.detail || 'Failed to delete entry');
     }
   },
+
+  async classifyActivity(description: string) {
+    const response = await authFetch('/api/entries/classify', {
+      method: 'POST',
+      body: JSON.stringify({ description }),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new ApiError(response.status, error.detail || 'Classification failed');
+    }
+    return response.json();
+  },
+
 
   async bulkCreateEntries(
     entries: Array<{
@@ -360,5 +407,84 @@ export const api = {
     const response = await authFetch('/api/analytics/monthly');
     if (!response.ok) throw new ApiError(response.status, 'Failed to get monthly analytics');
     return response.json();
+  },
+
+  // ── Admin ──────────────────────────────────────────────────────────────
+
+  async adminListUsers() {
+    const response = await authFetch('/api/admin/users');
+    if (!response.ok) throw new ApiError(response.status, 'Failed to fetch users');
+    return response.json();
+  },
+
+  async adminPatchUser(userId: string, patch: { is_admin?: boolean }) {
+    const response = await authFetch(`/api/admin/users/${userId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new ApiError(response.status, error.detail || 'Failed to update user');
+    }
+    return response.json();
+  },
+
+  async adminDeleteUser(userId: string) {
+    const response = await authFetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new ApiError(response.status, error.detail || 'Failed to delete user');
+    }
+  },
+
+  async adminListInvitations() {
+    const response = await authFetch('/api/admin/invitations');
+    if (!response.ok) throw new ApiError(response.status, 'Failed to fetch invitations');
+    return response.json();
+  },
+
+  async adminCreateInvitation(email: string) {
+    const response = await authFetch('/api/admin/invitations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new ApiError(response.status, error.detail || 'Failed to create invitation');
+    }
+    return response.json();
+  },
+
+  async adminRevokeInvitation(invitationId: string) {
+    const response = await authFetch(`/api/admin/invitations/${invitationId}`, { method: 'DELETE' });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new ApiError(response.status, error.detail || 'Failed to revoke invitation');
+    }
+  },
+
+  async adminListAccessRequests() {
+    const response = await authFetch('/api/admin/access-requests');
+    if (!response.ok) throw new ApiError(response.status, 'Failed to fetch access requests');
+    return response.json();
+  },
+
+  async adminApproveAccessRequest(requestId: string) {
+    const response = await authFetch(`/api/admin/access-requests/${requestId}/approve`, { method: 'POST' });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new ApiError(response.status, error.detail || 'Failed to approve request');
+    }
+    return response.json();
+  },
+
+  async adminDeclineAccessRequest(requestId: string) {
+    const response = await authFetch(`/api/admin/access-requests/${requestId}/decline`, { method: 'POST' });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new ApiError(response.status, error.detail || 'Failed to decline request');
+    }
   },
 };

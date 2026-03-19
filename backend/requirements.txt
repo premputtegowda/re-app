@@ -32,3 +32,7 @@ requests==2.32.5
 # Email and Scheduling
 APScheduler==3.10.4
 aiosmtplib==3.0.1
+
+# AI Classification
+google-generativeai==0.8.3
+# cache-bust: 2026-02-19

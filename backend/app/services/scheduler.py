@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.database import async_session_maker
 from app.models import User, Entry
 from app.services.email import EmailSender, get_smtp_sender
-from app.utils.csv_export import EntryRow, entry_to_row, generate_ytd_csv, get_ytd_filename
+from app.utils.csv_export import EntryRow, entry_to_row, generate_audit_csv, get_audit_csv_filename
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,11 @@ async def send_weekly_reports(sender: Optional[EmailSender] = None) -> dict:
             try:
                 entries_result = await db.execute(
                     select(Entry)
-                    .options(selectinload(Entry.category), selectinload(Entry.property))
+                    .options(
+                        selectinload(Entry.category),
+                        selectinload(Entry.property),
+                        selectinload(Entry.attachments),
+                    )
                     .where(
                         Entry.user_id == user.id,
                         Entry.date >= year_start,
@@ -60,15 +64,17 @@ async def send_weekly_reports(sender: Optional[EmailSender] = None) -> dict:
                     skipped += 1
                     continue
 
-                rows: list[EntryRow] = [entry_to_row(e) for e in entries]
-                csv_bytes = generate_ytd_csv(rows, year)
-                filename = get_ytd_filename(year)
+                rows: list[EntryRow] = [entry_to_row(e, idx + 1) for idx, e in enumerate(entries)]
+                csv_bytes = generate_audit_csv(rows, year)
+                filename = get_audit_csv_filename(year)
 
-                subject = f"Your REPS Tracker YTD Report — {today.strftime('%B %d, %Y')}"
+                subject = f"Your REPS Audit Log — {today.strftime('%B %d, %Y')}"
                 body = (
                     f"Hi {user.name},\n\n"
-                    f"Attached is your year-to-date hours report for {year} "
+                    f"Attached is your REPS Audit Log for {year} "
                     f"({year_start.strftime('%b %d')} – {today.strftime('%b %d, %Y')}).\n\n"
+                    f"The CSV contains your full activity log ({len(rows)} entries) "
+                    "including attachment Drive links.\n\n"
                     "Keep up the great work!\n\n"
                     "— REPS Tracker"
                 )

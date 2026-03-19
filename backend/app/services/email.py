@@ -72,6 +72,24 @@ class SmtpEmailSender:
         )
 
 
+    async def send_plain(self, to_email: str, subject: str, body: str) -> None:
+        """Send a plain-text email with no attachment."""
+        message = MIMEMultipart()
+        message["From"] = f"{self.from_name} <{self.from_email}>"
+        message["To"] = to_email
+        message["Subject"] = subject
+        message.attach(MIMEText(body, "plain"))
+
+        await aiosmtplib.send(
+            message,
+            hostname=self.host,
+            port=self.port,
+            username=self.username,
+            password=self.password,
+            start_tls=True,
+        )
+
+
 def get_smtp_sender() -> SmtpEmailSender:
     """Factory that reads settings once and returns a configured SmtpEmailSender."""
     settings = get_settings()

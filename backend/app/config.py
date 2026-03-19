@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     # CORS
     frontend_url: str = "http://localhost:3000"
 
+    # Gemini AI
+    gemini_api_key: str = ""
+
     # Email (SMTP)
     smtp_enabled: bool = False
     smtp_host: str = "smtp.gmail.com"

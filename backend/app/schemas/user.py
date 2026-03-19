@@ -22,6 +22,7 @@ class UserResponse(BaseModel):
     name: str
     picture_url: Optional[str]
     is_admin: bool
+    has_complimentary_access: bool
     created_at: datetime
     updated_at: datetime
 
