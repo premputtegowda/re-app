@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -26,22 +27,35 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    scheduler = None
     try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        logger.info("Database tables verified.")
-    except Exception as e:
-        logger.error(f"Database setup failed: {e}")
+        try:
+            async with engine.begin() as conn:
+                await asyncio.wait_for(
+                    conn.run_sync(Base.metadata.create_all),
+                    timeout=30.0
+                )
+            logger.info("Database tables verified.")
+        except asyncio.TimeoutError:
+            logger.error("Database setup timed out after 30s")
+            raise
+        except Exception as e:
+            logger.error(f"Database setup failed: {e}")
+            raise
 
-    scheduler = create_scheduler()
-    if settings.smtp_enabled:
-        scheduler.start()
-        logger.info("APScheduler started")
+        scheduler = create_scheduler()
+        if settings.smtp_enabled:
+            scheduler.start()
+            logger.info("APScheduler started")
+
+    except Exception as e:
+        logger.error(f"Startup failed: {e}")
+        raise
 
     yield
 
     # Shutdown
-    if scheduler.running:
+    if scheduler and scheduler.running:
         scheduler.shutdown(wait=False)
     try:
         await engine.dispose()
