@@ -28,7 +28,7 @@ export function SummaryCard({
       <div className="flex items-start justify-between">
         <div className="flex-1">
           <p className="text-sm font-medium text-slate-600 dark:text-slate-400 mb-1">{title}</p>
-          <p className="text-3xl font-bold text-slate-900 dark:text-white mb-1">{value}</p>
+          <p className="text-3xl font-bold text-slate-900 dark:text-white mb-1 truncate" title={String(value)}>{value}</p>
           {subtitle && <p className="text-sm text-slate-500 dark:text-slate-400">{subtitle}</p>}
           {trend && (
             <div className="mt-2">

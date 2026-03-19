@@ -427,20 +427,20 @@ export function HoursListItem({ entry }: HoursListItemProps) {
             </div>
             <div className="flex flex-wrap items-center gap-3">
               {displayCategory && (
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 min-w-0">
                   <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: displayCategory.color }} />
-                  <span className="text-sm text-slate-700 dark:text-slate-300">{displayCategory.name}</span>
+                  <span className="text-sm text-slate-700 dark:text-slate-300 truncate">{displayCategory.name}</span>
                 </div>
               )}
-              <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
-                <Home size={14} />
-                <span className="text-sm">{displayProperty?.name}</span>
+              <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400 min-w-0">
+                <Home size={14} className="shrink-0" />
+                <span className="text-sm truncate">{displayProperty?.name}</span>
               </div>
             </div>
             {entry.description && (
               <div className="flex items-start gap-1.5">
                 <FileText size={14} className="text-slate-400 mt-0.5 shrink-0" />
-                <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">{entry.description}</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed break-words min-w-0">{entry.description}</p>
               </div>
             )}
             {(entry.attachments ?? []).filter((a) => !deletedAttachmentIds.has(a.id)).length > 0 && (

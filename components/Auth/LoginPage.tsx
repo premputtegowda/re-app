@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Clock, TrendingUp, Shield } from 'lucide-react';
+import { Clock, TrendingUp, Shield, CheckCircle2, Lock, Home, BarChart2, Calculator } from 'lucide-react';
 import GoogleLoginButton from './GoogleLoginButton';
 import { useAuthStore } from '@/lib/authStore';
 
@@ -11,22 +11,26 @@ interface LoginPageProps {
 
 export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
   const { error, setError } = useAuthStore();
+  const requestSubmitted = error === 'ACCESS_REQUEST_SUBMITTED';
 
   const features = [
     {
       icon: Clock,
-      title: 'Track Your Hours',
-      description: 'Log material and non-material participation hours easily',
+      title: 'REPS Tracker',
+      description: 'Track and document your Real Estate Professional Status hours with AI-powered classification and audit-ready reports.',
+      available: true,
     },
     {
-      icon: TrendingUp,
-      title: 'Analytics Dashboard',
-      description: 'Visualize your progress with detailed charts and summaries',
+      icon: BarChart2,
+      title: 'Market Research',
+      description: 'Track unemployment, population growth, rent trends, vacancy rates, and supply vs. demand to identify the strongest markets.',
+      available: false,
     },
     {
-      icon: Shield,
-      title: 'REPS Compliance',
-      description: 'Stay on track with your Real Estate Professional Status',
+      icon: Calculator,
+      title: 'ROI Calculator',
+      description: 'Model cash flow, cap rates, and returns across your portfolio to evaluate deals with confidence.',
+      available: false,
     },
   ];
 
@@ -36,7 +40,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
-        className="w-full max-w-md"
+        className="w-full max-w-lg"
       >
         {/* Logo and Title */}
         <div className="text-center mb-8">
@@ -46,13 +50,13 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
             transition={{ delay: 0.2, type: 'spring', stiffness: 200 }}
             className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4"
           >
-            <Clock className="w-8 h-8 text-white" />
+            <Home className="w-8 h-8 text-white" />
           </motion.div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-            REPS Tracker
+            My Real Estate App
           </h1>
           <p className="text-gray-600 dark:text-gray-400 mt-2">
-            Track your Real Estate Professional Status hours
+            Your all-in-one platform for smarter real estate investing
           </p>
         </div>
 
@@ -63,32 +67,54 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
           transition={{ delay: 0.3 }}
           className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8"
         >
-          <h2 className="text-xl font-semibold text-center text-gray-900 dark:text-white mb-6">
-            Sign in to continue
-          </h2>
-
-          {error && (
+          {requestSubmitted ? (
             <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="text-center space-y-3 py-2"
             >
-              <p className="text-sm text-red-600 dark:text-red-400 text-center">
-                {error}
+              <div className="w-12 h-12 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center mx-auto">
+                <CheckCircle2 className="text-emerald-600 dark:text-emerald-400" size={24} />
+              </div>
+              <h3 className="font-semibold text-gray-900 dark:text-white">Request submitted!</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                We'll review your request and send you an invite link when approved.
               </p>
             </motion.div>
+          ) : (
+            <>
+              <div className="flex items-center justify-center gap-2 mb-4">
+                <Lock size={14} className="text-gray-400" />
+                <p className="text-sm text-gray-500 dark:text-gray-400 text-center">
+                  Access is by invitation only. Sign in with Google to request access.
+                </p>
+              </div>
+
+              {error && !requestSubmitted && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg"
+                >
+                  <p className="text-sm text-red-600 dark:text-red-400 text-center">{error}</p>
+                </motion.div>
+              )}
+
+              <div className="flex justify-center">
+                <GoogleLoginButton
+                  onSuccess={onLoginSuccess}
+                  onError={(err) => setError(err)}
+                />
+              </div>
+
+              <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-6">
+                By signing in, you agree to our{' '}
+                <a href="/terms" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-700 dark:hover:text-gray-300">Terms of Service</a>
+                {' '}and{' '}
+                <a href="/privacy" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-700 dark:hover:text-gray-300">Privacy Policy</a>
+              </p>
+            </>
           )}
-
-          <div className="flex justify-center">
-            <GoogleLoginButton
-              onSuccess={onLoginSuccess}
-              onError={(err) => setError(err)}
-            />
-          </div>
-
-          <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-6">
-            By signing in, you agree to our Terms of Service and Privacy Policy
-          </p>
         </motion.div>
 
         {/* Features */}
@@ -99,16 +125,43 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: 0.4 + index * 0.1 }}
-              className="flex items-center gap-4 bg-white/50 dark:bg-gray-800/50 backdrop-blur rounded-xl p-4"
+              className={`flex items-center gap-4 rounded-xl p-4 ${
+                feature.available
+                  ? 'bg-white/70 dark:bg-gray-800/70'
+                  : 'bg-white/40 dark:bg-gray-800/40'
+              } backdrop-blur`}
             >
-              <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center flex-shrink-0">
-                <feature.icon className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                feature.available
+                  ? 'bg-blue-100 dark:bg-blue-900/30'
+                  : 'bg-gray-100 dark:bg-gray-700/50'
+              }`}>
+                <feature.icon className={`w-5 h-5 ${
+                  feature.available
+                    ? 'text-blue-600 dark:text-blue-400'
+                    : 'text-gray-400 dark:text-gray-500'
+                }`} />
               </div>
-              <div>
-                <h3 className="font-medium text-gray-900 dark:text-white">
-                  {feature.title}
-                </h3>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className={`font-medium ${
+                    feature.available
+                      ? 'text-gray-900 dark:text-white'
+                      : 'text-gray-400 dark:text-gray-500'
+                  }`}>
+                    {feature.title}
+                  </h3>
+                  {!feature.available && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 font-medium">
+                      Coming soon
+                    </span>
+                  )}
+                </div>
+                <p className={`text-sm mt-0.5 ${
+                  feature.available
+                    ? 'text-gray-600 dark:text-gray-400'
+                    : 'text-gray-400 dark:text-gray-500'
+                }`}>
                   {feature.description}
                 </p>
               </div>

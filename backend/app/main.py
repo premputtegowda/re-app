@@ -15,6 +15,7 @@ from app.routers import (
     analytics_router,
     email_router,
     attachments_router,
+    admin_router,
 )
 from app.services.scheduler import create_scheduler
 
@@ -42,6 +43,20 @@ async def lifespan(app: FastAPI):
             await conn.execute(text(
                 "ALTER TABLE entries ADD COLUMN IF NOT EXISTS notes TEXT"
             ))
+            await conn.execute(text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS has_complimentary_access BOOLEAN DEFAULT FALSE"
+            ))
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS access_requests (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    email VARCHAR(255) NOT NULL,
+                    name VARCHAR(100) NOT NULL,
+                    picture_url VARCHAR(500),
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    requested_at TIMESTAMP DEFAULT NOW(),
+                    reviewed_at TIMESTAMP
+                )
+            """))
         db_connected = True
         logger.info("Database connection successful!")
     except Exception as e:
@@ -89,6 +104,7 @@ app.include_router(entries_router, prefix="/api")
 app.include_router(analytics_router, prefix="/api")
 app.include_router(email_router, prefix="/api")
 app.include_router(attachments_router, prefix="/api")
+app.include_router(admin_router, prefix="/api")
 
 
 @app.get("/")

@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.database import async_session_maker
 from app.models import User, Entry
 from app.services.email import EmailSender, get_smtp_sender
-from app.utils.csv_export import EntryRow, entry_to_row, generate_audit_bundle, get_audit_bundle_filename
+from app.utils.csv_export import EntryRow, entry_to_row, generate_audit_csv, get_audit_csv_filename
 
 logger = logging.getLogger(__name__)
 
@@ -65,16 +65,16 @@ async def send_weekly_reports(sender: Optional[EmailSender] = None) -> dict:
                     continue
 
                 rows: list[EntryRow] = [entry_to_row(e, idx + 1) for idx, e in enumerate(entries)]
-                bundle_bytes = generate_audit_bundle(rows, year)
-                filename = get_audit_bundle_filename(year)
+                csv_bytes = generate_audit_csv(rows, year)
+                filename = get_audit_csv_filename(year)
 
-                subject = f"Your REPS Audit Bundle — {today.strftime('%B %d, %Y')}"
+                subject = f"Your REPS Audit Log — {today.strftime('%B %d, %Y')}"
                 body = (
                     f"Hi {user.name},\n\n"
-                    f"Attached is your REPS Audit Bundle for {year} "
+                    f"Attached is your REPS Audit Log for {year} "
                     f"({year_start.strftime('%b %d')} – {today.strftime('%b %d, %Y')}).\n\n"
-                    f"The ZIP contains your full activity log ({len(rows)} entries) "
-                    "along with an attachments folder and README.\n\n"
+                    f"The CSV contains your full activity log ({len(rows)} entries) "
+                    "including attachment Drive links.\n\n"
                     "Keep up the great work!\n\n"
                     "— REPS Tracker"
                 )
@@ -83,7 +83,7 @@ async def send_weekly_reports(sender: Optional[EmailSender] = None) -> dict:
                     to_email=user.email,
                     subject=subject,
                     body=body,
-                    attachment_bytes=bundle_bytes,
+                    attachment_bytes=csv_bytes,
                     attachment_filename=filename,
                 )
                 logger.info("Sent YTD report to %s (%d entries).", user.email, len(entries))

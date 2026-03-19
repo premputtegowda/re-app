@@ -15,20 +15,13 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-import io
-import zipfile
-
 from app.utils.csv_export import (
-    ATTACHMENT_MANIFEST_HEADERS,
     AUDIT_CSV_HEADERS,
     CSV_HEADERS,
-    AttachmentRecord,
     EntryRow,
-    generate_attachment_manifest,
-    generate_audit_bundle,
     generate_audit_csv,
     generate_ytd_csv,
-    get_audit_bundle_filename,
+    get_audit_csv_filename,
     get_ytd_filename,
 )
 
@@ -130,79 +123,33 @@ def test_generate_audit_csv_single_row():
     assert data[4] == "material"   # Type
     assert data[5] == "2"          # Hours
     assert data[6] == "30"         # Minutes
-    assert data[7] == "2.50"       # Total Hours
-    assert data[8] == "Routine inspection"  # Description
-    assert data[9] == ""           # Notes / Evidence
+    assert data[7] == "150"        # Total Minutes
+    assert data[8] == "2.50"       # Total Hours
+    assert data[9] == "Routine inspection"  # Description
+    assert data[10] == ""          # Notes / Evidence
+    assert data[11] == ""          # Attachment Links
 
 
 def test_generate_audit_csv_notes():
     row = _make_row(notes="Receipt #123")
     rows = _parse_csv(generate_audit_csv([row], year=2026))
-    assert rows[1][9] == "Receipt #123"
+    assert rows[1][10] == "Receipt #123"
 
 
-def test_generate_audit_bundle_is_valid_zip():
+def test_generate_audit_csv_attachment_links():
     row = _make_row()
-    bundle = generate_audit_bundle([row], year=2026)
-    assert zipfile.is_zipfile(io.BytesIO(bundle))
+    row.attachment_urls = [
+        "https://drive.google.com/file/d/abc/view",
+        "https://drive.google.com/file/d/def/view",
+    ]
+    rows = _parse_csv(generate_audit_csv([row], year=2026))
+    links = rows[1][11]
+    assert "https://drive.google.com/file/d/abc/view" in links
+    assert "https://drive.google.com/file/d/def/view" in links
 
 
-def test_generate_audit_bundle_contains_expected_files():
-    row = _make_row()
-    bundle = generate_audit_bundle([row], year=2026)
-    with zipfile.ZipFile(io.BytesIO(bundle)) as zf:
-        names = zf.namelist()
-    assert "REPS_Audit_Log_2026.csv" in names
-    assert "REPS_Attachments_2026.csv" in names
-    assert "README.txt" in names
-
-
-def test_generate_audit_bundle_csv_has_entry():
-    row = _make_row()
-    bundle = generate_audit_bundle([row], year=2026)
-    with zipfile.ZipFile(io.BytesIO(bundle)) as zf:
-        csv_bytes = zf.read("REPS_Audit_Log_2026.csv")
-    rows = _parse_csv(csv_bytes)
-    assert rows[0] == AUDIT_CSV_HEADERS
-    assert rows[1][8] == "Routine inspection"
-
-
-def test_get_audit_bundle_filename():
-    assert get_audit_bundle_filename(2026) == "REPS_Audit_Bundle_2026.zip"
-
-
-def _make_attachment(entry_num="001") -> AttachmentRecord:
-    return AttachmentRecord(
-        entry_num=entry_num,
-        entry_date=date(2026, 1, 15),
-        filename="receipt.pdf",
-        content_type="application/pdf",
-        file_size=12345,
-        attachment_url="https://drive.google.com/file/d/abc123/view",
-    )
-
-
-def test_generate_attachment_manifest_headers():
-    rows = _parse_csv(generate_attachment_manifest([]))
-    assert rows[0] == ATTACHMENT_MANIFEST_HEADERS
-
-
-def test_generate_attachment_manifest_empty():
-    row = _make_row()
-    rows = _parse_csv(generate_attachment_manifest([row]))
-    assert len(rows) == 1  # header only
-
-
-def test_generate_attachment_manifest_with_attachment():
-    att = _make_attachment()
-    row = _make_row()
-    row.attachments = [att]
-    rows = _parse_csv(generate_attachment_manifest([row]))
-    assert len(rows) == 2
-    data = rows[1]
-    assert data[0] == "001"
-    assert data[2] == "receipt.pdf"
-    assert data[5] == "https://drive.google.com/file/d/abc123/view"
+def test_get_audit_csv_filename():
+    assert get_audit_csv_filename(2026) == "REPS_Audit_Log_2026.csv"
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +238,7 @@ async def test_send_weekly_reports_sends_to_user_with_entries():
     mock_sender.send.assert_awaited_once()
     call_kwargs = mock_sender.send.call_args.kwargs
     assert call_kwargs["to_email"] == "user@example.com"
-    assert call_kwargs["attachment_filename"].startswith("REPS_Audit_Bundle_")
+    assert call_kwargs["attachment_filename"].startswith("REPS_Audit_Log_")
     assert result["sent"] == 1
     assert result["skipped"] == 0
     assert result["failed"] == 0

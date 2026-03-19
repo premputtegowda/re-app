@@ -10,6 +10,7 @@ export interface User {
   name: string;
   picture_url: string | null;
   is_admin: boolean;
+  has_complimentary_access: boolean;
 }
 
 interface AuthStore {

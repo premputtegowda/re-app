@@ -7,6 +7,7 @@ import { Dashboard } from '@/components/Dashboard/Dashboard';
 import { ChatLikeEntry } from '@/components/HoursEntry/ChatLikeEntry';
 import { HoursList } from '@/components/HoursList/HoursList';
 import { Settings } from '@/components/Settings/Settings';
+import { AdminView } from '@/components/Admin/AdminView';
 import { LoginPage } from '@/components/Auth';
 import { useAuthStore } from '@/lib/authStore';
 import { useStore } from '@/lib/store';
@@ -74,6 +75,8 @@ export default function Home() {
         return <HoursList />;
       case 'settings':
         return <Settings />;
+      case 'admin':
+        return <AdminView />;
       default:
         return <Dashboard onViewChange={setCurrentView} />;
     }

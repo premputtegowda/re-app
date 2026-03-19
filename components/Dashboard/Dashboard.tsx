@@ -1,11 +1,10 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Clock, Calendar, TrendingUp, Activity, PlusCircle } from 'lucide-react';
+import { Clock, Calendar, TrendingUp, PlusCircle } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { SummaryCard } from './SummaryCard';
 import { CategoryChart, PropertyChart, MonthlyTrendChart, TypeComparisonChart } from './HoursChart';
-import { ExportBundle } from '@/components/Export/ExportBundle';
 import { Card } from '@/components/UI/Card';
 import { Button } from '@/components/UI/Button';
 import { HoursListItem } from '@/components/HoursList/HoursListItem';
@@ -55,12 +54,11 @@ export function Dashboard({ onViewChange }: DashboardProps) {
       </motion.div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {[
           { title: "Total Hours", value: formatDuration(summary.totalMinutes), subtitle: `${summary.entriesCount} entries`, icon: Clock, iconColor: "text-primary-600" },
           { title: "This Month", value: formatDuration(summary.monthHours * 60), subtitle: "Current month", icon: Calendar, iconColor: "text-secondary-600" },
           { title: "This Week", value: formatDuration(summary.weekHours * 60), subtitle: "Last 7 days", icon: TrendingUp, iconColor: "text-accent-600" },
-          { title: "Top Category", value: topCategory ? topCategory.categoryName : 'N/A', subtitle: topCategory ? formatDuration(topCategory.totalMinutes) : 'No data', icon: Activity, iconColor: "text-purple-600" },
         ].map((card, index) => (
           <motion.div
             key={card.title}
@@ -72,15 +70,6 @@ export function Dashboard({ onViewChange }: DashboardProps) {
           </motion.div>
         ))}
       </div>
-
-      {/* Audit Export */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.35 }}
-      >
-        <ExportBundle />
-      </motion.div>
 
       {/* Material vs Non-Material */}
       <motion.div
@@ -116,6 +105,12 @@ export function Dashboard({ onViewChange }: DashboardProps) {
                 {summary.entriesCount > 0
                   ? formatDuration(Math.floor(summary.totalMinutes / summary.entriesCount))
                   : '0h'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-slate-600 dark:text-slate-400 shrink-0">Top Category</span>
+              <span className="text-lg font-semibold text-slate-900 dark:text-white truncate text-right" title={topCategory?.categoryName}>
+                {topCategory ? topCategory.categoryName : 'N/A'}
               </span>
             </div>
           </div>

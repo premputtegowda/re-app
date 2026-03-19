@@ -2,6 +2,8 @@ import type { HoursEntry, Category, Property } from '@/types';
 import { formatDate } from './dateUtils';
 import { formatDuration } from './calculations';
 
+const escape = (s: string) => `"${(s ?? '').replace(/"/g, '""')}"`;
+
 /**
  * Convert entries to CSV format
  */
@@ -19,27 +21,33 @@ export const exportToCSV = (
     'Date',
     'Hours',
     'Minutes',
-    'Total Duration',
+    'Total Minutes',
     'Category',
     'Property',
     'Type',
     'Description',
+    'Attachment Links',
   ];
 
   // Create CSV rows
   const rows = entries.map((entry) => {
     const categoryName = categoryMap.get(entry.category) || 'Unknown';
     const propertyName = propertyMap.get(entry.property) || 'Unknown';
+    const attachmentLinks = (entry.attachments ?? [])
+      .filter((a) => a.attachment_url)
+      .map((a) => a.attachment_url)
+      .join('\n');
 
     return [
       formatDate(entry.date),
-      entry.hours.toString(),
-      entry.minutes.toString(),
-      formatDuration(entry.totalMinutes),
-      categoryName,
-      propertyName,
+      entry.hours,
+      entry.minutes,
+      entry.totalMinutes,
+      escape(categoryName),
+      escape(propertyName),
       entry.type === 'material' ? 'Material' : 'Non-Material',
-      `"${entry.description.replace(/"/g, '""')}"`, // Escape quotes in description
+      escape(entry.description),
+      escape(attachmentLinks),
     ];
   });
 

@@ -5,6 +5,7 @@ export interface User {
   name: string;
   picture_url: string | null;
   is_admin: boolean;
+  has_complimentary_access: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -185,7 +186,7 @@ export interface SortConfig {
 }
 
 // View types
-export type ViewMode = 'dashboard' | 'list' | 'entry' | 'settings';
+export type ViewMode = 'dashboard' | 'list' | 'entry' | 'settings' | 'admin';
 
 // Toast/Notification types
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
