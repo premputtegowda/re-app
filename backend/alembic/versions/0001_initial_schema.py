@@ -22,11 +22,6 @@ def upgrade() -> None:
         END $$;
     """))
 
-    existing = inspect(op.get_bind()).get_table_names()
-
-    if "users" in existing:
-        return  # schema already exists, nothing to do
-
     op.create_table(
         "users",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
