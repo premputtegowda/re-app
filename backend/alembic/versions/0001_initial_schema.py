@@ -15,11 +15,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Create entry_type enum
-    entry_type_enum = postgresql.ENUM(
-        "material", "non-material", name="entry_type", create_type=True
-    )
-    entry_type_enum.create(op.get_bind(), checkfirst=True)
+    # Create entry_type enum only if it doesn't already exist
+    op.execute("CREATE TYPE IF NOT EXISTS entry_type AS ENUM ('material', 'non-material')")
 
     op.create_table(
         "users",
