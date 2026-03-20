@@ -93,7 +93,7 @@ def generate_audit_csv(rows: Sequence[EntryRow], year: int) -> bytes:
             f"{total_hours:.2f}",
             row.description,
             row.notes,
-            "\n".join(row.attachment_urls),
+            " | ".join(row.attachment_urls),
         ])
     return buffer.getvalue().encode("utf-8-sig")
 
