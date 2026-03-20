@@ -17,6 +17,7 @@ export function Settings() {
       </motion.div>
 
       <motion.div
+        id="categories"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.1 }}
@@ -25,6 +26,7 @@ export function Settings() {
       </motion.div>
 
       <motion.div
+        id="properties"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 0.2 }}

@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Clock, TrendingUp, Shield, CheckCircle2, Lock, Home, BarChart2, Calculator } from 'lucide-react';
+import { Clock, Shield, CheckCircle2, Home, BarChart2, Calculator } from 'lucide-react';
 import GoogleLoginButton from './GoogleLoginButton';
 import { useAuthStore } from '@/lib/authStore';
 
@@ -12,6 +12,7 @@ interface LoginPageProps {
 export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
   const { error, setError } = useAuthStore();
   const requestSubmitted = error === 'ACCESS_REQUEST_SUBMITTED';
+  const requestPending = error === 'ACCESS_REQUEST_PENDING';
 
   const features = [
     {
@@ -53,7 +54,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
             <Home className="w-8 h-8 text-white" />
           </motion.div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-            My Real Estate App
+            DealstackRE
           </h1>
           <p className="text-gray-600 dark:text-gray-400 mt-2">
             Your all-in-one platform for smarter real estate investing
@@ -71,26 +72,49 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="text-center space-y-3 py-2"
+              className="text-center space-y-4 py-2"
             >
               <div className="w-12 h-12 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center mx-auto">
                 <CheckCircle2 className="text-emerald-600 dark:text-emerald-400" size={24} />
               </div>
-              <h3 className="font-semibold text-gray-900 dark:text-white">Request submitted!</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                We'll review your request and send you an invite link when approved.
-              </p>
+              <div>
+                <h3 className="font-semibold text-gray-900 dark:text-white">Request received!</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  This app is invite only. We'll review your request and reach out when you're approved.
+                </p>
+              </div>
+              <button
+                onClick={() => setError(null)}
+                className="text-xs text-primary-600 dark:text-primary-400 hover:underline"
+              >
+                Back to sign in
+              </button>
+            </motion.div>
+          ) : requestPending ? (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="text-center space-y-4 py-2"
+            >
+              <div className="w-12 h-12 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center mx-auto">
+                <Shield className="text-amber-600 dark:text-amber-400" size={24} />
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-900 dark:text-white">Request under review</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  Your request is being reviewed. We'll reach out once you've been granted access.
+                </p>
+              </div>
+              <button
+                onClick={() => setError(null)}
+                className="text-xs text-primary-600 dark:text-primary-400 hover:underline"
+              >
+                Back to sign in
+              </button>
             </motion.div>
           ) : (
             <>
-              <div className="flex items-center justify-center gap-2 mb-4">
-                <Lock size={14} className="text-gray-400" />
-                <p className="text-sm text-gray-500 dark:text-gray-400 text-center">
-                  Access is by invitation only. Sign in with Google to request access.
-                </p>
-              </div>
-
-              {error && !requestSubmitted && (
+              {error && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}

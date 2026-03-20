@@ -111,7 +111,8 @@ async def get_or_create_user(db: AsyncSession, user_info: dict) -> tuple[User, b
                 AccessRequest.status == "pending",
             )
         )
-        if not existing_req.scalar_one_or_none():
+        already_pending = existing_req.scalar_one_or_none() is not None
+        if not already_pending:
             db.add(AccessRequest(
                 email=user_info["email"],
                 name=user_info["name"],
@@ -121,7 +122,7 @@ async def get_or_create_user(db: AsyncSession, user_info: dict) -> tuple[User, b
 
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="ACCESS_REQUEST_SUBMITTED",
+            detail="ACCESS_REQUEST_PENDING" if already_pending else "ACCESS_REQUEST_SUBMITTED",
         )
 
     # Create new user
