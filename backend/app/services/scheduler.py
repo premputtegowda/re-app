@@ -76,7 +76,7 @@ async def send_weekly_reports(sender: Optional[EmailSender] = None) -> dict:
                     f"The CSV contains your full activity log ({len(rows)} entries) "
                     "including attachment Drive links.\n\n"
                     "Keep up the great work!\n\n"
-                    "— REPS Tracker"
+                    "— DealstackRE"
                 )
 
                 await sender.send(
