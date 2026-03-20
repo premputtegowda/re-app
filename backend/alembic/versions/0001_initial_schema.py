@@ -19,7 +19,9 @@ def upgrade() -> None:
             CREATE TYPE entry_type AS ENUM ('MATERIAL', 'NON_MATERIAL');
         EXCEPTION WHEN duplicate_object THEN null;
         END $$;
+    """))
 
+    op.execute(sa.text("""
         CREATE TABLE IF NOT EXISTS users (
             id UUID PRIMARY KEY,
             email VARCHAR(255) NOT NULL,
@@ -30,10 +32,12 @@ def upgrade() -> None:
             has_complimentary_access BOOLEAN NOT NULL DEFAULT false,
             created_at TIMESTAMP NOT NULL,
             updated_at TIMESTAMP NOT NULL
-        );
-        CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email);
-        CREATE UNIQUE INDEX IF NOT EXISTS ix_users_google_id ON users (google_id);
+        )
+    """))
+    op.execute(sa.text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email)"))
+    op.execute(sa.text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_google_id ON users (google_id)"))
 
+    op.execute(sa.text("""
         CREATE TABLE IF NOT EXISTS categories (
             id UUID PRIMARY KEY,
             user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -42,9 +46,11 @@ def upgrade() -> None:
             created_at TIMESTAMP NOT NULL,
             updated_at TIMESTAMP NOT NULL,
             CONSTRAINT uq_category_user_name UNIQUE (user_id, name)
-        );
-        CREATE INDEX IF NOT EXISTS ix_categories_user_id ON categories (user_id);
+        )
+    """))
+    op.execute(sa.text("CREATE INDEX IF NOT EXISTS ix_categories_user_id ON categories (user_id)"))
 
+    op.execute(sa.text("""
         CREATE TABLE IF NOT EXISTS properties (
             id UUID PRIMARY KEY,
             user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -53,9 +59,11 @@ def upgrade() -> None:
             created_at TIMESTAMP NOT NULL,
             updated_at TIMESTAMP NOT NULL,
             CONSTRAINT uq_property_user_name UNIQUE (user_id, name)
-        );
-        CREATE INDEX IF NOT EXISTS ix_properties_user_id ON properties (user_id);
+        )
+    """))
+    op.execute(sa.text("CREATE INDEX IF NOT EXISTS ix_properties_user_id ON properties (user_id)"))
 
+    op.execute(sa.text("""
         CREATE TABLE IF NOT EXISTS entries (
             id UUID PRIMARY KEY,
             user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -70,19 +78,23 @@ def upgrade() -> None:
             notes TEXT,
             created_at TIMESTAMP NOT NULL,
             updated_at TIMESTAMP NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS ix_entries_user_id ON entries (user_id);
-        CREATE INDEX IF NOT EXISTS ix_entries_date ON entries (date);
+        )
+    """))
+    op.execute(sa.text("CREATE INDEX IF NOT EXISTS ix_entries_user_id ON entries (user_id)"))
+    op.execute(sa.text("CREATE INDEX IF NOT EXISTS ix_entries_date ON entries (date)"))
 
+    op.execute(sa.text("""
         CREATE TABLE IF NOT EXISTS refresh_tokens (
             id UUID PRIMARY KEY,
             user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             token_hash VARCHAR(255) NOT NULL UNIQUE,
             expires_at TIMESTAMP NOT NULL,
             created_at TIMESTAMP NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS ix_refresh_tokens_user_id ON refresh_tokens (user_id);
+        )
+    """))
+    op.execute(sa.text("CREATE INDEX IF NOT EXISTS ix_refresh_tokens_user_id ON refresh_tokens (user_id)"))
 
+    op.execute(sa.text("""
         CREATE TABLE IF NOT EXISTS attachments (
             id UUID PRIMARY KEY,
             entry_id UUID NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
@@ -93,9 +105,11 @@ def upgrade() -> None:
             content_type VARCHAR(100) NOT NULL,
             file_size INTEGER NOT NULL,
             created_at TIMESTAMP NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS ix_attachments_entry_id ON attachments (entry_id);
+        )
+    """))
+    op.execute(sa.text("CREATE INDEX IF NOT EXISTS ix_attachments_entry_id ON attachments (entry_id)"))
 
+    op.execute(sa.text("""
         CREATE TABLE IF NOT EXISTS invitations (
             id UUID PRIMARY KEY,
             email VARCHAR(255) NOT NULL,
@@ -104,10 +118,12 @@ def upgrade() -> None:
             created_at TIMESTAMP NOT NULL,
             expires_at TIMESTAMP NOT NULL,
             accepted_at TIMESTAMP
-        );
-        CREATE INDEX IF NOT EXISTS ix_invitations_email ON invitations (email);
-        CREATE UNIQUE INDEX IF NOT EXISTS ix_invitations_token ON invitations (token);
+        )
+    """))
+    op.execute(sa.text("CREATE INDEX IF NOT EXISTS ix_invitations_email ON invitations (email)"))
+    op.execute(sa.text("CREATE UNIQUE INDEX IF NOT EXISTS ix_invitations_token ON invitations (token)"))
 
+    op.execute(sa.text("""
         CREATE TABLE IF NOT EXISTS access_requests (
             id UUID PRIMARY KEY,
             email VARCHAR(255) NOT NULL,
@@ -116,20 +132,18 @@ def upgrade() -> None:
             status VARCHAR(20) NOT NULL DEFAULT 'pending',
             requested_at TIMESTAMP NOT NULL,
             reviewed_at TIMESTAMP
-        );
-        CREATE INDEX IF NOT EXISTS ix_access_requests_email ON access_requests (email);
+        )
     """))
+    op.execute(sa.text("CREATE INDEX IF NOT EXISTS ix_access_requests_email ON access_requests (email)"))
 
 
 def downgrade() -> None:
-    op.execute(sa.text("""
-        DROP TABLE IF EXISTS access_requests;
-        DROP TABLE IF EXISTS invitations;
-        DROP TABLE IF EXISTS attachments;
-        DROP TABLE IF EXISTS refresh_tokens;
-        DROP TABLE IF EXISTS entries;
-        DROP TABLE IF EXISTS properties;
-        DROP TABLE IF EXISTS categories;
-        DROP TABLE IF EXISTS users;
-        DROP TYPE IF EXISTS entry_type;
-    """))
+    op.execute(sa.text("DROP TABLE IF EXISTS access_requests"))
+    op.execute(sa.text("DROP TABLE IF EXISTS invitations"))
+    op.execute(sa.text("DROP TABLE IF EXISTS attachments"))
+    op.execute(sa.text("DROP TABLE IF EXISTS refresh_tokens"))
+    op.execute(sa.text("DROP TABLE IF EXISTS entries"))
+    op.execute(sa.text("DROP TABLE IF EXISTS properties"))
+    op.execute(sa.text("DROP TABLE IF EXISTS categories"))
+    op.execute(sa.text("DROP TABLE IF EXISTS users"))
+    op.execute(sa.text("DROP TYPE IF EXISTS entry_type"))
