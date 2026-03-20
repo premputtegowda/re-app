@@ -3,8 +3,9 @@ import Script from 'next/script';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'REPS Tracker',
+  title: 'DealstackRE',
   description: 'Real Estate Professional Status Hours Tracking Application',
+  icons: { icon: '/icon.png' },
 };
 
 export default function RootLayout({

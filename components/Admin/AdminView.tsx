@@ -78,6 +78,7 @@ export function AdminView() {
       .then(setAccessRequests)
       .catch((e) => setError(e.message))
       .finally(() => setRequestsLoading(false));
+
   }, []);
 
   const handleToggleAdmin = async (user: AdminUser) => {

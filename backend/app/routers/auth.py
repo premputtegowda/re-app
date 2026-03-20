@@ -92,38 +92,39 @@ async def get_or_create_user(db: AsyncSession, user_info: dict) -> tuple[User, b
         await db.refresh(user)
         return user, False
 
-    # New user — check for a valid invite
-    now = datetime.utcnow()
-    invite_result = await db.execute(
-        select(Invitation).where(
-            Invitation.email == user_info["email"],
-            Invitation.accepted_at.is_(None),
-            Invitation.expires_at > now,
-        )
-    )
-    has_invite = invite_result.scalar_one_or_none() is not None
-
-    if not has_invite:
-        # Save or update an access request so admin can approve it
-        existing_req = await db.execute(
-            select(AccessRequest).where(
-                AccessRequest.email == user_info["email"],
-                AccessRequest.status == "pending",
+    # New user — check invite gate
+    if settings.invite_only:
+        now = datetime.utcnow()
+        invite_result = await db.execute(
+            select(Invitation).where(
+                Invitation.email == user_info["email"],
+                Invitation.accepted_at.is_(None),
+                Invitation.expires_at > now,
             )
         )
-        already_pending = existing_req.scalar_one_or_none() is not None
-        if not already_pending:
-            db.add(AccessRequest(
-                email=user_info["email"],
-                name=user_info["name"],
-                picture_url=user_info.get("picture"),
-            ))
-            await db.commit()
+        has_invite = invite_result.scalar_one_or_none() is not None
 
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="ACCESS_REQUEST_PENDING" if already_pending else "ACCESS_REQUEST_SUBMITTED",
-        )
+        if not has_invite:
+            # Save or update an access request so admin can approve it
+            existing_req = await db.execute(
+                select(AccessRequest).where(
+                    AccessRequest.email == user_info["email"],
+                    AccessRequest.status == "pending",
+                )
+            )
+            already_pending = existing_req.scalar_one_or_none() is not None
+            if not already_pending:
+                db.add(AccessRequest(
+                    email=user_info["email"],
+                    name=user_info["name"],
+                    picture_url=user_info.get("picture"),
+                ))
+                await db.commit()
+
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="ACCESS_REQUEST_PENDING" if already_pending else "ACCESS_REQUEST_SUBMITTED",
+            )
 
     # Create new user
     user = User(
