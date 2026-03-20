@@ -37,9 +37,9 @@ function TimeFormBody({ formData, setFormData, errors }: TimeFormBodyProps) {
           {QUICK_HOURS.map((h) => (
             <button
               key={h}
-              onClick={() => setFormData({ ...formData, hours: h, minutes: 0 })}
+              onClick={() => setFormData({ ...formData, hours: h })}
               className={`px-4 py-2 rounded-lg border-2 transition-all ${
-                formData.hours === h && formData.minutes === 0
+                formData.hours === h
                   ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400'
                   : 'border-slate-200 dark:border-slate-600 hover:border-primary-300 dark:hover:border-primary-500 text-slate-700 dark:text-slate-300'
               }`}
@@ -55,9 +55,9 @@ function TimeFormBody({ formData, setFormData, errors }: TimeFormBodyProps) {
           {QUICK_MINUTES.map((m) => (
             <button
               key={m}
-              onClick={() => setFormData({ ...formData, hours: 0, minutes: m })}
+              onClick={() => setFormData({ ...formData, minutes: m })}
               className={`px-4 py-2 rounded-lg border-2 transition-all ${
-                formData.hours === 0 && formData.minutes === m
+                formData.minutes === m
                   ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400'
                   : 'border-slate-200 dark:border-slate-600 hover:border-primary-300 dark:hover:border-primary-500 text-slate-700 dark:text-slate-300'
               }`}
@@ -71,20 +71,20 @@ function TimeFormBody({ formData, setFormData, errors }: TimeFormBodyProps) {
         <p className="text-sm text-slate-600 dark:text-slate-400 mb-3">Or enter custom time:</p>
         <div className="grid grid-cols-2 gap-4">
           <Input
-            type="number"
+            type="text"
+            inputMode="numeric"
             label="Hours"
-            min="0"
-            max="24"
-            value={formData.hours}
+            placeholder="0"
+            value={formData.hours === 0 ? '' : formData.hours}
             onChange={(e) => setFormData({ ...formData, hours: parseInt(e.target.value) || 0 })}
             error={getFieldError(errors, 'hours')}
           />
           <Input
-            type="number"
+            type="text"
+            inputMode="numeric"
             label="Minutes"
-            min="0"
-            max="59"
-            value={formData.minutes}
+            placeholder="0"
+            value={formData.minutes === 0 ? '' : formData.minutes}
             onChange={(e) => setFormData({ ...formData, minutes: parseInt(e.target.value) || 0 })}
             error={getFieldError(errors, 'minutes')}
           />
@@ -151,6 +151,7 @@ export function ChatLikeEntry() {
   const [step, setStep] = useState(1);
   const [editingStep, setEditingStep] = useState<number | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [saveMode, setSaveMode] = useState<'done' | 'another'>('done');
   const [errors, setErrors] = useState<any[]>([]);
 
   // AI classification state
@@ -256,10 +257,14 @@ export function ChatLikeEntry() {
 
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
 
-  // Reset form after successful submission
+  // Reset form or redirect after successful submission
   useEffect(() => {
     if (showSuccess) {
       const timer = setTimeout(() => {
+        if (saveMode === 'done') {
+          router.push('/dashboard');
+          return;
+        }
         setShowSuccess(false);
         setStep(1);
         setFormData({
@@ -284,11 +289,11 @@ export function ChatLikeEntry() {
         clearAttachKey(ATTACH_KEY);
         setEditingStep(null);
         setIsCreatingCategory(false);
-      }, 2000);
+      }, 1500);
 
       return () => clearTimeout(timer);
     }
-  }, [showSuccess]);
+  }, [showSuccess, saveMode]);
 
   const handlePropertySelect = (propertyId: string) => {
     setFormData({ ...formData, property: propertyId });
@@ -458,7 +463,8 @@ export function ChatLikeEntry() {
     if (classificationResult) setSelectedType(classificationResult.type);
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (mode: 'done' | 'another' = 'done') => {
+    setSaveMode(mode);
     const trimmedName = categoryInput.trim();
     if (!trimmedName) {
       setErrors([{ field: 'category', message: 'Please enter or select a category' }]);
@@ -1281,16 +1287,28 @@ export function ChatLikeEntry() {
                     </div>
                   )}
 
-                  <Button onClick={handleSubmit} fullWidth disabled={!categoryInput.trim() || isSubmitting || isCreatingCategory}>
-                    {isSubmitting ? (
-                      <span className="flex items-center gap-2">
-                        <Loader2 size={16} className="animate-spin" />
-                        Saving…
-                      </span>
-                    ) : (
-                      'Save Entry'
-                    )}
-                  </Button>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Button onClick={() => handleSubmit('done')} fullWidth disabled={!categoryInput.trim() || isSubmitting || isCreatingCategory}>
+                      {isSubmitting && saveMode === 'done' ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <Loader2 size={16} className="animate-spin" />
+                          Saving…
+                        </span>
+                      ) : (
+                        'Save'
+                      )}
+                    </Button>
+                    <Button variant="secondary" onClick={() => handleSubmit('another')} fullWidth disabled={!categoryInput.trim() || isSubmitting || isCreatingCategory}>
+                      {isSubmitting && saveMode === 'another' ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <Loader2 size={16} className="animate-spin" />
+                          Saving…
+                        </span>
+                      ) : (
+                        'Save & Add'
+                      )}
+                    </Button>
+                  </div>
                 </div>
               </Card>
             </motion.div>
