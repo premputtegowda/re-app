@@ -73,6 +73,8 @@ export const calculateSummary = (entries: HoursEntry[]): SummaryData => {
     totalMinutes,
     monthHours: Math.floor(monthMinutes / 60),
     weekHours: Math.floor(weekMinutes / 60),
+    materialMinutes,
+    nonMaterialMinutes,
     materialHours: Math.floor(materialMinutes / 60),
     nonMaterialHours: Math.floor(nonMaterialMinutes / 60),
     entriesCount: entries.length,
@@ -105,7 +107,7 @@ export const calculateCategorySummaries = (
     const summary = summaryMap.get(entry.category);
     if (summary) {
       summary.totalMinutes += entry.totalMinutes;
-      summary.totalHours = Math.floor(summary.totalMinutes / 60);
+      summary.totalHours = +(summary.totalMinutes / 60).toFixed(2);
       summary.entryCount += 1;
     }
   });
@@ -141,7 +143,7 @@ export const calculatePropertySummaries = (
     const summary = summaryMap.get(entry.property);
     if (summary) {
       summary.totalMinutes += entry.totalMinutes;
-      summary.totalHours = Math.floor(summary.totalMinutes / 60);
+      summary.totalHours = +(summary.totalMinutes / 60).toFixed(2);
       summary.entryCount += 1;
     }
   });
