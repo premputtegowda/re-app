@@ -40,7 +40,7 @@ export function generateCSV(
     const attachmentLinks = (entry.attachments ?? [])
       .filter((a) => a.attachment_url)
       .map((a) => a.attachment_url)
-      .join('\n');
+      .join(' | ');
     return [
       entryNum(idx),
       entry.date,
