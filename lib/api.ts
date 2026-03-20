@@ -6,12 +6,17 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 let accessToken: string | null = null;
 let refreshToken: string | null = null;
 
-export const setTokens = (access: string, refresh: string) => {
+// Access token expiry stored as Unix ms timestamp
+let accessTokenExpiresAt: number | null = null;
+
+export const setTokens = (access: string, refresh: string, expiresInSeconds = 900) => {
   accessToken = access;
   refreshToken = refresh;
+  accessTokenExpiresAt = Date.now() + expiresInSeconds * 1000;
   if (typeof window !== 'undefined') {
     localStorage.setItem('access_token', access);
     localStorage.setItem('refresh_token', refresh);
+    localStorage.setItem('access_token_expires_at', String(accessTokenExpiresAt));
   }
 };
 
@@ -19,17 +24,28 @@ export const getTokens = () => {
   if (typeof window !== 'undefined' && !accessToken) {
     accessToken = localStorage.getItem('access_token');
     refreshToken = localStorage.getItem('refresh_token');
+    const exp = localStorage.getItem('access_token_expires_at');
+    accessTokenExpiresAt = exp ? Number(exp) : null;
   }
-  return { accessToken, refreshToken };
+  return { accessToken, refreshToken, accessTokenExpiresAt };
 };
 
 export const clearTokens = () => {
   accessToken = null;
   refreshToken = null;
+  accessTokenExpiresAt = null;
   if (typeof window !== 'undefined') {
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
+    localStorage.removeItem('access_token_expires_at');
   }
+};
+
+const isAccessTokenExpiringSoon = (): boolean => {
+  const { accessTokenExpiresAt: exp } = getTokens();
+  if (!exp) return false;
+  // Refresh if less than 60 seconds remaining
+  return Date.now() > exp - 60_000;
 };
 
 // API error class
@@ -53,15 +69,16 @@ const refreshAccessToken = async (): Promise<boolean> => {
     });
 
     if (!response.ok) {
-      clearTokens();
+      // Only clear tokens on explicit auth rejection, not server errors
+      if (response.status === 401) clearTokens();
       return false;
     }
 
     const data = await response.json();
-    setTokens(data.access_token, data.refresh_token);
+    setTokens(data.access_token, data.refresh_token, data.expires_in ?? 900);
     return true;
   } catch {
-    clearTokens();
+    // Network error — keep tokens, don't log the user out
     return false;
   }
 };
@@ -71,6 +88,11 @@ const authFetch = async (
   endpoint: string,
   options: RequestInit = {}
 ): Promise<Response> => {
+  // Proactively refresh if the access token is about to expire
+  if (isAccessTokenExpiringSoon()) {
+    await refreshAccessToken();
+  }
+
   const { accessToken: token } = getTokens();
 
   const headers: HeadersInit = {
@@ -119,7 +141,7 @@ export const api = {
     }
 
     const data = await response.json();
-    setTokens(data.access_token, data.refresh_token);
+    setTokens(data.access_token, data.refresh_token, data.expires_in ?? 900);
     return data;
   },
 
@@ -263,6 +285,7 @@ export const api = {
     property_id: string;
     type: string;
     description: string;
+    notes?: string;
   }) {
     const response = await authFetch('/api/entries', {
       method: 'POST',
@@ -288,6 +311,7 @@ export const api = {
       property_id?: string;
       type?: string;
       description?: string;
+      notes?: string;
     }
   ) {
     const response = await authFetch(`/api/entries/${id}`, {
@@ -305,6 +329,38 @@ export const api = {
     return response.json();
   },
 
+  // Attachments
+  async createAttachment(
+    entryId: string,
+    data: {
+      file_ref: string;
+      attachment_url: string;
+      original_filename: string;
+      content_type: string;
+      file_size: number;
+    }
+  ) {
+    const response = await authFetch(`/api/entries/${entryId}/attachments`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new ApiError(response.status, error.detail || 'Failed to save attachment');
+    }
+    return response.json();
+  },
+
+  async deleteAttachment(entryId: string, attachmentId: string) {
+    const response = await authFetch(`/api/entries/${entryId}/attachments/${attachmentId}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new ApiError(response.status, error.detail || 'Failed to delete attachment');
+    }
+  },
+
   async deleteEntry(id: string) {
     const response = await authFetch(`/api/entries/${id}`, {
       method: 'DELETE',
@@ -314,6 +370,19 @@ export const api = {
       throw new ApiError(response.status, error.detail || 'Failed to delete entry');
     }
   },
+
+  async classifyActivity(description: string) {
+    const response = await authFetch('/api/entries/classify', {
+      method: 'POST',
+      body: JSON.stringify({ description }),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new ApiError(response.status, error.detail || 'Classification failed');
+    }
+    return response.json();
+  },
+
 
   async bulkCreateEntries(
     entries: Array<{
@@ -360,5 +429,84 @@ export const api = {
     const response = await authFetch('/api/analytics/monthly');
     if (!response.ok) throw new ApiError(response.status, 'Failed to get monthly analytics');
     return response.json();
+  },
+
+  // ── Admin ──────────────────────────────────────────────────────────────
+
+  async adminListUsers() {
+    const response = await authFetch('/api/admin/users');
+    if (!response.ok) throw new ApiError(response.status, 'Failed to fetch users');
+    return response.json();
+  },
+
+  async adminPatchUser(userId: string, patch: { is_admin?: boolean; has_complimentary_access?: boolean }) {
+    const response = await authFetch(`/api/admin/users/${userId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new ApiError(response.status, error.detail || 'Failed to update user');
+    }
+    return response.json();
+  },
+
+  async adminDeleteUser(userId: string) {
+    const response = await authFetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new ApiError(response.status, error.detail || 'Failed to delete user');
+    }
+  },
+
+  async adminListInvitations() {
+    const response = await authFetch('/api/admin/invitations');
+    if (!response.ok) throw new ApiError(response.status, 'Failed to fetch invitations');
+    return response.json();
+  },
+
+  async adminCreateInvitation(email: string) {
+    const response = await authFetch('/api/admin/invitations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new ApiError(response.status, error.detail || 'Failed to create invitation');
+    }
+    return response.json();
+  },
+
+  async adminRevokeInvitation(invitationId: string) {
+    const response = await authFetch(`/api/admin/invitations/${invitationId}`, { method: 'DELETE' });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new ApiError(response.status, error.detail || 'Failed to revoke invitation');
+    }
+  },
+
+  async adminListAccessRequests() {
+    const response = await authFetch('/api/admin/access-requests');
+    if (!response.ok) throw new ApiError(response.status, 'Failed to fetch access requests');
+    return response.json();
+  },
+
+  async adminApproveAccessRequest(requestId: string) {
+    const response = await authFetch(`/api/admin/access-requests/${requestId}/approve`, { method: 'POST' });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new ApiError(response.status, error.detail || 'Failed to approve request');
+    }
+    return response.json();
+  },
+
+  async adminDeclineAccessRequest(requestId: string) {
+    const response = await authFetch(`/api/admin/access-requests/${requestId}/decline`, { method: 'POST' });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new ApiError(response.status, error.detail || 'Failed to decline request');
+    }
   },
 };

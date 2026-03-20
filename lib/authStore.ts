@@ -10,6 +10,7 @@ export interface User {
   name: string;
   picture_url: string | null;
   is_admin: boolean;
+  has_complimentary_access: boolean;
 }
 
 interface AuthStore {
@@ -80,12 +81,20 @@ export const useAuthStore = create<AuthStore>()(
           if (user) {
             set({ user, isAuthenticated: true, isLoading: false });
           } else {
-            clearTokens();
+            // getCurrentUser returned null — explicit 401, tokens already cleared
             set({ user: null, isAuthenticated: false, isLoading: false });
           }
-        } catch {
-          clearTokens();
-          set({ user: null, isAuthenticated: false, isLoading: false });
+        } catch (err) {
+          // Network error or server error — keep the user logged in, don't clear tokens
+          // They may just be offline or the backend is temporarily down
+          const isAuthError = err instanceof Error && err.message.includes('401');
+          if (isAuthError) {
+            clearTokens();
+            set({ user: null, isAuthenticated: false, isLoading: false });
+          } else {
+            // Preserve existing auth state — don't log the user out
+            set({ isLoading: false });
+          }
         }
       },
 

@@ -16,9 +16,12 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.utils.csv_export import (
+    AUDIT_CSV_HEADERS,
     CSV_HEADERS,
     EntryRow,
+    generate_audit_csv,
     generate_ytd_csv,
+    get_audit_csv_filename,
     get_ytd_filename,
 )
 
@@ -37,6 +40,7 @@ def _make_row(**kwargs) -> EntryRow:
         property="Main St",
         type="material",
         description="Routine inspection",
+        notes="",
     )
     defaults.update(kwargs)
     return EntryRow(**defaults)
@@ -99,6 +103,56 @@ def test_generate_ytd_csv_utf8_bom():
 
 
 # ---------------------------------------------------------------------------
+# audit bundle — pure unit tests
+# ---------------------------------------------------------------------------
+
+def test_generate_audit_csv_headers():
+    rows = _parse_csv(generate_audit_csv([], year=2026))
+    assert rows[0] == AUDIT_CSV_HEADERS
+
+
+def test_generate_audit_csv_single_row():
+    row = _make_row()
+    rows = _parse_csv(generate_audit_csv([row], year=2026))
+    assert len(rows) == 2
+    data = rows[1]
+    assert data[0] == "001"        # Entry #
+    assert data[1] == "2026-01-15" # Date
+    assert data[2] == "Main St"    # Property
+    assert data[3] == "Management" # Category
+    assert data[4] == "material"   # Type
+    assert data[5] == "2"          # Hours
+    assert data[6] == "30"         # Minutes
+    assert data[7] == "150"        # Total Minutes
+    assert data[8] == "2.50"       # Total Hours
+    assert data[9] == "Routine inspection"  # Description
+    assert data[10] == ""          # Notes / Evidence
+    assert data[11] == ""          # Attachment Links
+
+
+def test_generate_audit_csv_notes():
+    row = _make_row(notes="Receipt #123")
+    rows = _parse_csv(generate_audit_csv([row], year=2026))
+    assert rows[1][10] == "Receipt #123"
+
+
+def test_generate_audit_csv_attachment_links():
+    row = _make_row()
+    row.attachment_urls = [
+        "https://drive.google.com/file/d/abc/view",
+        "https://drive.google.com/file/d/def/view",
+    ]
+    rows = _parse_csv(generate_audit_csv([row], year=2026))
+    links = rows[1][11]
+    assert "https://drive.google.com/file/d/abc/view" in links
+    assert "https://drive.google.com/file/d/def/view" in links
+
+
+def test_get_audit_csv_filename():
+    assert get_audit_csv_filename(2026) == "REPS_Audit_Log_2026.csv"
+
+
+# ---------------------------------------------------------------------------
 # scheduler — send_weekly_reports (mocked session + sender)
 # ---------------------------------------------------------------------------
 
@@ -116,6 +170,8 @@ def _make_orm_entry(user_id, category_name="Work", property_name="Home"):
     entry.type = MagicMock()
     entry.type.value = "material"
     entry.description = "Test"
+    entry.notes = None
+    entry.attachments = []
     return entry
 
 
@@ -182,7 +238,7 @@ async def test_send_weekly_reports_sends_to_user_with_entries():
     mock_sender.send.assert_awaited_once()
     call_kwargs = mock_sender.send.call_args.kwargs
     assert call_kwargs["to_email"] == "user@example.com"
-    assert call_kwargs["attachment_filename"].startswith("reps_tracker_YTD_")
+    assert call_kwargs["attachment_filename"].startswith("REPS_Audit_Log_")
     assert result["sent"] == 1
     assert result["skipped"] == 0
     assert result["failed"] == 0

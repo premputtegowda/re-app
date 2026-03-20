@@ -24,6 +24,7 @@ export function CategoryManager() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleteBlocked, setDeleteBlocked] = useState<string | null>(null);
   const [errors, setErrors] = useState<any[]>([]);
 
   const [formData, setFormData] = useState<CategoryFormData>({
@@ -101,14 +102,14 @@ export function CategoryManager() {
 
           return (
             <Card key={category.id} padding="sm">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3 flex-1">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
                   <div
                     className="w-8 h-8 rounded-lg flex-shrink-0"
                     style={{ backgroundColor: category.color }}
                   />
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-slate-900 dark:text-white truncate">{category.name}</p>
+                  <div className="min-w-0">
+                    <p className="font-medium text-slate-900 dark:text-white">{category.name}</p>
                     {isInUse && (
                       <p className="text-xs text-slate-500 dark:text-slate-400">
                         Used in {entries.filter((e) => e.category === category.id).length} entries
@@ -116,7 +117,7 @@ export function CategoryManager() {
                     )}
                   </div>
                 </div>
-                <div className="flex gap-1">
+                <div className="flex gap-1 flex-shrink-0">
                   <button
                     onClick={() => handleOpenEdit(category)}
                     className="p-2 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
@@ -125,10 +126,9 @@ export function CategoryManager() {
                     <Edit2 size={16} />
                   </button>
                   <button
-                    onClick={() => setDeleteConfirm(category.id)}
+                    onClick={() => isInUse ? setDeleteBlocked(category.id) : setDeleteConfirm(category.id)}
                     className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
                     title="Delete"
-                    disabled={isInUse}
                   >
                     <Trash2 size={16} />
                   </button>
@@ -204,6 +204,25 @@ export function CategoryManager() {
               {editingCategory ? 'Update' : 'Add'}
             </Button>
           </div>
+        </div>
+      </Modal>
+
+      {/* Blocked Delete Modal */}
+      <Modal
+        isOpen={deleteBlocked !== null}
+        onClose={() => setDeleteBlocked(null)}
+        title="Cannot Delete Category"
+      >
+        <div className="space-y-4">
+          {(() => {
+            const count = entries.filter((e) => e.category === deleteBlocked).length;
+            return (
+              <p className="text-slate-600 dark:text-slate-400">
+                This category has <span className="font-semibold text-slate-900 dark:text-white">{count} {count === 1 ? 'entry' : 'entries'}</span> associated with it. Please delete those entries first before removing this category.
+              </p>
+            );
+          })()}
+          <Button onClick={() => setDeleteBlocked(null)} fullWidth>OK</Button>
         </div>
       </Modal>
 

@@ -5,6 +5,7 @@ export interface User {
   name: string;
   picture_url: string | null;
   is_admin: boolean;
+  has_complimentary_access: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -25,7 +26,9 @@ export interface HoursEntry {
   category: string; // category_id
   property: string; // property_id
   description: string;
+  notes?: string; // Optional notes / evidence text
   type: 'material' | 'non-material';
+  attachments?: Attachment[];
   createdAt: string; // ISO timestamp
   updatedAt: string; // ISO timestamp
 }
@@ -89,6 +92,31 @@ export interface MonthlyData {
   entryCount: number;
 }
 
+// AI Classification types
+export interface ClassificationResult {
+  refined_title: string;
+  refined_description: string;            // Purpose + Result
+  evidence_note: string;                  // Evidence suggestion → pre-fills Notes field
+  category_name: string | null;           // null when AI suggests a brand-new category
+  suggested_new_category?: string | null; // set when category_name is null
+  type: 'material' | 'non-material';
+  audit_strength: 'high' | 'medium' | 'low';
+  justification: string;
+  audit_tip: string;
+}
+
+// Attachment stored in user's Google Drive or linked manually
+export interface Attachment {
+  id: string;
+  entry_id: string;
+  file_ref: string;
+  attachment_url: string;
+  original_filename: string;
+  content_type: string;
+  file_size: number;
+  created_at: string;
+}
+
 // Form types
 export interface HoursEntryFormData {
   date: string;
@@ -97,6 +125,7 @@ export interface HoursEntryFormData {
   category: string;
   property: string;
   description: string;
+  notes?: string;
   type: 'material' | 'non-material';
 }
 
@@ -157,7 +186,7 @@ export interface SortConfig {
 }
 
 // View types
-export type ViewMode = 'dashboard' | 'list' | 'entry' | 'settings';
+export type ViewMode = 'dashboard' | 'list' | 'entry' | 'settings' | 'admin';
 
 // Toast/Notification types
 export type ToastType = 'success' | 'error' | 'info' | 'warning';

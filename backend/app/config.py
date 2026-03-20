@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     # App
     app_name: str = "REPS Tracker API"
     debug: bool = False
+    invite_only: bool = False  # Set to True to restrict registration to invited users only
 
     # Database
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/reps_tracker"
@@ -14,7 +15,7 @@ class Settings(BaseSettings):
     jwt_secret_key: str = "your-secret-key-change-in-production"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 15
-    refresh_token_expire_days: int = 7
+    refresh_token_expire_days: int = 30
 
     # Google OAuth
     google_client_id: str = ""
@@ -23,6 +24,9 @@ class Settings(BaseSettings):
 
     # CORS
     frontend_url: str = "http://localhost:3000"
+
+    # Gemini AI
+    gemini_api_key: str = ""
 
     # Email (SMTP)
     smtp_enabled: bool = False
