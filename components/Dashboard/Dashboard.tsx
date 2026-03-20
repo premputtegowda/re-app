@@ -16,13 +16,10 @@ import {
   formatDuration,
 } from '@/utils/calculations';
 import { useRecentEntries } from '@/hooks/useHoursData';
-import type { ViewMode } from '@/types';
+import { useRouter } from 'next/navigation';
 
-interface DashboardProps {
-  onViewChange: (view: ViewMode) => void;
-}
-
-export function Dashboard({ onViewChange }: DashboardProps) {
+export function Dashboard() {
+  const router = useRouter();
   const entries = useStore((s) => s.entries);
   const categories = useStore((s) => s.categories);
   const properties = useStore((s) => s.properties);
@@ -47,7 +44,7 @@ export function Dashboard({ onViewChange }: DashboardProps) {
           <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Dashboard</h2>
           <p className="text-slate-600 dark:text-slate-400">Overview of your REPS hours tracking</p>
         </div>
-        <Button onClick={() => onViewChange('entry')} className="flex items-center gap-2">
+        <Button onClick={() => router.push('/entry')} className="flex items-center gap-2">
           <PlusCircle size={20} />
           Add Hours
         </Button>
@@ -145,7 +142,7 @@ export function Dashboard({ onViewChange }: DashboardProps) {
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Recent Entries</h3>
           {recentEntries.length > 0 && (
-            <Button variant="ghost" onClick={() => onViewChange('list')} size="sm">
+            <Button variant="ghost" onClick={() => router.push('/list')} size="sm">
               View All
             </Button>
           )}
@@ -157,7 +154,7 @@ export function Dashboard({ onViewChange }: DashboardProps) {
               <Clock className="mx-auto text-slate-300 dark:text-slate-600 mb-4" size={64} />
               <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">No entries yet</h3>
               <p className="text-slate-600 dark:text-slate-400 mb-4">Start tracking your REPS hours by adding your first entry.</p>
-              <Button onClick={() => onViewChange('entry')}>Add First Entry</Button>
+              <Button onClick={() => router.push('/entry')}>Add First Entry</Button>
             </div>
           </Card>
         ) : (

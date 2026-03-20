@@ -1,23 +1,20 @@
 'use client';
 
+import { useRouter, usePathname } from 'next/navigation';
 import { LayoutDashboard, List, PlusCircle, Settings, Folder, Tag, ShieldCheck } from 'lucide-react';
-import type { ViewMode } from '@/types';
 import { useAuthStore } from '@/lib/authStore';
 
-interface NavigationProps {
-  currentView: ViewMode;
-  onViewChange: (view: ViewMode) => void;
-}
-
-export function Navigation({ currentView, onViewChange }: NavigationProps) {
+export function Navigation() {
+  const router = useRouter();
+  const pathname = usePathname();
   const isAdmin = useAuthStore((s) => s.user?.is_admin ?? false);
 
   const navItems = [
-    { id: 'dashboard' as ViewMode, label: 'Home', icon: LayoutDashboard },
-    { id: 'entry' as ViewMode, label: 'Add', icon: PlusCircle },
-    { id: 'list' as ViewMode, label: 'List', icon: List },
-    { id: 'settings' as ViewMode, label: 'Settings', icon: Settings },
-    ...(isAdmin ? [{ id: 'admin' as ViewMode, label: 'Admin', icon: ShieldCheck }] : []),
+    { href: '/dashboard', label: 'Home', icon: LayoutDashboard },
+    { href: '/entry', label: 'Add', icon: PlusCircle },
+    { href: '/list', label: 'List', icon: List },
+    { href: '/settings', label: 'Settings', icon: Settings },
+    ...(isAdmin ? [{ href: '/admin', label: 'Admin', icon: ShieldCheck }] : []),
   ];
 
   return (
@@ -27,12 +24,12 @@ export function Navigation({ currentView, onViewChange }: NavigationProps) {
         <div className="p-4 space-y-1">
           {navItems.map((item) => {
             const Icon = item.icon;
-            const isActive = currentView === item.id;
+            const isActive = pathname === item.href;
 
             return (
               <button
-                key={item.id}
-                onClick={() => onViewChange(item.id)}
+                key={item.href}
+                onClick={() => router.push(item.href)}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
                   isActive
                     ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 font-medium'
@@ -53,14 +50,14 @@ export function Navigation({ currentView, onViewChange }: NavigationProps) {
           </h3>
           <div className="space-y-1">
             <button
-              onClick={() => onViewChange('settings')}
+              onClick={() => router.push('/settings')}
               className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-sm"
             >
               <Tag size={18} />
               <span>Manage Categories</span>
             </button>
             <button
-              onClick={() => onViewChange('settings')}
+              onClick={() => router.push('/settings')}
               className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors text-sm"
             >
               <Folder size={18} />
@@ -75,12 +72,12 @@ export function Navigation({ currentView, onViewChange }: NavigationProps) {
         <div className="flex">
           {navItems.map((item) => {
             const Icon = item.icon;
-            const isActive = currentView === item.id;
+            const isActive = pathname === item.href;
 
             return (
               <button
-                key={item.id}
-                onClick={() => onViewChange(item.id)}
+                key={item.href}
+                onClick={() => router.push(item.href)}
                 className={`flex-1 flex flex-col items-center justify-center py-2 gap-1 transition-colors ${
                   isActive
                     ? 'text-primary-600 dark:text-primary-400'
