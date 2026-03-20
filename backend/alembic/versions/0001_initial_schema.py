@@ -6,7 +6,6 @@ Create Date: 2026-03-19
 """
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 
 revision = "0001"
 down_revision = None
@@ -20,123 +19,117 @@ def upgrade() -> None:
             CREATE TYPE entry_type AS ENUM ('MATERIAL', 'NON_MATERIAL');
         EXCEPTION WHEN duplicate_object THEN null;
         END $$;
+
+        CREATE TABLE IF NOT EXISTS users (
+            id UUID PRIMARY KEY,
+            email VARCHAR(255) NOT NULL,
+            name VARCHAR(100) NOT NULL,
+            picture_url VARCHAR(500),
+            google_id VARCHAR(255) NOT NULL,
+            is_admin BOOLEAN NOT NULL DEFAULT false,
+            has_complimentary_access BOOLEAN NOT NULL DEFAULT false,
+            created_at TIMESTAMP NOT NULL,
+            updated_at TIMESTAMP NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email);
+        CREATE UNIQUE INDEX IF NOT EXISTS ix_users_google_id ON users (google_id);
+
+        CREATE TABLE IF NOT EXISTS categories (
+            id UUID PRIMARY KEY,
+            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            name VARCHAR(50) NOT NULL,
+            color VARCHAR(7) NOT NULL,
+            created_at TIMESTAMP NOT NULL,
+            updated_at TIMESTAMP NOT NULL,
+            CONSTRAINT uq_category_user_name UNIQUE (user_id, name)
+        );
+        CREATE INDEX IF NOT EXISTS ix_categories_user_id ON categories (user_id);
+
+        CREATE TABLE IF NOT EXISTS properties (
+            id UUID PRIMARY KEY,
+            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            name VARCHAR(100) NOT NULL,
+            address VARCHAR(200),
+            created_at TIMESTAMP NOT NULL,
+            updated_at TIMESTAMP NOT NULL,
+            CONSTRAINT uq_property_user_name UNIQUE (user_id, name)
+        );
+        CREATE INDEX IF NOT EXISTS ix_properties_user_id ON properties (user_id);
+
+        CREATE TABLE IF NOT EXISTS entries (
+            id UUID PRIMARY KEY,
+            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            category_id UUID NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
+            property_id UUID NOT NULL REFERENCES properties(id) ON DELETE RESTRICT,
+            date DATE NOT NULL,
+            hours INTEGER NOT NULL,
+            minutes INTEGER NOT NULL,
+            total_minutes INTEGER NOT NULL,
+            type entry_type NOT NULL,
+            description TEXT NOT NULL,
+            notes TEXT,
+            created_at TIMESTAMP NOT NULL,
+            updated_at TIMESTAMP NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_entries_user_id ON entries (user_id);
+        CREATE INDEX IF NOT EXISTS ix_entries_date ON entries (date);
+
+        CREATE TABLE IF NOT EXISTS refresh_tokens (
+            id UUID PRIMARY KEY,
+            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            token_hash VARCHAR(255) NOT NULL UNIQUE,
+            expires_at TIMESTAMP NOT NULL,
+            created_at TIMESTAMP NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_refresh_tokens_user_id ON refresh_tokens (user_id);
+
+        CREATE TABLE IF NOT EXISTS attachments (
+            id UUID PRIMARY KEY,
+            entry_id UUID NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            file_ref VARCHAR(255) NOT NULL,
+            attachment_url VARCHAR(1000) NOT NULL,
+            original_filename VARCHAR(255) NOT NULL,
+            content_type VARCHAR(100) NOT NULL,
+            file_size INTEGER NOT NULL,
+            created_at TIMESTAMP NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS ix_attachments_entry_id ON attachments (entry_id);
+
+        CREATE TABLE IF NOT EXISTS invitations (
+            id UUID PRIMARY KEY,
+            email VARCHAR(255) NOT NULL,
+            token VARCHAR(64) NOT NULL UNIQUE,
+            invited_by_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            created_at TIMESTAMP NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            accepted_at TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS ix_invitations_email ON invitations (email);
+        CREATE UNIQUE INDEX IF NOT EXISTS ix_invitations_token ON invitations (token);
+
+        CREATE TABLE IF NOT EXISTS access_requests (
+            id UUID PRIMARY KEY,
+            email VARCHAR(255) NOT NULL,
+            name VARCHAR(100) NOT NULL,
+            picture_url VARCHAR(500),
+            status VARCHAR(20) NOT NULL DEFAULT 'pending',
+            requested_at TIMESTAMP NOT NULL,
+            reviewed_at TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS ix_access_requests_email ON access_requests (email);
     """))
-
-    op.create_table(
-        "users",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("email", sa.String(255), nullable=False),
-        sa.Column("name", sa.String(100), nullable=False),
-        sa.Column("picture_url", sa.String(500), nullable=True),
-        sa.Column("google_id", sa.String(255), nullable=False),
-        sa.Column("is_admin", sa.Boolean(), nullable=False, server_default="false"),
-        sa.Column("has_complimentary_access", sa.Boolean(), nullable=False, server_default="false"),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(), nullable=False),
-    )
-    op.create_index("ix_users_email", "users", ["email"], unique=True)
-    op.create_index("ix_users_google_id", "users", ["google_id"], unique=True)
-
-    op.create_table(
-        "categories",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("name", sa.String(50), nullable=False),
-        sa.Column("color", sa.String(7), nullable=False),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(), nullable=False),
-        sa.UniqueConstraint("user_id", "name", name="uq_category_user_name"),
-    )
-    op.create_index("ix_categories_user_id", "categories", ["user_id"])
-
-    op.create_table(
-        "properties",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("name", sa.String(100), nullable=False),
-        sa.Column("address", sa.String(200), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(), nullable=False),
-        sa.UniqueConstraint("user_id", "name", name="uq_property_user_name"),
-    )
-    op.create_index("ix_properties_user_id", "properties", ["user_id"])
-
-    op.create_table(
-        "entries",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("category_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("categories.id", ondelete="RESTRICT"), nullable=False),
-        sa.Column("property_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("properties.id", ondelete="RESTRICT"), nullable=False),
-        sa.Column("date", sa.Date(), nullable=False),
-        sa.Column("hours", sa.Integer(), nullable=False),
-        sa.Column("minutes", sa.Integer(), nullable=False),
-        sa.Column("total_minutes", sa.Integer(), nullable=False),
-        sa.Column("type", postgresql.ENUM("MATERIAL", "NON_MATERIAL", name="entry_type", create_type=False), nullable=False),
-        sa.Column("description", sa.Text(), nullable=False),
-        sa.Column("notes", sa.Text(), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.Column("updated_at", sa.DateTime(), nullable=False),
-    )
-    op.create_index("ix_entries_user_id", "entries", ["user_id"])
-    op.create_index("ix_entries_date", "entries", ["date"])
-
-    op.create_table(
-        "refresh_tokens",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("token_hash", sa.String(255), nullable=False, unique=True),
-        sa.Column("expires_at", sa.DateTime(), nullable=False),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-    )
-    op.create_index("ix_refresh_tokens_user_id", "refresh_tokens", ["user_id"])
-
-    op.create_table(
-        "attachments",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("entry_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("entries.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("file_ref", sa.String(255), nullable=False),
-        sa.Column("attachment_url", sa.String(1000), nullable=False),
-        sa.Column("original_filename", sa.String(255), nullable=False),
-        sa.Column("content_type", sa.String(100), nullable=False),
-        sa.Column("file_size", sa.Integer(), nullable=False),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-        )
-    op.create_index("ix_attachments_entry_id", "attachments", ["entry_id"])
-
-    op.create_table(
-        "invitations",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("email", sa.String(255), nullable=False),
-        sa.Column("token", sa.String(64), nullable=False, unique=True),
-        sa.Column("invited_by_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.Column("expires_at", sa.DateTime(), nullable=False),
-        sa.Column("accepted_at", sa.DateTime(), nullable=True),
-    )
-    op.create_index("ix_invitations_email", "invitations", ["email"])
-    op.create_index("ix_invitations_token", "invitations", ["token"], unique=True)
-
-    op.create_table(
-        "access_requests",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("email", sa.String(255), nullable=False),
-        sa.Column("name", sa.String(100), nullable=False),
-        sa.Column("picture_url", sa.String(500), nullable=True),
-        sa.Column("status", sa.String(20), nullable=False, server_default="pending"),
-        sa.Column("requested_at", sa.DateTime(), nullable=False),
-        sa.Column("reviewed_at", sa.DateTime(), nullable=True),
-    )
-    op.create_index("ix_access_requests_email", "access_requests", ["email"])
 
 
 def downgrade() -> None:
-    op.drop_table("access_requests")
-    op.drop_table("invitations")
-    op.drop_table("attachments")
-    op.drop_table("refresh_tokens")
-    op.drop_table("entries")
-    op.drop_table("properties")
-    op.drop_table("categories")
-    op.drop_table("users")
-    op.execute(sa.text("DROP TYPE IF EXISTS entry_type"))
+    op.execute(sa.text("""
+        DROP TABLE IF EXISTS access_requests;
+        DROP TABLE IF EXISTS invitations;
+        DROP TABLE IF EXISTS attachments;
+        DROP TABLE IF EXISTS refresh_tokens;
+        DROP TABLE IF EXISTS entries;
+        DROP TABLE IF EXISTS properties;
+        DROP TABLE IF EXISTS categories;
+        DROP TABLE IF EXISTS users;
+        DROP TYPE IF EXISTS entry_type;
+    """))
