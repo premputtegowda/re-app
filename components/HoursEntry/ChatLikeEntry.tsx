@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Clock, Home, FileText, CheckCircle, Loader2, AlertCircle, Brain, Lightbulb, ShieldCheck, Paperclip, X, Sparkles, RotateCcw, Pencil, Upload, Link, CheckCircle2 } from 'lucide-react';
 import { useStore } from '@/lib/store';
+import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useAttachmentStore, type PendingAttachment } from '@/lib/attachmentStore';
 import { requestDriveToken, uploadFileToDrive } from '@/lib/driveApi';
@@ -135,6 +136,7 @@ function SummaryBar({
 export function ChatLikeEntry() {
   const properties = useStore((s) => s.properties);
   const categories = useStore((s) => s.categories);
+  const router = useRouter();
   const addEntry = useStore((s) => s.addEntry);
   const addCategory = useStore((s) => s.addCategory);
   const patchEntryAttachments = useStore((s) => s.patchEntryAttachments);
@@ -789,9 +791,17 @@ export function ChatLikeEntry() {
                     <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Which property?</h3>
                   </div>
                   {properties.length === 0 ? (
-                    <p className="text-slate-500 dark:text-slate-400 text-center py-8">
-                      No properties available. Please add a property in Settings first.
-                    </p>
+                    <div className="text-center py-10 space-y-3">
+                      <Home className="mx-auto text-slate-300 dark:text-slate-600" size={36} />
+                      <p className="text-slate-600 dark:text-slate-400 font-medium">No properties added yet</p>
+                      <p className="text-sm text-slate-500 dark:text-slate-500">Add your first property in Settings before logging hours.</p>
+                      <button
+                        onClick={() => router.push('/settings#properties')}
+                        className="mt-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-lg transition-colors"
+                      >
+                        Go to Settings
+                      </button>
+                    </div>
                   ) : (
                     <div className="grid grid-cols-1 gap-3">
                       {properties.map((property, index) => (

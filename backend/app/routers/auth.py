@@ -33,8 +33,7 @@ DEFAULT_CATEGORIES = [
 
 
 async def create_default_data(db: AsyncSession, user: User) -> None:
-    """Create default categories and a sample property for new users."""
-    # Create default categories
+    """Create default categories for new users."""
     for cat_data in DEFAULT_CATEGORIES:
         category = Category(
             user_id=user.id,
@@ -42,14 +41,6 @@ async def create_default_data(db: AsyncSession, user: User) -> None:
             color=cat_data["color"],
         )
         db.add(category)
-
-    # Create a default property
-    default_property = Property(
-        user_id=user.id,
-        name="My First Property",
-        address="",
-    )
-    db.add(default_property)
 
     await db.commit()
 
