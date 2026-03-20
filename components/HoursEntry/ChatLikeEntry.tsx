@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Clock, Home, FileText, CheckCircle, Loader2, AlertCircle, Brain, Lightbulb, ShieldCheck, Paperclip, X, Sparkles, RotateCcw, Pencil, Upload, Link, CheckCircle2 } from 'lucide-react';
 import { useStore } from '@/lib/store';
@@ -306,32 +306,43 @@ export function ChatLikeEntry() {
     }
   };
 
-  const applyClassificationResult = (result: ClassificationResult) => {
+  const applyClassificationResult = useCallback((result: ClassificationResult, applyDescription = true) => {
     setClassificationResult(result);
     const aiText = result.refined_description || '';
     setRefinedDescription(aiText);
     setOriginalAiDescription(aiText);
-    setUseRefinedDescription(!!aiText);
+    if (applyDescription) {
+      setUseRefinedDescription(!!aiText);
+    } else {
+      setUseRefinedDescription(false);
+    }
     setSelectedType(result.type);
     // Use category_name if available, fall back to suggested_new_category so Save is always enabled
     const name = result.category_name ?? result.suggested_new_category ?? '';
     setCategoryInput(name);
     const match = categories.find((c) => c.name.toLowerCase() === name.toLowerCase());
-    setSelectedCategoryId(match?.id ?? '');
-  };
+    if (match) {
+      setSelectedCategoryId(match.id);
+    } else if (result.suggested_new_category) {
+      setSelectedCategoryId(`__new__${result.suggested_new_category}`);
+    } else {
+      setSelectedCategoryId('');
+    }
+  }, [categories]);
 
-  const runClassification = async () => {
-    const cached = getCachedClassification(formData.description);
+  const runClassification = useCallback(async (description: string, applyDescription = true) => {
+    if (!description.trim()) return;
+    const cached = getCachedClassification(description);
     if (cached) {
-      applyClassificationResult(cached);
+      applyClassificationResult(cached, applyDescription);
       return;
     }
     setIsClassifying(true);
     setClassificationError(null);
     try {
-      const result: ClassificationResult = await api.classifyActivity(formData.description);
-      setCachedClassification(formData.description, result);
-      applyClassificationResult(result);
+      const result: ClassificationResult = await api.classifyActivity(description);
+      setCachedClassification(description, result);
+      applyClassificationResult(result, applyDescription);
     } catch (err: any) {
       setClassificationError(err.message || 'Classification failed. Please select manually.');
       const firstCat = categories.length > 0 ? categories[0] : null;
@@ -340,7 +351,17 @@ export function ChatLikeEntry() {
     } finally {
       setIsClassifying(false);
     }
-  };
+  }, [categories, applyClassificationResult]);
+
+  // Re-classify when description changes after a classification has already been done
+  // but not while the user is actively editing inline (they'll trigger it on Done)
+  useEffect(() => {
+    if (!classificationResult || !formData.description.trim() || editingStep === 3) return;
+    const timer = setTimeout(() => {
+      runClassification(formData.description, false);
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [formData.description]);
 
   const handleDescriptionNext = async () => {
     if (!formData.description.trim()) {
@@ -348,7 +369,7 @@ export function ChatLikeEntry() {
       return;
     }
     setErrors([]);
-    await runClassification();
+    await runClassification(formData.description);
     setStep(4);
   };
 
@@ -359,7 +380,7 @@ export function ChatLikeEntry() {
     }
     setErrors([]);
     setEditingStep(null);
-    await runClassification();
+    await runClassification(formData.description, true);
   };
 
   const CATEGORY_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#0ea5e9'];
@@ -894,6 +915,14 @@ export function ChatLikeEntry() {
                     <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 block">
                       Activity Description <span className="text-red-500">*</span>
                     </label>
+
+                    {/* Original description — shown as readable text when AI refined is active */}
+                    {refinedDescription && useRefinedDescription && formData.description && (
+                      <div className="mb-3 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
+                        <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Your original description</p>
+                        <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{formData.description}</p>
+                      </div>
+                    )}
 
                     {/* Mode indicator + revert buttons (only when AI result exists) */}
                     {refinedDescription && (

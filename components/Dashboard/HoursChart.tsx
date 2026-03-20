@@ -171,6 +171,31 @@ export function TypeComparisonChart({ materialHours, nonMaterialHours }: TypeCom
 
   const total = materialHours + nonMaterialHours;
 
+  const renderLabel = ({ cx, cy, midAngle, outerRadius, percent }: {
+    cx: number; cy: number; midAngle: number; outerRadius: number; percent: number;
+  }) => {
+    const RADIAN = Math.PI / 180;
+    const radius = outerRadius + 28;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+    return (
+      <text
+        x={x}
+        y={y}
+        textAnchor={x > cx ? 'start' : 'end'}
+        dominantBaseline="central"
+        fontSize={13}
+        fontWeight={700}
+        fill="#374151"
+        stroke="white"
+        strokeWidth={4}
+        paintOrder="stroke"
+      >
+        {`${(percent * 100).toFixed(0)}%`}
+      </text>
+    );
+  };
+
   return (
     <Card>
       <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Material vs Non-Material Hours</h3>
@@ -178,17 +203,17 @@ export function TypeComparisonChart({ materialHours, nonMaterialHours }: TypeCom
         <p className="text-center text-slate-500 dark:text-slate-400 py-8">No data available</p>
       ) : (
         <div className="space-y-4">
-          <ResponsiveContainer width="100%" height={200}>
-            <PieChart>
+          <ResponsiveContainer width="100%" height={240}>
+            <PieChart margin={{ top: 20, bottom: 20, left: 20, right: 20 }}>
               <Pie
                 data={data}
                 cx="50%"
                 cy="50%"
                 innerRadius={60}
                 outerRadius={80}
-                fill="#8884d8"
                 dataKey="value"
-                label={({ percent }) => `${(percent * 100).toFixed(0)}%`}
+                label={renderLabel}
+                labelLine={{ stroke: '#94a3b8', strokeWidth: 1 }}
               >
                 {data.map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={entry.color} />
