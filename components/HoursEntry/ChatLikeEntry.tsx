@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Clock, Home, FileText, CheckCircle, Loader2, AlertCircle, Brain, Lightbulb, ShieldCheck, Paperclip, X, Sparkles, RotateCcw, Pencil, Upload, Link, CheckCircle2 } from 'lucide-react';
 import { useStore } from '@/lib/store';
+import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useAttachmentStore, type PendingAttachment } from '@/lib/attachmentStore';
 import { requestDriveToken, uploadFileToDrive } from '@/lib/driveApi';
@@ -135,9 +136,17 @@ function SummaryBar({
 export function ChatLikeEntry() {
   const properties = useStore((s) => s.properties);
   const categories = useStore((s) => s.categories);
+  const router = useRouter();
   const addEntry = useStore((s) => s.addEntry);
   const addCategory = useStore((s) => s.addCategory);
   const patchEntryAttachments = useStore((s) => s.patchEntryAttachments);
+
+  const CATEGORY_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#0ea5e9', '#14b8a6', '#f97316', '#06b6d4', '#a855f7', '#ec4899', '#84cc16'];
+
+  const getUnusedCategoryColor = () => {
+    const usedColors = new Set(categories.map((c) => c.color));
+    return CATEGORY_COLORS.find((c) => !usedColors.has(c)) ?? CATEGORY_COLORS[categories.length % CATEGORY_COLORS.length];
+  };
 
   const [step, setStep] = useState(1);
   const [editingStep, setEditingStep] = useState<number | null>(null);
@@ -306,7 +315,7 @@ export function ChatLikeEntry() {
     }
   };
 
-  const applyClassificationResult = useCallback((result: ClassificationResult, applyDescription = true) => {
+  const applyClassificationResult = useCallback(async (result: ClassificationResult, applyDescription = true) => {
     setClassificationResult(result);
     const aiText = result.refined_description || '';
     setRefinedDescription(aiText);
@@ -317,24 +326,38 @@ export function ChatLikeEntry() {
       setUseRefinedDescription(false);
     }
     setSelectedType(result.type);
-    // Use category_name if available, fall back to suggested_new_category so Save is always enabled
     const name = result.category_name ?? result.suggested_new_category ?? '';
     setCategoryInput(name);
     const match = categories.find((c) => c.name.toLowerCase() === name.toLowerCase());
     if (match) {
       setSelectedCategoryId(match.id);
-    } else if (result.suggested_new_category) {
-      setSelectedCategoryId(`__new__${result.suggested_new_category}`);
+    } else if (name) {
+      // Auto-create the category immediately
+      const color = getUnusedCategoryColor();
+      setIsCreatingCategory(true);
+      try {
+        await addCategory({ name, color });
+        const created = useStore.getState().categories.find(
+          (c) => c.name.toLowerCase() === name.toLowerCase()
+        );
+        if (created) {
+          setSelectedCategoryId(created.id);
+        }
+      } catch {
+        setSelectedCategoryId(`__new__${name}`);
+      } finally {
+        setIsCreatingCategory(false);
+      }
     } else {
       setSelectedCategoryId('');
     }
-  }, [categories]);
+  }, [categories, addCategory]);
 
   const runClassification = useCallback(async (description: string, applyDescription = true) => {
     if (!description.trim()) return;
     const cached = getCachedClassification(description);
     if (cached) {
-      applyClassificationResult(cached, applyDescription);
+      await applyClassificationResult(cached, applyDescription);
       return;
     }
     setIsClassifying(true);
@@ -342,7 +365,7 @@ export function ChatLikeEntry() {
     try {
       const result: ClassificationResult = await api.classifyActivity(description);
       setCachedClassification(description, result);
-      applyClassificationResult(result, applyDescription);
+      await applyClassificationResult(result, applyDescription);
     } catch (err: any) {
       setClassificationError(err.message || 'Classification failed. Please select manually.');
       const firstCat = categories.length > 0 ? categories[0] : null;
@@ -383,11 +406,9 @@ export function ChatLikeEntry() {
     await runClassification(formData.description, true);
   };
 
-  const CATEGORY_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#0ea5e9'];
-
   const handleCategorySelect = async (option: { id: string; name: string; isNew: boolean }) => {
     if (option.isNew) {
-      const color = CATEGORY_COLORS[categories.length % CATEGORY_COLORS.length];
+      const color = getUnusedCategoryColor();
       setIsCreatingCategory(true);
       try {
         await addCategory({ name: option.name, color });
@@ -416,7 +437,7 @@ export function ChatLikeEntry() {
       setSelectedCategoryId(existing.id);
       setCategoryInput(existing.name);
     } else {
-      const color = CATEGORY_COLORS[categories.length % CATEGORY_COLORS.length];
+      const color = getUnusedCategoryColor();
       setIsCreatingCategory(true);
       try {
         await addCategory({ name: targetName, color });
@@ -451,7 +472,7 @@ export function ChatLikeEntry() {
 
     // Create the category on the fly if it doesn't match an existing one
     if (!categoryId) {
-      const color = CATEGORY_COLORS[categories.length % CATEGORY_COLORS.length];
+      const color = getUnusedCategoryColor();
       try {
         await addCategory({ name: trimmedName, color });
         const created = useStore.getState().categories.find(
@@ -770,9 +791,17 @@ export function ChatLikeEntry() {
                     <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Which property?</h3>
                   </div>
                   {properties.length === 0 ? (
-                    <p className="text-slate-500 dark:text-slate-400 text-center py-8">
-                      No properties available. Please add a property in Settings first.
-                    </p>
+                    <div className="text-center py-10 space-y-3">
+                      <Home className="mx-auto text-slate-300 dark:text-slate-600" size={36} />
+                      <p className="text-slate-600 dark:text-slate-400 font-medium">No properties added yet</p>
+                      <p className="text-sm text-slate-500 dark:text-slate-500">Add your first property in Settings before logging hours.</p>
+                      <button
+                        onClick={() => router.push('/settings#properties')}
+                        className="mt-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-lg transition-colors"
+                      >
+                        Go to Settings
+                      </button>
+                    </div>
                   ) : (
                     <div className="grid grid-cols-1 gap-3">
                       {properties.map((property, index) => (
