@@ -141,7 +141,7 @@ export function MonthlyTrendChart({ data }: MonthlyTrendChartProps) {
             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
             <XAxis dataKey="month" tick={{ fontSize: 12 }} />
             <YAxis tick={{ fontSize: 12 }} />
-            <Tooltip />
+            <Tooltip formatter={(v: number) => [`${v}h`, 'Hours']} />
             <Legend />
             <Line
               type="monotone"

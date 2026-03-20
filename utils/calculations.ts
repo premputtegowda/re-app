@@ -71,6 +71,8 @@ export const calculateSummary = (entries: HoursEntry[]): SummaryData => {
   return {
     totalHours: Math.floor(totalMinutes / 60),
     totalMinutes,
+    monthMinutes,
+    weekMinutes,
     monthHours: Math.floor(monthMinutes / 60),
     weekHours: Math.floor(weekMinutes / 60),
     materialMinutes,
@@ -166,13 +168,13 @@ export const calculateMonthlyData = (entries: HoursEntry[]): MonthlyData[] => {
 
     if (existing) {
       existing.totalMinutes += entry.totalMinutes;
-      existing.totalHours = Math.floor(existing.totalMinutes / 60);
+      existing.totalHours = +(existing.totalMinutes / 60).toFixed(2);
       existing.entryCount += 1;
     } else {
       monthlyMap.set(month, {
         month,
         totalMinutes: entry.totalMinutes,
-        totalHours: Math.floor(entry.totalMinutes / 60),
+        totalHours: +(entry.totalMinutes / 60).toFixed(2),
         entryCount: 1,
       });
     }

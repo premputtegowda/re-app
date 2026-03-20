@@ -54,8 +54,8 @@ export function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {[
           { title: "Total Hours", value: formatDuration(summary.totalMinutes), subtitle: `${summary.entriesCount} entries`, icon: Clock, iconColor: "text-primary-600" },
-          { title: "This Month", value: formatDuration(summary.monthHours * 60), subtitle: "Current month", icon: Calendar, iconColor: "text-secondary-600" },
-          { title: "This Week", value: formatDuration(summary.weekHours * 60), subtitle: "Last 7 days", icon: TrendingUp, iconColor: "text-accent-600" },
+          { title: "This Month", value: formatDuration(summary.monthMinutes), subtitle: "Current month", icon: Calendar, iconColor: "text-secondary-600" },
+          { title: "This Week", value: formatDuration(summary.weekMinutes), subtitle: "Last 7 days", icon: TrendingUp, iconColor: "text-accent-600" },
         ].map((card, index) => (
           <motion.div
             key={card.title}

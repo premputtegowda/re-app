@@ -61,6 +61,8 @@ export interface HoursFilter {
 export interface SummaryData {
   totalHours: number;
   totalMinutes: number;
+  monthMinutes: number;
+  weekMinutes: number;
   monthHours: number;
   weekHours: number;
   materialMinutes: number;
