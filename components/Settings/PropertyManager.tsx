@@ -19,6 +19,7 @@ export function PropertyManager() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingProperty, setEditingProperty] = useState<Property | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleteBlocked, setDeleteBlocked] = useState<string | null>(null);
   const [errors, setErrors] = useState<any[]>([]);
 
   const [formData, setFormData] = useState<PropertyFormData>({
@@ -96,9 +97,9 @@ export function PropertyManager() {
 
           return (
             <Card key={property.id} padding="sm">
-              <div className="flex items-start justify-between">
+              <div className="flex items-start justify-between gap-2">
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-slate-900 dark:text-white truncate">{property.name}</p>
+                  <p className="font-medium text-slate-900 dark:text-white">{property.name}</p>
                   {property.address && (
                     <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{property.address}</p>
                   )}
@@ -108,7 +109,7 @@ export function PropertyManager() {
                     </p>
                   )}
                 </div>
-                <div className="flex gap-1 ml-2">
+                <div className="flex gap-1 flex-shrink-0">
                   <button
                     onClick={() => handleOpenEdit(property)}
                     className="p-2 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
@@ -117,10 +118,9 @@ export function PropertyManager() {
                     <Edit2 size={16} />
                   </button>
                   <button
-                    onClick={() => setDeleteConfirm(property.id)}
+                    onClick={() => isInUse ? setDeleteBlocked(property.id) : setDeleteConfirm(property.id)}
                     className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
                     title="Delete"
-                    disabled={isInUse}
                   >
                     <Trash2 size={16} />
                   </button>
@@ -185,6 +185,25 @@ export function PropertyManager() {
               {editingProperty ? 'Update' : 'Add'}
             </Button>
           </div>
+        </div>
+      </Modal>
+
+      {/* Blocked Delete Modal */}
+      <Modal
+        isOpen={deleteBlocked !== null}
+        onClose={() => setDeleteBlocked(null)}
+        title="Cannot Delete Property"
+      >
+        <div className="space-y-4">
+          {(() => {
+            const count = entries.filter((e) => e.property === deleteBlocked).length;
+            return (
+              <p className="text-slate-600 dark:text-slate-400">
+                This property has <span className="font-semibold text-slate-900 dark:text-white">{count} {count === 1 ? 'entry' : 'entries'}</span> associated with it. Please delete those entries first before removing this property.
+              </p>
+            );
+          })()}
+          <Button onClick={() => setDeleteBlocked(null)} fullWidth>OK</Button>
         </div>
       </Modal>
 
