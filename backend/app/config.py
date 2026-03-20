@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     # App
     app_name: str = "REPS Tracker API"
     debug: bool = False
+    invite_only: bool = False  # Set to True to restrict registration to invited users only
 
     # Database
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/reps_tracker"
