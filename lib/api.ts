@@ -6,12 +6,17 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 let accessToken: string | null = null;
 let refreshToken: string | null = null;
 
-export const setTokens = (access: string, refresh: string) => {
+// Access token expiry stored as Unix ms timestamp
+let accessTokenExpiresAt: number | null = null;
+
+export const setTokens = (access: string, refresh: string, expiresInSeconds = 900) => {
   accessToken = access;
   refreshToken = refresh;
+  accessTokenExpiresAt = Date.now() + expiresInSeconds * 1000;
   if (typeof window !== 'undefined') {
     localStorage.setItem('access_token', access);
     localStorage.setItem('refresh_token', refresh);
+    localStorage.setItem('access_token_expires_at', String(accessTokenExpiresAt));
   }
 };
 
@@ -19,17 +24,28 @@ export const getTokens = () => {
   if (typeof window !== 'undefined' && !accessToken) {
     accessToken = localStorage.getItem('access_token');
     refreshToken = localStorage.getItem('refresh_token');
+    const exp = localStorage.getItem('access_token_expires_at');
+    accessTokenExpiresAt = exp ? Number(exp) : null;
   }
-  return { accessToken, refreshToken };
+  return { accessToken, refreshToken, accessTokenExpiresAt };
 };
 
 export const clearTokens = () => {
   accessToken = null;
   refreshToken = null;
+  accessTokenExpiresAt = null;
   if (typeof window !== 'undefined') {
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
+    localStorage.removeItem('access_token_expires_at');
   }
+};
+
+const isAccessTokenExpiringSoon = (): boolean => {
+  const { accessTokenExpiresAt: exp } = getTokens();
+  if (!exp) return false;
+  // Refresh if less than 60 seconds remaining
+  return Date.now() > exp - 60_000;
 };
 
 // API error class
@@ -53,15 +69,16 @@ const refreshAccessToken = async (): Promise<boolean> => {
     });
 
     if (!response.ok) {
-      clearTokens();
+      // Only clear tokens on explicit auth rejection, not server errors
+      if (response.status === 401) clearTokens();
       return false;
     }
 
     const data = await response.json();
-    setTokens(data.access_token, data.refresh_token);
+    setTokens(data.access_token, data.refresh_token, data.expires_in ?? 900);
     return true;
   } catch {
-    clearTokens();
+    // Network error — keep tokens, don't log the user out
     return false;
   }
 };
@@ -71,6 +88,11 @@ const authFetch = async (
   endpoint: string,
   options: RequestInit = {}
 ): Promise<Response> => {
+  // Proactively refresh if the access token is about to expire
+  if (isAccessTokenExpiringSoon()) {
+    await refreshAccessToken();
+  }
+
   const { accessToken: token } = getTokens();
 
   const headers: HeadersInit = {
@@ -119,7 +141,7 @@ export const api = {
     }
 
     const data = await response.json();
-    setTokens(data.access_token, data.refresh_token);
+    setTokens(data.access_token, data.refresh_token, data.expires_in ?? 900);
     return data;
   },
 
