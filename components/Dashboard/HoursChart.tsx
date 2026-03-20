@@ -141,7 +141,7 @@ export function MonthlyTrendChart({ data }: MonthlyTrendChartProps) {
             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
             <XAxis dataKey="month" tick={{ fontSize: 12 }} />
             <YAxis tick={{ fontSize: 12 }} />
-            <Tooltip />
+            <Tooltip formatter={(v: number) => [`${v}h`, 'Hours']} />
             <Legend />
             <Line
               type="monotone"
@@ -159,17 +159,20 @@ export function MonthlyTrendChart({ data }: MonthlyTrendChartProps) {
 }
 
 interface TypeComparisonChartProps {
-  materialHours: number;
-  nonMaterialHours: number;
+  materialMinutes: number;
+  nonMaterialMinutes: number;
 }
 
-export function TypeComparisonChart({ materialHours, nonMaterialHours }: TypeComparisonChartProps) {
+export function TypeComparisonChart({ materialMinutes, nonMaterialMinutes }: TypeComparisonChartProps) {
+  const materialHours = +(materialMinutes / 60).toFixed(2);
+  const nonMaterialHours = +(nonMaterialMinutes / 60).toFixed(2);
+
   const data = [
-    { name: 'Material', value: materialHours, color: '#10B981' },
-    { name: 'Non-Material', value: nonMaterialHours, color: '#F59E0B' },
+    { name: 'Material', value: materialMinutes, color: '#10B981' },
+    { name: 'Non-Material', value: nonMaterialMinutes, color: '#F59E0B' },
   ];
 
-  const total = materialHours + nonMaterialHours;
+  const total = materialMinutes + nonMaterialMinutes;
 
   const renderLabel = ({ cx, cy, midAngle, outerRadius, percent }: {
     cx: number; cy: number; midAngle: number; outerRadius: number; percent: number;
@@ -219,7 +222,7 @@ export function TypeComparisonChart({ materialHours, nonMaterialHours }: TypeCom
                   <Cell key={`cell-${index}`} fill={entry.color} />
                 ))}
               </Pie>
-              <Tooltip />
+              <Tooltip formatter={(v: number) => [`${(v / 60).toFixed(2)}h`, 'Hours']} />
             </PieChart>
           </ResponsiveContainer>
 

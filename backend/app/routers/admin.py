@@ -252,18 +252,18 @@ async def create_invitation(
         invite_url = f"{settings.frontend_url}/invite?token={token}"
         body_text = (
             f"Hi,\n\n"
-            f"You've been invited by {admin.name} to join REPS Tracker with complimentary access.\n\n"
+            f"You've been invited to join DealstackRE with complimentary access.\n\n"
             f"Click the link below to accept your invitation (expires in {INVITE_EXPIRY_DAYS} days):\n"
             f"{invite_url}\n\n"
-            f"REPS Tracker helps real estate professionals track and document their hours "
+            f"DealstackRE helps real estate professionals track and document their hours "
             f"for IRS Real Estate Professional Status (REPS) qualification.\n\n"
-            f"— The REPS Tracker Team"
+            f"— The DealstackRE Team"
         )
         try:
             sender = get_smtp_sender()
             await sender.send_plain(
                 to_email=body.email,
-                subject=f"{admin.name} invited you to REPS Tracker",
+                subject="You've been invited to DealstackRE",
                 body=body_text,
             )
         except Exception:
@@ -364,14 +364,14 @@ async def approve_access_request(
         invite_url = f"{settings.frontend_url}/invite?token={token}"
         body_text = (
             f"Hi {req.name},\n\n"
-            f"Your request to join REPS Tracker has been approved by {admin.name}!\n\n"
+            f"Your request to join DealstackRE has been approved!\n\n"
             f"Click the link below to accept your invitation (expires in {INVITE_EXPIRY_DAYS} days):\n"
             f"{invite_url}\n\n"
-            f"— The REPS Tracker Team"
+            f"— The DealstackRE Team"
         )
         try:
             sender = get_smtp_sender()
-            await sender.send_plain(to_email=req.email, subject="You're in! Your REPS Tracker invite", body=body_text)
+            await sender.send_plain(to_email=req.email, subject="You're in! Your DealstackRE invite", body=body_text)
         except Exception:
             pass
 
