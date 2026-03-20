@@ -63,6 +63,8 @@ export interface SummaryData {
   totalMinutes: number;
   monthHours: number;
   weekHours: number;
+  materialMinutes: number;
+  nonMaterialMinutes: number;
   materialHours: number;
   nonMaterialHours: number;
   entriesCount: number;

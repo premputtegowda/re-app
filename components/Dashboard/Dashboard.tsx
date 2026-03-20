@@ -76,8 +76,8 @@ export function Dashboard() {
         className="grid grid-cols-1 lg:grid-cols-2 gap-6"
       >
         <TypeComparisonChart
-          materialHours={summary.materialHours}
-          nonMaterialHours={summary.nonMaterialHours}
+          materialMinutes={summary.materialMinutes}
+          nonMaterialMinutes={summary.nonMaterialMinutes}
         />
 
         {/* Quick Stats */}
