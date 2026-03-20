@@ -23,8 +23,10 @@ export function Header() {
               <Clock className="text-white" size={24} />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-slate-900 dark:text-white">REPS Tracker</h1>
-              <p className="text-xs text-slate-600 dark:text-slate-400 hidden sm:block">Real Estate Professional Status Hours</p>
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-bold text-slate-900 dark:text-white">REPS Tracker</h1>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">by <span className="font-semibold text-primary-600 dark:text-primary-400">DealstackRE</span></p>
             </div>
           </div>
 

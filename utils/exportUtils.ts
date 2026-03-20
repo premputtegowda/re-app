@@ -47,7 +47,7 @@ export const exportToCSV = (
       escape(propertyName),
       entry.type === 'material' ? 'Material' : 'Non-Material',
       escape(entry.description),
-      escape(attachmentLinks),
+      attachmentLinks,
     ];
   });
 

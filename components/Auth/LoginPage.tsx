@@ -53,9 +53,14 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
           >
             <Home className="w-8 h-8 text-white" />
           </motion.div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-            DealstackRE
-          </h1>
+          <div className="flex items-center justify-center gap-2">
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+              DealstackRE
+            </h1>
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-700">
+              Beta
+            </span>
+          </div>
           <p className="text-gray-600 dark:text-gray-400 mt-2">
             Your all-in-one platform for smarter real estate investing
           </p>
