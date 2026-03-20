@@ -17,7 +17,7 @@ depends_on = None
 def upgrade() -> None:
     op.execute(sa.text("""
         DO $$ BEGIN
-            CREATE TYPE entry_type AS ENUM ('material', 'non-material');
+            CREATE TYPE entry_type AS ENUM ('MATERIAL', 'NON_MATERIAL');
         EXCEPTION WHEN duplicate_object THEN null;
         END $$;
     """))
@@ -71,7 +71,7 @@ def upgrade() -> None:
         sa.Column("hours", sa.Integer(), nullable=False),
         sa.Column("minutes", sa.Integer(), nullable=False),
         sa.Column("total_minutes", sa.Integer(), nullable=False),
-        sa.Column("type", postgresql.ENUM("material", "non-material", name="entry_type", create_type=False), nullable=False),
+        sa.Column("type", postgresql.ENUM("MATERIAL", "NON_MATERIAL", name="entry_type", create_type=False), nullable=False),
         sa.Column("description", sa.Text(), nullable=False),
         sa.Column("notes", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
