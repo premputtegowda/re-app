@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from pydantic import BaseModel
 
 from app.config import Settings, get_settings
@@ -27,6 +28,50 @@ REPS_CATEGORIES: list[dict] = [
 
 _VALID_CATEGORY_NAMES = {c["name"] for c in REPS_CATEGORIES}
 _AUDIT_STRENGTHS = {"high", "medium", "low"}
+
+# Static system instruction — sent once per request, not inlined in user message
+_SYSTEM_INSTRUCTION = (
+    "You are a Real Estate Tax Compliance Expert specializing in Internal Revenue Code "
+    "Section 469(c)(7) and Treasury Regulation § 1.469-5T. Your goal is to classify "
+    "real estate activities to qualify for Real Estate Professional Status (REPS) and "
+    "meet Material Participation tests.\n\n"
+    "AVAILABLE CATEGORIES — pick exactly one:\n"
+    + "\n".join(f'  - "{c["name"]}" ({c["type"]})' for c in REPS_CATEGORIES)
+    + "\n\n"
+    "CLASSIFICATION RULES:\n"
+    "- Material Participation: Activities involving operations, management, construction, "
+    "or tenant relations. Must be regular, continuous, and substantial.\n"
+    "- Non-Material (Investor): Administrative or high-level tasks that do NOT count "
+    "toward the 750-hour REPS requirement (bookkeeping, research, education, passive "
+    "travel). These carry High Audit Risk.\n"
+    "- If the activity involves actively directing people or making real-time decisions "
+    "about the property, it is Material — even over the phone or in a meeting.\n\n"
+    "Return valid JSON only — no markdown fences, no extra text. Required keys:\n"
+    '{"refined_title","refined_description","evidence_note","category_name","type",'
+    '"audit_strength","justification","audit_tip"}\n\n'
+    "Rules:\n"
+    "- category_name: verbatim from the list above, OR null to suggest a new category\n"
+    "- type: exactly \"material\" or \"non-material\"\n"
+    "- audit_strength: \"high\" (core REPS), \"medium\" (needs detail), or \"low\" (weak/non-qualifying)\n"
+    "- Non-material activities must have low or medium audit_strength\n"
+    "- If proposing a new category (confidence < 0.6), set category_name to null and "
+    "add suggested_new_category: \"<2-5 word name>\""
+)
+
+_USER_PROMPT_TEMPLATE = (
+    'ACTIVITY: "{description}"\n\n'
+    "Respond with JSON matching this shape:\n"
+    '{{\n'
+    '  "refined_title": "Audit-ready title",\n'
+    '  "refined_description": "Purpose: [...]. Result: [...].",\n'
+    '  "evidence_note": "Cite or attach: [documents/photos/invoices/emails].",\n'
+    '  "category_name": "Property Management",\n'
+    '  "type": "material",\n'
+    '  "audit_strength": "high",\n'
+    '  "justification": "One sentence under IRC § 469(c)(7).",\n'
+    '  "audit_tip": "One specific documentation suggestion."\n'
+    "}}"
+)
 
 
 class ClassificationResult(BaseModel):
@@ -54,77 +99,29 @@ class GeminiActivityClassifier:
     """Classifies REPS activities using Gemini."""
 
     api_key: str
+    _client: genai.Client = field(init=False, default=None)
 
-    def _build_prompt(self, description: str) -> str:
-        category_list = "\n".join(
-            f'  - "{c["name"]}" ({c["type"]})' for c in REPS_CATEGORIES
-        )
-        return f"""You are a Real Estate Tax Compliance Expert specializing in Internal Revenue Code Section 469(c)(7) and Treasury Regulation § 1.469-5T. Your goal is to classify real estate activities to qualify for Real Estate Professional Status (REPS) and meet Material Participation tests.
-
-AVAILABLE CATEGORIES — you MUST pick exactly one:
-{category_list}
-
-CLASSIFICATION RULES:
-- Material Participation: Activities involving operations, management, construction, or tenant relations. Must be regular, continuous, and substantial.
-- Non-Material (Investor): Administrative or high-level tasks that do NOT count toward the 750-hour REPS requirement (bookkeeping, research, education, passive travel). These carry High Audit Risk.
-
-Key distinction: if the activity involves actively directing people or making real-time decisions about what happens at the property, it is Material — even over the phone or in a meeting.
-
-ACTIVITY: "{description}"
-
-Analyze this activity and return exactly this JSON (all seven keys required):
-{{
-  "refined_title": "Professional, audit-ready title (e.g. 'Roof Leak Mitigation: Contractor Coordination')",
-  "refined_description": "Purpose: [what the taxpayer set out to do and why]. Result: [what was decided, approved, or accomplished].",
-  "evidence_note": "Cite or attach: [specific documents, photos, invoices, emails, or records that prove this activity occurred].",
-  "category_name": "Property Management",
-  "type": "material",
-  "audit_strength": "high",
-  "justification": "One sentence referencing why it qualifies (or doesn't) under IRC § 469(c)(7).",
-  "audit_tip": "One specific documentation suggestion to strengthen the audit trail."
-}}
-
-Rules:
-- category_name must be exactly one of the names listed above (copy it verbatim), OR null if suggesting a new category (see below)
-- type must be exactly "material" or "non-material"
-- audit_strength must be exactly "high", "medium", or "low"
-  - high = core, well-documented REPS activity
-  - medium = qualifies but may need more detail
-  - low = weak or non-qualifying (use for non-material activities)
-- Non-material activities should always have low or medium audit_strength
-
-NEW CATEGORY SUGGESTION:
-If none of the existing REPS categories are a good fit (your confidence would be below 0.6),
-you may propose an entirely new category instead. Set category_name to null and provide a
-concise, professional category name in suggested_new_category:
-{{
-  "refined_title": "...",
-  "refined_description": "...",
-  "evidence_note": "...",
-  "category_name": null,
-  "suggested_new_category": "<concise category name, 2-5 words>",
-  "type": "material",
-  "audit_strength": "medium",
-  "justification": "...",
-  "audit_tip": "..."
-}}
-
-Respond with valid JSON only — no markdown fences, no extra text."""
+    def _get_client(self) -> genai.Client:
+        """Return cached client, creating it once on first use."""
+        if self._client is None:
+            self._client = genai.Client(api_key=self.api_key)
+        return self._client
 
     async def classify(self, description: str) -> ClassificationResult:
-        genai.configure(api_key=self.api_key)
-        model = genai.GenerativeModel(
-            model_name="gemini-2.5-flash",
-            generation_config=genai.types.GenerationConfig(
-                response_mime_type="application/json",
-                temperature=0,
-            ),
-        )
-
-        prompt = self._build_prompt(description)
+        client = self._get_client()
+        prompt = _USER_PROMPT_TEMPLATE.format(description=description)
 
         try:
-            response = model.generate_content(prompt)
+            response = await client.aio.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=_SYSTEM_INSTRUCTION,
+                    response_mime_type="application/json",
+                    temperature=0,
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
+                ),
+            )
             raw = response.text.strip()
             logger.debug("Gemini raw response: %s", raw)
             data = json.loads(raw)
