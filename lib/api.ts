@@ -57,7 +57,7 @@ export class ApiError extends Error {
 }
 
 // Refresh access token
-const refreshAccessToken = async (): Promise<boolean> => {
+export const refreshAccessToken = async (): Promise<boolean> => {
   const { refreshToken: currentRefresh } = getTokens();
   if (!currentRefresh) return false;
 
