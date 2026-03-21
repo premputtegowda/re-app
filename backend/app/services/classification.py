@@ -119,7 +119,6 @@ class GeminiActivityClassifier:
                     system_instruction=_SYSTEM_INSTRUCTION,
                     response_mime_type="application/json",
                     temperature=0,
-                    thinking_config=types.ThinkingConfig(thinking_budget=0),
                 ),
             )
             raw = response.text.strip()
