@@ -8,11 +8,7 @@ from typing import Protocol, runtime_checkable
 
 from google import genai
 from google.genai import types
-from pydantic import BaseModel, ConfigDict
-
-
-class ThinkingConfig(BaseModel):
-    model_config = ConfigDict(extra='ignore')
+from pydantic import BaseModel
 
 from app.config import Settings, get_settings
 
@@ -125,8 +121,7 @@ class GeminiActivityClassifier:
                     temperature=0,
                     top_p=1,
                     top_k=1,
-                    max_output_tokens=512,
-                    thinking_config=ThinkingConfig(thinkingBudget=0),
+                    max_output_tokens=1024,
                 ),
             )
             raw = response.text.strip()
