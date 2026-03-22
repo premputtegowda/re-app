@@ -122,7 +122,6 @@ class GeminiActivityClassifier:
                     top_p=1,
                     top_k=1,
                     max_output_tokens=512,
-                    thinking_config=types.ThinkingConfig(thinkingBudget=0),
                 ),
             )
             raw = response.text.strip()
