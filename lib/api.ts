@@ -88,12 +88,12 @@ const authFetch = async (
   endpoint: string,
   options: RequestInit = {}
 ): Promise<Response> => {
-  // Proactively refresh if the access token is about to expire
-  if (isAccessTokenExpiringSoon()) {
+  // Proactively refresh if the access token is about to expire or missing
+  if (!getTokens().accessToken || isAccessTokenExpiringSoon()) {
     await refreshAccessToken();
   }
 
-  const { accessToken: token } = getTokens();
+  let { accessToken: token } = getTokens();
 
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
@@ -109,12 +109,12 @@ const authFetch = async (
     headers,
   });
 
-  // If unauthorized, try to refresh token
-  if (response.status === 401 && token) {
+  // If unauthorized, try to refresh token and retry once
+  if (response.status === 401) {
     const refreshed = await refreshAccessToken();
     if (refreshed) {
-      const { accessToken: newToken } = getTokens();
-      (headers as Record<string, string>)['Authorization'] = `Bearer ${newToken}`;
+      ({ accessToken: token } = getTokens());
+      (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
       response = await fetch(`${API_BASE_URL}${endpoint}`, {
         ...options,
         headers,
@@ -525,6 +525,15 @@ export const api = {
       throw new ApiError(response.status, error.detail || 'Failed to approve request');
     }
     return response.json();
+  },
+
+  async downloadAuditPackage(year: number): Promise<Blob> {
+    const response = await authFetch(`/api/export/audit-package?year=${year}`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new ApiError(response.status, error.detail || 'Failed to generate audit package');
+    }
+    return response.blob();
   },
 
   async adminDeclineAccessRequest(requestId: string) {

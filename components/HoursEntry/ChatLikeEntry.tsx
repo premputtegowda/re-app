@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Clock, Home, FileText, CheckCircle, Loader2, AlertCircle, Brain, Lightbulb, ShieldCheck, Paperclip, X, Sparkles, RotateCcw, Pencil, Upload, Link, CheckCircle2 } from 'lucide-react';
+import { Clock, Home, FileText, CheckCircle, Loader2, AlertCircle, Brain, Lightbulb, ShieldCheck, Paperclip, X, Sparkles, RotateCcw, Pencil, Upload, CheckCircle2 } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
@@ -174,7 +174,7 @@ export function ChatLikeEntry() {
   const ATTACH_KEY = 'pending-entry';
   const pendingAttachments = useAttachmentStore((s) => s.attachments[ATTACH_KEY] ?? EMPTY_ATTACHMENTS);
   const addFiles = useAttachmentStore((s) => s.addFiles);
-  const addLink = useAttachmentStore((s) => s.addLink);
+
   const updateAttachment = useAttachmentStore((s) => s.updateAttachment);
   const removeAttachment = useAttachmentStore((s) => s.removeAttachment);
   const clearAttachKey = useAttachmentStore((s) => s.clearKey);
@@ -356,7 +356,10 @@ export function ChatLikeEntry() {
     setClassificationError(null);
     try {
       const result: ClassificationResult = await api.classifyActivity(description);
-      setCachedClassification(description, result);
+      // Only cache genuine results, not fallbacks
+      if (result.audit_strength !== 'low' || result.refined_title !== 'Unclassified Activity') {
+        setCachedClassification(description, result);
+      }
       await applyClassificationResult(result, applyDescription);
     } catch (err: any) {
       setClassificationError(err.message || 'Classification failed. Please select manually.');
@@ -1243,10 +1246,6 @@ export function ChatLikeEntry() {
                           Attach file
                           <input type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) handleAddFiles(Array.from(e.target.files)); }} />
                         </label>
-                        <button type="button" onClick={() => addLink(ATTACH_KEY)} className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors justify-center text-sm">
-                          <Link size={14} />
-                          Paste link
-                        </button>
                       </div>
                     </div>
                   </div>

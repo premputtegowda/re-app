@@ -1,20 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Toaster } from 'sonner';
 import { Layout } from '@/components/Layout/Layout';
 import { useAuthStore } from '@/lib/authStore';
 import { useStore } from '@/lib/store';
-import { useDriveStore } from '@/lib/driveStore';
-import { DriveConsentModal } from '@/components/Settings/DriveConsentModal';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
   const syncFromBackend = useStore((s) => s.syncFromBackend);
-  const drivePermission = useDriveStore((s) => s.permission);
-  const [showDriveConsent, setShowDriveConsent] = useState(false);
 
   useEffect(() => {
     checkAuth();
@@ -29,9 +25,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (isAuthenticated) {
       syncFromBackend().catch(console.error);
-      if (drivePermission === 'unknown') {
-        setShowDriveConsent(true);
-      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
@@ -49,9 +42,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <Layout>
         {children}
       </Layout>
-      {showDriveConsent && (
-        <DriveConsentModal onClose={() => setShowDriveConsent(false)} />
-      )}
       <Toaster position="top-right" richColors closeButton />
     </>
   );

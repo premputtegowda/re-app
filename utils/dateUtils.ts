@@ -55,15 +55,13 @@ export const isFutureDate = (dateString: string): boolean => {
 };
 
 /**
- * Get the start of the current week (Sunday)
+ * Get the start of the rolling 7-day window (today minus 6 days)
  */
 export const getWeekStart = (): Date => {
-  const today = new Date();
-  const day = today.getDay();
-  const diff = today.getDate() - day;
-  const weekStart = new Date(today.setDate(diff));
-  weekStart.setHours(0, 0, 0, 0);
-  return weekStart;
+  const start = new Date();
+  start.setDate(start.getDate() - 6);
+  start.setHours(0, 0, 0, 0);
+  return start;
 };
 
 /**
