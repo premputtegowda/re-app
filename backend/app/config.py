@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     # Gemini AI
     gemini_api_key: str = ""
 
+    # Cloudflare R2
+    r2_account_id: str = ""
+    r2_access_key_id: str = ""
+    r2_secret_access_key: str = ""
+    r2_bucket_name: str = ""
+
     # Email (SMTP)
     smtp_enabled: bool = False
     smtp_host: str = "smtp.gmail.com"

@@ -14,6 +14,7 @@ from app.routers import (
     analytics_router,
     email_router,
     attachments_router,
+    attachments_download_router,
     admin_router,
 )
 from app.services.scheduler import create_scheduler
@@ -65,6 +66,7 @@ app.include_router(entries_router, prefix="/api")
 app.include_router(analytics_router, prefix="/api")
 app.include_router(email_router, prefix="/api")
 app.include_router(attachments_router, prefix="/api")
+app.include_router(attachments_download_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
 
 

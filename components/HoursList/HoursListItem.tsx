@@ -17,8 +17,7 @@ import { formatDate } from '@/utils/dateUtils';
 import { formatDuration } from '@/utils/calculations';
 import { getCachedClassification, setCachedClassification } from '@/utils/classificationCache';
 import { labelFromUrl, dropboxDownloadUrl } from '@/utils/attachmentUtils';
-import { requestDriveToken, uploadFileToDrive } from '@/lib/driveApi';
-import { useDriveStore } from '@/lib/driveStore';
+import { uploadFileToR2 } from '@/lib/r2Api';
 
 const QUICK_HOURS = [1, 2, 3, 4, 6, 8];
 const QUICK_MINUTES = [15, 30, 45];
@@ -72,8 +71,6 @@ export function HoursListItem({ entry }: HoursListItemProps) {
   const deleteEntry = useStore((s) => s.deleteEntry);
   const addCategory = useStore((s) => s.addCategory);
   const ATTACH_KEY = `edit-${entry.id}`;
-  const drivePermission = useDriveStore((s) => s.permission);
-  const setPermission = useDriveStore((s) => s.setPermission);
   const pendingAttachments = useAttachmentStore((s) => s.attachments[ATTACH_KEY] ?? EMPTY_ATTACHMENTS);
   const addFiles = useAttachmentStore((s) => s.addFiles);
   const addLink = useAttachmentStore((s) => s.addLink);
@@ -84,26 +81,16 @@ export function HoursListItem({ entry }: HoursListItemProps) {
   const handleAddFiles = async (files: File[]) => {
     addFiles(ATTACH_KEY, files);
     const currentCount = pendingAttachments.length;
-    const token = await requestDriveToken();
     for (let i = 0; i < files.length; i++) {
       const idx = currentCount + i;
-      if (!token) {
-        updateAttachment(ATTACH_KEY, idx, { status: 'error', errorMsg: 'Drive token expired. Reconnect in Settings.' });
-        continue;
-      }
       updateAttachment(ATTACH_KEY, idx, { status: 'uploading' });
       try {
-        const result = await uploadFileToDrive(files[i], token);
-        updateAttachment(ATTACH_KEY, idx, { status: 'uploaded', driveFileId: result.fileId, driveViewUrl: result.viewUrl, errorMsg: '' });
+        const result = await uploadFileToR2(files[i], entry.id);
+        updateAttachment(ATTACH_KEY, idx, { status: 'uploaded', r2Key: result.key, fileUrl: '', errorMsg: '' });
       } catch (e) {
         updateAttachment(ATTACH_KEY, idx, { status: 'error', errorMsg: e instanceof Error ? e.message : 'Upload failed' });
       }
     }
-  };
-
-  const handleConnectDrive = async () => {
-    const token = await requestDriveToken();
-    if (token) setPermission('granted');
   };
 
   // ── Modal visibility ──
@@ -363,16 +350,16 @@ export function HoursListItem({ entry }: HoursListItemProps) {
         type: selectedType,
       });
 
-      // Save any new attachments with Drive URLs or manual URLs
+      // Save any new attachments uploaded to R2 or with manual URLs
       const attachsToSave = pendingAttachments.filter(
-        (a) => a.driveViewUrl.trim() || a.manualUrl.trim()
+        (a) => a.r2Key.trim() || a.manualUrl.trim()
       );
       if (attachsToSave.length > 0) {
         const results = await Promise.allSettled(
           attachsToSave.map((a) =>
             api.createAttachment(entry.id, {
-              file_ref: a.driveFileId || 'manual',
-              attachment_url: a.driveViewUrl || a.manualUrl,
+              file_ref: a.r2Key || 'manual',
+              attachment_url: a.manualUrl || '',
               original_filename: a.label || a.manualUrl,
               content_type: a.file?.type || 'application/octet-stream',
               file_size: a.file?.size ?? 0,
@@ -445,42 +432,49 @@ export function HoursListItem({ entry }: HoursListItemProps) {
             )}
             {(entry.attachments ?? []).filter((a) => !deletedAttachmentIds.has(a.id)).length > 0 && (
               <div className="flex flex-wrap gap-1.5">
-                {(entry.attachments ?? []).filter((a) => !deletedAttachmentIds.has(a.id)).map((a) => (
-                  a.attachment_url ? (
+                {(entry.attachments ?? []).filter((a) => !deletedAttachmentIds.has(a.id)).map((a) => {
+                  const isR2 = a.file_ref && a.file_ref.includes('/');
+                  const openFile = async () => {
+                    if (isR2) {
+                      const url = await api.getDownloadUrl(a.file_ref);
+                      window.open(url, '_blank');
+                    } else if (a.attachment_url) {
+                      window.open(a.attachment_url, '_blank');
+                    }
+                  };
+                  const downloadFile = async () => {
+                    let url: string;
+                    if (isR2) {
+                      url = await api.getDownloadUrl(a.file_ref);
+                    } else if (a.attachment_url) {
+                      url = dropboxDownloadUrl(a.attachment_url) ?? a.attachment_url;
+                    } else return;
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = a.original_filename || 'attachment';
+                    link.click();
+                  };
+                  return (
                     <span key={a.id} className="inline-flex items-center gap-0.5">
-                      <a
-                        href={a.attachment_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title="Open file"
+                      <button
+                        onClick={openFile}
+                        title="View file"
                         className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-l-full pl-2 pr-1.5 py-0.5 transition-colors max-w-[140px]"
                       >
                         <Paperclip size={10} className="shrink-0" />
                         <span className="truncate">{a.original_filename}</span>
                         <ExternalLink size={9} className="shrink-0 opacity-60" />
-                      </a>
-                      {dropboxDownloadUrl(a.attachment_url) && (
-                        <a
-                          href={dropboxDownloadUrl(a.attachment_url)!}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title="Download file"
-                          className="inline-flex items-center px-1.5 py-0.5 text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-r-full border-l border-blue-200 dark:border-blue-800 transition-colors"
-                        >
-                          <Download size={9} />
-                        </a>
-                      )}
+                      </button>
+                      <button
+                        onClick={downloadFile}
+                        title="Download file"
+                        className="inline-flex items-center px-1.5 py-0.5 text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-r-full border-l border-blue-200 dark:border-blue-800 transition-colors"
+                      >
+                        <Download size={9} />
+                      </button>
                     </span>
-                  ) : (
-                    <span
-                      key={a.id}
-                      className="inline-flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 rounded-full px-2 py-0.5 max-w-[160px]"
-                    >
-                      <Paperclip size={10} className="shrink-0" />
-                      <span className="truncate">{a.original_filename}</span>
-                    </span>
-                  )
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -962,33 +956,38 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                         .map((a) => (
                           <li key={a.id} className="flex items-center gap-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg px-3 py-2">
                             <Paperclip size={12} className="shrink-0 text-slate-400" />
-                            {a.attachment_url ? (
-                              <a
-                                href={a.attachment_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title="Open file"
-                                className="flex-1 min-w-0 flex items-center gap-1 text-xs text-primary-600 dark:text-primary-400 hover:underline"
-                              >
-                                <span className="truncate">{a.original_filename}</span>
-                                <ExternalLink size={10} className="shrink-0 opacity-60" />
-                              </a>
-                            ) : (
-                              <span className="flex-1 truncate text-xs text-slate-700 dark:text-slate-300">
-                                {a.original_filename}
-                              </span>
-                            )}
-                            {a.attachment_url && dropboxDownloadUrl(a.attachment_url) && (
-                              <a
-                                href={dropboxDownloadUrl(a.attachment_url)!}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title="Download"
-                                className="text-slate-400 hover:text-primary-500 transition-colors shrink-0"
-                              >
-                                <Download size={13} />
-                              </a>
-                            )}
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const url = a.file_ref?.includes('/') ? await api.getDownloadUrl(a.file_ref) : a.attachment_url;
+                                if (url) window.open(url, '_blank');
+                              }}
+                              title="View file"
+                              className="flex-1 min-w-0 flex items-center gap-1 text-xs text-primary-600 dark:text-primary-400 hover:underline text-left"
+                            >
+                              <span className="truncate">{a.original_filename}</span>
+                              <ExternalLink size={10} className="shrink-0 opacity-60" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                let url: string | undefined;
+                                if (a.file_ref?.includes('/')) {
+                                  url = await api.getDownloadUrl(a.file_ref);
+                                } else {
+                                  url = dropboxDownloadUrl(a.attachment_url) ?? a.attachment_url;
+                                }
+                                if (!url) return;
+                                const link = document.createElement('a');
+                                link.href = url;
+                                link.download = a.original_filename || 'attachment';
+                                link.click();
+                              }}
+                              title="Download"
+                              className="text-slate-400 hover:text-primary-500 transition-colors shrink-0"
+                            >
+                              <Download size={13} />
+                            </button>
                             <button
                               type="button"
                               onClick={() => handleDeleteSavedAttachment(a.id)}
@@ -1039,10 +1038,10 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                           {a.file ? (
                             <span className="flex items-center gap-1 text-xs">
                               {a.status === 'uploading' && (
-                                <><Loader2 size={12} className="animate-spin text-primary-500" /><span className="text-slate-400">Uploading to Drive…</span></>
+                                <><Loader2 size={12} className="animate-spin text-primary-500" /><span className="text-slate-400">Uploading…</span></>
                               )}
                               {a.status === 'uploaded' && (
-                                <><CheckCircle2 size={12} className="text-green-500" /><span className="text-green-600 dark:text-green-400">Saved to Drive</span></>
+                                <><CheckCircle2 size={12} className="text-green-500" /><span className="text-green-600 dark:text-green-400">Uploaded</span></>
                               )}
                               {a.status === 'error' && (
                                 <span className="text-red-500">{a.errorMsg}</span>
@@ -1073,49 +1072,28 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                       ))}
                     </ul>
                   )}
-                  {drivePermission === 'granted' ? (
-                    <div className="flex gap-2">
-                      <label className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors cursor-pointer justify-center text-sm">
-                        <Paperclip size={14} />
-                        Attach file
-                        <input
-                          type="file"
-                          multiple
-                          className="hidden"
-                          onChange={(e) => {
-                            if (e.target.files) handleAddFiles(Array.from(e.target.files));
-                          }}
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => addLink(ATTACH_KEY)}
-                        className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors justify-center text-sm"
-                      >
-                        <Link size={14} />
-                        Paste link
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={handleConnectDrive}
-                        className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors justify-center text-sm"
-                      >
-                        <Upload size={14} />
-                        Connect Google Drive to Attach file
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => addLink(ATTACH_KEY)}
-                        className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors justify-center text-sm"
-                      >
-                        <Link size={14} />
-                        Paste link
-                      </button>
-                    </div>
-                  )}
+                  <div className="flex gap-2">
+                    <label className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors cursor-pointer justify-center text-sm">
+                      <Paperclip size={14} />
+                      Attach file
+                      <input
+                        type="file"
+                        multiple
+                        className="hidden"
+                        onChange={(e) => {
+                          if (e.target.files) handleAddFiles(Array.from(e.target.files));
+                        }}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => addLink(ATTACH_KEY)}
+                      className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors justify-center text-sm"
+                    >
+                      <Link size={14} />
+                      Paste link
+                    </button>
+                  </div>
                 </div>
               </div>
 
