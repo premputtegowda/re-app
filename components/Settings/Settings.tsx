@@ -3,7 +3,7 @@
 import { motion } from 'framer-motion';
 import { CategoryManager } from './CategoryManager';
 import { PropertyManager } from './PropertyManager';
-import { DriveSettings } from './DriveSettings';
+import { AuditExport } from './AuditExport';
 
 export function Settings() {
   return (
@@ -41,7 +41,9 @@ export function Settings() {
         transition={{ delay: 0.3 }}
         className="border-t border-slate-200 dark:border-slate-700 pt-8"
       >
-        <DriveSettings />
+        <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-1">Export & Reports</h3>
+        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Download your data for tax filing or audits</p>
+        <AuditExport />
       </motion.div>
     </div>
   );

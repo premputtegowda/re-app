@@ -4,7 +4,7 @@ import { useState, useMemo } from 'react';
 import {
   Edit2, Trash2, Calendar, Clock, Home, FileText, Loader2, Paperclip,
   AlertCircle, X, Brain, ShieldCheck, Sparkles, RotateCcw, Lightbulb, Pencil,
-  Upload, Link, CheckCircle2, ExternalLink, Download,
+  Upload, CheckCircle2, ExternalLink, Download,
 } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { useAttachmentStore } from '@/lib/attachmentStore';
@@ -73,7 +73,7 @@ export function HoursListItem({ entry }: HoursListItemProps) {
   const ATTACH_KEY = `edit-${entry.id}`;
   const pendingAttachments = useAttachmentStore((s) => s.attachments[ATTACH_KEY] ?? EMPTY_ATTACHMENTS);
   const addFiles = useAttachmentStore((s) => s.addFiles);
-  const addLink = useAttachmentStore((s) => s.addLink);
+
   const updateAttachment = useAttachmentStore((s) => s.updateAttachment);
   const removeAttachment = useAttachmentStore((s) => s.removeAttachment);
   const clearAttachKey = useAttachmentStore((s) => s.clearKey);
@@ -127,15 +127,17 @@ export function HoursListItem({ entry }: HoursListItemProps) {
 
   // ── Attachments ──
   const [deletingAttachmentIds, setDeletingAttachmentIds] = useState<Set<string>>(new Set());
-  const [deletedAttachmentIds, setDeletedAttachmentIds] = useState<Set<string>>(new Set());
 
   const handleDeleteSavedAttachment = async (attachmentId: string) => {
+    if (!window.confirm('Delete this attachment? This cannot be undone.')) return;
     setDeletingAttachmentIds((prev) => new Set(prev).add(attachmentId));
     try {
       await api.deleteAttachment(entry.id, attachmentId);
-      setDeletedAttachmentIds((prev) => new Set(prev).add(attachmentId));
-    } catch {
-      setErrors([{ field: 'general', message: 'Failed to delete attachment' }]);
+      // Update store immediately so card view and modal stay in sync
+      patchEntryAttachments(entry.id, (entry.attachments ?? []).filter((a) => a.id !== attachmentId));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete attachment';
+      setErrors([{ field: 'general', message: msg }]);
     } finally {
       setDeletingAttachmentIds((prev) => {
         const next = new Set(prev);
@@ -222,7 +224,6 @@ export function HoursListItem({ entry }: HoursListItemProps) {
     setEditingSection(null);
     setIsCreatingCategory(false);
     setErrors([]);
-    setDeletedAttachmentIds(new Set());
     setIsEditModalOpen(true);
   };
 
@@ -370,9 +371,7 @@ export function HoursListItem({ entry }: HoursListItemProps) {
           .filter((r): r is PromiseFulfilledResult<import('@/types').Attachment> => r.status === 'fulfilled')
           .map((r) => r.value);
         if (saved.length > 0) {
-          // Merge newly saved attachments with existing ones (minus any deleted)
-          const existing = (entry.attachments ?? []).filter((a) => !deletedAttachmentIds.has(a.id));
-          patchEntryAttachments(entry.id, [...existing, ...saved]);
+          patchEntryAttachments(entry.id, [...(entry.attachments ?? []), ...saved]);
         }
       }
       clearAttachKey(ATTACH_KEY);
@@ -430,9 +429,9 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                 <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed break-words min-w-0">{entry.description}</p>
               </div>
             )}
-            {(entry.attachments ?? []).filter((a) => !deletedAttachmentIds.has(a.id)).length > 0 && (
+            {(entry.attachments ?? []).length > 0 && (
               <div className="flex flex-wrap gap-1.5">
-                {(entry.attachments ?? []).filter((a) => !deletedAttachmentIds.has(a.id)).map((a) => {
+                {(entry.attachments ?? []).map((a) => {
                   const isR2 = a.file_ref && a.file_ref.includes('/');
                   const openFile = async () => {
                     if (isR2) {
@@ -949,11 +948,10 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                 </label>
                 <div className="space-y-2">
                   {/* Existing saved attachments */}
-                  {(entry.attachments ?? []).filter((a) => !deletedAttachmentIds.has(a.id)).length > 0 && (
+                  {(entry.attachments ?? []).length > 0 && (
                     <ul className="space-y-1.5">
                       {(entry.attachments ?? [])
-                        .filter((a) => !deletedAttachmentIds.has(a.id))
-                        .map((a) => (
+                                                .map((a) => (
                           <li key={a.id} className="flex items-center gap-2 bg-slate-50 dark:bg-slate-700/50 rounded-lg px-3 py-2">
                             <Paperclip size={12} className="shrink-0 text-slate-400" />
                             <button
@@ -1085,14 +1083,6 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                         }}
                       />
                     </label>
-                    <button
-                      type="button"
-                      onClick={() => addLink(ATTACH_KEY)}
-                      className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors justify-center text-sm"
-                    >
-                      <Link size={14} />
-                      Paste link
-                    </button>
                   </div>
                 </div>
               </div>
