@@ -356,7 +356,10 @@ export function ChatLikeEntry() {
     setClassificationError(null);
     try {
       const result: ClassificationResult = await api.classifyActivity(description);
-      setCachedClassification(description, result);
+      // Only cache genuine results, not fallbacks
+      if (result.audit_strength !== 'low' || result.refined_title !== 'Unclassified Activity') {
+        setCachedClassification(description, result);
+      }
       await applyClassificationResult(result, applyDescription);
     } catch (err: any) {
       setClassificationError(err.message || 'Classification failed. Please select manually.');
