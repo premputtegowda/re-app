@@ -113,16 +113,16 @@ class GeminiActivityClassifier:
 
         try:
             response = await client.aio.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.1-flash-lite-preview",
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     system_instruction=_SYSTEM_INSTRUCTION,
                     response_mime_type="application/json",
                     temperature=0,
-                    top_p=1,
-                    top_k=1,
                     max_output_tokens=512,
-                    thinking_config=types.ThinkingConfig(thinkingBudget=0),
+                    thinking_config=types.ThinkingConfig(
+                        thinking_level=types.ThinkingLevel.LOW,
+                    ),
                 ),
             )
             raw = response.text.strip()
