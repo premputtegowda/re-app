@@ -10,6 +10,10 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
+
+class ThinkingConfig(BaseModel):
+    thinking_budget: int = 0
+
 from app.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
@@ -122,7 +126,7 @@ class GeminiActivityClassifier:
                     top_p=1,
                     top_k=1,
                     max_output_tokens=200,
-                    thinking_config=types.ThinkingConfig(thinking_budget=0),
+                    thinking_config=ThinkingConfig(thinking_budget=0),
                 ),
             )
             raw = response.text.strip()
