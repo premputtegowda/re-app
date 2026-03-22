@@ -7,8 +7,7 @@ import { useStore } from '@/lib/store';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useAttachmentStore, type PendingAttachment } from '@/lib/attachmentStore';
-import { requestDriveToken, uploadFileToDrive } from '@/lib/driveApi';
-import { useDriveStore } from '@/lib/driveStore';
+import { uploadFileToR2 } from '@/lib/r2Api';
 import { Button } from '@/components/UI/Button';
 import { Input } from '@/components/UI/Input';
 import { Card } from '@/components/UI/Card';
@@ -173,8 +172,6 @@ export function ChatLikeEntry() {
   const [originalAiDescription, setOriginalAiDescription] = useState('');
   // Pending file attachments
   const ATTACH_KEY = 'pending-entry';
-  const drivePermission = useDriveStore((s) => s.permission);
-  const setPermission = useDriveStore((s) => s.setPermission);
   const pendingAttachments = useAttachmentStore((s) => s.attachments[ATTACH_KEY] ?? EMPTY_ATTACHMENTS);
   const addFiles = useAttachmentStore((s) => s.addFiles);
   const addLink = useAttachmentStore((s) => s.addLink);
@@ -185,26 +182,16 @@ export function ChatLikeEntry() {
   const handleAddFiles = async (files: File[]) => {
     addFiles(ATTACH_KEY, files);
     const currentCount = pendingAttachments.length;
-    const token = await requestDriveToken();
     for (let i = 0; i < files.length; i++) {
       const idx = currentCount + i;
-      if (!token) {
-        updateAttachment(ATTACH_KEY, idx, { status: 'error', errorMsg: 'Drive token expired. Reconnect in Settings.' });
-        continue;
-      }
       updateAttachment(ATTACH_KEY, idx, { status: 'uploading' });
       try {
-        const result = await uploadFileToDrive(files[i], token);
-        updateAttachment(ATTACH_KEY, idx, { status: 'uploaded', driveFileId: result.fileId, driveViewUrl: result.viewUrl, errorMsg: '' });
+        const result = await uploadFileToR2(files[i], 'pending');
+        updateAttachment(ATTACH_KEY, idx, { status: 'uploaded', r2Key: result.key, fileUrl: '', errorMsg: '' });
       } catch (e) {
         updateAttachment(ATTACH_KEY, idx, { status: 'error', errorMsg: e instanceof Error ? e.message : 'Upload failed' });
       }
     }
-  };
-
-  const handleConnectDrive = async () => {
-    const token = await requestDriveToken();
-    if (token) setPermission('granted');
   };
 
   // Derived: AI recommended category name (existing or suggested new)
@@ -519,16 +506,16 @@ export function ChatLikeEntry() {
     try {
       const createdEntry = await addEntry(finalFormData);
 
-      // Save attachments that have a Drive URL or manual URL
+      // Save attachments that have been uploaded to R2 or have a manual URL
       const attachsToSave = pendingAttachments.filter(
-        (a) => a.driveViewUrl.trim() || a.manualUrl.trim()
+        (a) => a.r2Key.trim() || a.manualUrl.trim()
       );
       if (attachsToSave.length > 0) {
         const results = await Promise.allSettled(
           attachsToSave.map((a) =>
             api.createAttachment(createdEntry.id, {
-              file_ref: a.driveFileId || 'manual',
-              attachment_url: a.driveViewUrl || a.manualUrl,
+              file_ref: a.r2Key || 'manual',
+              attachment_url: a.manualUrl || '',
               original_filename: a.label || a.manualUrl,
               content_type: a.file?.type || 'application/octet-stream',
               file_size: a.file?.size ?? 0,
@@ -1241,7 +1228,7 @@ export function ChatLikeEntry() {
                                 />
                               )}
                               {a.status === 'uploaded' && (
-                                <p className="text-xs text-green-600 dark:text-green-400">Saved to Google Drive</p>
+                                <p className="text-xs text-green-600 dark:text-green-400">Uploaded</p>
                               )}
                               {a.errorMsg && <p className="text-xs text-red-500">{a.errorMsg}</p>}
                             </li>
@@ -1249,31 +1236,18 @@ export function ChatLikeEntry() {
                         </ul>
                       )}
 
-                      {/* Add buttons — vary by Drive connection state */}
-                      {drivePermission === 'granted' ? (
-                        <div className="flex gap-2">
-                          <label className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors cursor-pointer justify-center text-sm">
-                            <Paperclip size={14} />
-                            Attach file
-                            <input type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) handleAddFiles(Array.from(e.target.files)); }} />
-                          </label>
-                          <button type="button" onClick={() => addLink(ATTACH_KEY)} className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors justify-center text-sm">
-                            <Link size={14} />
-                            Paste link
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex gap-2">
-                          <button type="button" onClick={handleConnectDrive} className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors justify-center text-sm">
-                            <Upload size={14} />
-                            Connect Google Drive to Attach file
-                          </button>
-                          <button type="button" onClick={() => addLink(ATTACH_KEY)} className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors justify-center text-sm">
-                            <Link size={14} />
-                            Paste link
-                          </button>
-                        </div>
-                      )}
+                      {/* Add buttons */}
+                      <div className="flex gap-2">
+                        <label className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors cursor-pointer justify-center text-sm">
+                          <Paperclip size={14} />
+                          Attach file
+                          <input type="file" multiple className="hidden" onChange={(e) => { if (e.target.files) handleAddFiles(Array.from(e.target.files)); }} />
+                        </label>
+                        <button type="button" onClick={() => addLink(ATTACH_KEY)} className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-500 hover:text-primary-600 dark:hover:text-primary-400 transition-colors justify-center text-sm">
+                          <Link size={14} />
+                          Paste link
+                        </button>
+                      </div>
                     </div>
                   </div>
 

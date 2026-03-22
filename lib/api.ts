@@ -330,6 +330,31 @@ export const api = {
   },
 
   // Attachments
+  async getDownloadUrl(file_ref: string): Promise<string> {
+    const response = await authFetch('/api/entries/download-url', {
+      method: 'POST',
+      body: JSON.stringify({ file_ref }),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new ApiError(response.status, error.detail || 'Failed to get download URL');
+    }
+    const data = await response.json();
+    return data.url;
+  },
+
+  async presignUpload(data: { entry_id: string; filename: string; content_type: string }) {
+    const response = await authFetch('/api/entries/presign', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new ApiError(response.status, error.detail || 'Failed to get upload URL');
+    }
+    return response.json() as Promise<{ upload_url: string; key: string }>;
+  },
+
   async createAttachment(
     entryId: string,
     data: {

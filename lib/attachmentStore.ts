@@ -8,9 +8,9 @@ export interface PendingAttachment {
   file: File | null;       // null for link-only entries
   label: string;           // display name — filename for file picks, user-typed for link-only
   status: AttachmentStatus;
-  driveFileId: string;
-  driveViewUrl: string;
-  manualUrl: string;
+  r2Key: string;           // R2 object key after upload
+  fileUrl: string;         // pre-signed download URL (refreshed on load)
+  manualUrl: string;       // for manually pasted links
   errorMsg: string;
 }
 
@@ -37,8 +37,8 @@ export const useAttachmentStore = create<AttachmentStore>((set) => ({
             file,
             label: file.name,
             status: 'idle' as AttachmentStatus,
-            driveFileId: '',
-            driveViewUrl: '',
+            r2Key: '',
+            fileUrl: '',
             manualUrl: '',
             errorMsg: '',
           })),
@@ -56,8 +56,8 @@ export const useAttachmentStore = create<AttachmentStore>((set) => ({
             file: null,
             label: '',
             status: 'idle' as AttachmentStatus,
-            driveFileId: '',
-            driveViewUrl: '',
+            r2Key: '',
+            fileUrl: '',
             manualUrl: '',
             errorMsg: '',
           },
