@@ -140,6 +140,7 @@ export function HoursListItem({ entry }: HoursListItemProps) {
   const handleDescriptionClassify = async () => {
     if (isClassifying) return;
     setIsDescriptionDirty(false);
+    setIsTextareaFocused(false);
     const desc = editData.description.trim();
     if (!desc || desc === lastClassifiedDesc) return;
     setLastClassifiedDesc(desc);
