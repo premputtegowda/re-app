@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Edit2, Trash2, Calendar, Clock, Home, FileText, Loader2, Paperclip,
   AlertCircle, X, Brain, ShieldCheck, Sparkles, RotateCcw, Lightbulb, Pencil,
@@ -132,30 +132,28 @@ export function HoursListItem({ entry }: HoursListItemProps) {
   const [refinedDescription, setRefinedDescription] = useState('');
   const [originalAiDescription, setOriginalAiDescription] = useState('');
 
-  // ── Auto-reclassify on raw description change (debounced) ──
-  const rawDescChangedRef = useRef(false);
-  useEffect(() => {
-    if (!rawDescChangedRef.current) return;
+  // ── Reclassify on description blur ──
+  const [isDescriptionDirty, setIsDescriptionDirty] = useState(false);
+
+  const handleDescriptionBlur = async () => {
+    if (!isDescriptionDirty) return;
+    setIsDescriptionDirty(false);
     const desc = editData.description.trim();
     if (!desc) return;
-    const timer = setTimeout(async () => {
-      const cached = getCachedClassification(desc);
-      if (cached) { applyClassificationResult(cached); return; }
-      setIsClassifying(true);
-      setClassificationError(null);
-      try {
-        const result: ClassificationResult = await api.classifyActivity(desc);
-        setCachedClassification(desc, result);
-        applyClassificationResult(result);
-      } catch (err: any) {
-        setClassificationError(err.message || 'Classification failed.');
-      } finally {
-        setIsClassifying(false);
-      }
-    }, 800);
-    return () => clearTimeout(timer);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editData.description]);
+    const cached = getCachedClassification(desc);
+    if (cached) { applyClassificationResult(cached); return; }
+    setIsClassifying(true);
+    setClassificationError(null);
+    try {
+      const result: ClassificationResult = await api.classifyActivity(desc);
+      setCachedClassification(desc, result);
+      applyClassificationResult(result);
+    } catch (err: any) {
+      setClassificationError(err.message || 'Classification failed.');
+    } finally {
+      setIsClassifying(false);
+    }
+  };
 
   // ── Attachments ──
   const [deletingAttachmentIds, setDeletingAttachmentIds] = useState<Set<string>>(new Set());
@@ -266,7 +264,7 @@ export function HoursListItem({ entry }: HoursListItemProps) {
     setAiCategoryId(entry.ai_category_id ?? '');
     setAiType((entry.ai_type as 'material' | 'non-material') ?? '');
     setLastUsedCategoryId('');
-    rawDescChangedRef.current = false;
+    setIsDescriptionDirty(false);
     setIsClassifying(false);
     setEditingSection(null);
     setIsCreatingCategory(false);
@@ -797,12 +795,16 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                       maxLength={2000}
                       value={editData.description}
                       onChange={(e) => {
-                        rawDescChangedRef.current = true;
+                        setIsDescriptionDirty(true);
                         setEditData((d) => ({ ...d, description: e.target.value }));
                       }}
+                      onBlur={handleDescriptionBlur}
                       className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none text-sm"
                     />
-                    {refinedDescription && (
+                    {isDescriptionDirty && (
+                      <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 italic">Click away when done to classify.</p>
+                    )}
+                    {!isDescriptionDirty && refinedDescription && (
                       <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 italic">Your original will be used for audit.</p>
                     )}
                   </>
