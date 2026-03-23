@@ -812,9 +812,15 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                         }}
                         onFocus={() => setIsTextareaFocused(true)}
                         onBlur={handleDescriptionBlur}
-                        className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none text-sm pb-8"
+                        disabled={isClassifying}
+                        className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none text-sm pb-8 disabled:opacity-60 disabled:cursor-not-allowed"
                       />
-                      {(isTextareaFocused || isDescriptionDirty) && (
+                      {isClassifying ? (
+                        <span className="absolute bottom-2 right-2 flex items-center gap-1 text-xs text-primary-500 dark:text-primary-400">
+                          <Loader2 size={11} className="animate-spin shrink-0" />
+                          Classifying…
+                        </span>
+                      ) : (isTextareaFocused || isDescriptionDirty) ? (
                         <button
                           type="button"
                           onMouseDown={(e) => e.preventDefault()}
@@ -823,14 +829,8 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                         >
                           Done
                         </button>
-                      )}
+                      ) : null}
                     </div>
-                    {isClassifying && (
-                      <p className="text-xs text-primary-500 dark:text-primary-400 mt-1 flex items-center gap-1">
-                        <Loader2 size={11} className="animate-spin shrink-0" />
-                        Classifying… switching to AI refined when done.
-                      </p>
-                    )}
                     {!isClassifying && !isDescriptionDirty && refinedDescription && (
                       <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 italic">Your original will be used for audit.</p>
                     )}
