@@ -68,7 +68,8 @@ class SmtpEmailSender:
             port=self.port,
             username=self.username,
             password=self.password,
-            start_tls=True,
+            use_tls=self.port == 465,
+            start_tls=self.port == 587,
         )
 
 
@@ -86,7 +87,8 @@ class SmtpEmailSender:
             port=self.port,
             username=self.username,
             password=self.password,
-            start_tls=True,
+            use_tls=self.port == 465,
+            start_tls=self.port == 587,
         )
 
 
