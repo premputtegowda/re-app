@@ -144,13 +144,14 @@ export function HoursListItem({ entry }: HoursListItemProps) {
     if (!desc || desc === lastClassifiedDesc) return;
     setLastClassifiedDesc(desc);
     const cached = getCachedClassification(desc);
-    if (cached) { applyClassificationResult(cached); return; }
+    if (cached) { applyClassificationResult(cached); setUseRefinedDescription(true); return; }
     setIsClassifying(true);
     setClassificationError(null);
     try {
       const result: ClassificationResult = await api.classifyActivity(desc);
       setCachedClassification(desc, result);
       applyClassificationResult(result);
+      setUseRefinedDescription(true);
     } catch (err: any) {
       setClassificationError(err.message || 'Classification failed.');
     } finally {
@@ -824,7 +825,13 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                         </button>
                       )}
                     </div>
-                    {!isDescriptionDirty && refinedDescription && (
+                    {isClassifying && (
+                      <p className="text-xs text-primary-500 dark:text-primary-400 mt-1 flex items-center gap-1">
+                        <Loader2 size={11} className="animate-spin shrink-0" />
+                        Classifying… switching to AI refined when done.
+                      </p>
+                    )}
+                    {!isClassifying && !isDescriptionDirty && refinedDescription && (
                       <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 italic">Your original will be used for audit.</p>
                     )}
                   </>
