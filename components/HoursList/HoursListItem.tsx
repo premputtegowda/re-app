@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import {
   Edit2, Trash2, Calendar, Clock, Home, FileText, Loader2, Paperclip,
   AlertCircle, X, Brain, ShieldCheck, Sparkles, RotateCcw, Lightbulb, Pencil,
@@ -136,11 +136,13 @@ export function HoursListItem({ entry }: HoursListItemProps) {
   const [isDescriptionDirty, setIsDescriptionDirty] = useState(false);
   const [isTextareaFocused, setIsTextareaFocused] = useState(false);
   const [lastClassifiedDesc, setLastClassifiedDesc] = useState('');
+  const descriptionTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleDescriptionClassify = async () => {
     if (isClassifying) return;
     setIsDescriptionDirty(false);
     setIsTextareaFocused(false);
+    descriptionTextareaRef.current?.blur();
     const desc = editData.description.trim();
     if (!desc || desc === lastClassifiedDesc) return;
     setLastClassifiedDesc(desc);
@@ -804,6 +806,7 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                   <>
                     <div className="relative">
                       <textarea
+                        ref={descriptionTextareaRef}
                         rows={4}
                         maxLength={2000}
                         value={editData.description}
