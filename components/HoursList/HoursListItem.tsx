@@ -132,14 +132,17 @@ export function HoursListItem({ entry }: HoursListItemProps) {
   const [refinedDescription, setRefinedDescription] = useState('');
   const [originalAiDescription, setOriginalAiDescription] = useState('');
 
-  // ── Reclassify on description blur ──
+  // ── Reclassify on blur / Done ──
   const [isDescriptionDirty, setIsDescriptionDirty] = useState(false);
+  const [isTextareaFocused, setIsTextareaFocused] = useState(false);
+  const [lastClassifiedDesc, setLastClassifiedDesc] = useState('');
 
-  const handleDescriptionBlur = async () => {
-    if (!isDescriptionDirty) return;
+  const handleDescriptionClassify = async () => {
+    if (isClassifying) return;
     setIsDescriptionDirty(false);
     const desc = editData.description.trim();
-    if (!desc) return;
+    if (!desc || desc === lastClassifiedDesc) return;
+    setLastClassifiedDesc(desc);
     const cached = getCachedClassification(desc);
     if (cached) { applyClassificationResult(cached); return; }
     setIsClassifying(true);
@@ -153,6 +156,11 @@ export function HoursListItem({ entry }: HoursListItemProps) {
     } finally {
       setIsClassifying(false);
     }
+  };
+
+  const handleDescriptionBlur = () => {
+    setIsTextareaFocused(false);
+    if (isDescriptionDirty) handleDescriptionClassify();
   };
 
   // ── Attachments ──
@@ -265,6 +273,8 @@ export function HoursListItem({ entry }: HoursListItemProps) {
     setAiType((entry.ai_type as 'material' | 'non-material') ?? '');
     setLastUsedCategoryId('');
     setIsDescriptionDirty(false);
+    setIsTextareaFocused(false);
+    setLastClassifiedDesc(rawDesc.trim());
     setIsClassifying(false);
     setEditingSection(null);
     setIsCreatingCategory(false);
@@ -790,20 +800,30 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                 {/* Your original — always editable */}
                 {!useRefinedDescription && (
                   <>
-                    <textarea
-                      rows={4}
-                      maxLength={2000}
-                      value={editData.description}
-                      onChange={(e) => {
-                        setIsDescriptionDirty(true);
-                        setEditData((d) => ({ ...d, description: e.target.value }));
-                      }}
-                      onBlur={handleDescriptionBlur}
-                      className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none text-sm"
-                    />
-                    {isDescriptionDirty && (
-                      <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 italic">Click away when done to classify.</p>
-                    )}
+                    <div className="relative">
+                      <textarea
+                        rows={4}
+                        maxLength={2000}
+                        value={editData.description}
+                        onChange={(e) => {
+                          setIsDescriptionDirty(true);
+                          setEditData((d) => ({ ...d, description: e.target.value }));
+                        }}
+                        onFocus={() => setIsTextareaFocused(true)}
+                        onBlur={handleDescriptionBlur}
+                        className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none text-sm pb-8"
+                      />
+                      {(isTextareaFocused || isDescriptionDirty) && (
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={handleDescriptionClassify}
+                          className="absolute bottom-2 right-2 px-2.5 py-1 text-xs font-semibold bg-primary-600 hover:bg-primary-700 text-white rounded-md transition-colors shadow-sm"
+                        >
+                          Done
+                        </button>
+                      )}
+                    </div>
                     {!isDescriptionDirty && refinedDescription && (
                       <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 italic">Your original will be used for audit.</p>
                     )}
@@ -1168,7 +1188,7 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                 <Button
                   onClick={handleSaveEdit}
                   fullWidth
-                  disabled={isSaving || isCreatingCategory || !selectedCategoryId || isClassifying}
+                  disabled={isSaving || isCreatingCategory || !selectedCategoryId || isClassifying || isDescriptionDirty}
                 >
                   {isSaving ? (
                     <span className="flex items-center gap-2">
