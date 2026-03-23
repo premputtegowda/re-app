@@ -22,6 +22,10 @@ const transformEntry = (backendEntry: any): HoursEntry => ({
   category: backendEntry.category_id,
   property: backendEntry.property_id,
   description: backendEntry.description,
+  raw_description: backendEntry.raw_description ?? undefined,
+  refined_description: backendEntry.refined_description ?? undefined,
+  ai_category_id: backendEntry.ai_category_id ?? undefined,
+  ai_type: backendEntry.ai_type ?? undefined,
   notes: backendEntry.notes ?? undefined,
   type: backendEntry.type === 'non-material' ? 'non-material' : 'material',
   attachments: backendEntry.attachments ?? [],
@@ -109,6 +113,10 @@ export const useStore = create<AppStore>()(
             property_id: entry.property,
             type: entry.type,
             description: entry.description,
+            raw_description: entry.raw_description,
+            refined_description: entry.refined_description,
+            ai_category_id: entry.ai_category_id,
+            ai_type: entry.ai_type,
             notes: entry.notes,
           });
 
@@ -138,6 +146,10 @@ export const useStore = create<AppStore>()(
             property_id: entry.property,
             type: entry.type,
             description: entry.description,
+            raw_description: entry.raw_description,
+            refined_description: entry.refined_description,
+            ai_category_id: entry.ai_category_id,
+            ai_type: entry.ai_type,
             notes: entry.notes,
           };
           const response = await api.updateEntry(entry.id, updateData);

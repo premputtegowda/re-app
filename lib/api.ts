@@ -285,6 +285,10 @@ export const api = {
     property_id: string;
     type: string;
     description: string;
+    raw_description?: string;
+    refined_description?: string;
+    ai_category_id?: string;
+    ai_type?: string;
     notes?: string;
   }) {
     const response = await authFetch('/api/entries', {
@@ -311,6 +315,10 @@ export const api = {
       property_id?: string;
       type?: string;
       description?: string;
+      raw_description?: string;
+      refined_description?: string;
+      ai_category_id?: string;
+      ai_type?: string;
       notes?: string;
     }
   ) {

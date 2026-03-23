@@ -25,8 +25,12 @@ export interface HoursEntry {
   totalMinutes: number; // Calculated field: hours * 60 + minutes
   category: string; // category_id
   property: string; // property_id
-  description: string;
-  notes?: string; // Optional notes / evidence text
+  description: string;          // active description (used for audit)
+  raw_description?: string;     // user's original text
+  refined_description?: string; // AI-generated text
+  ai_category_id?: string;      // AI-recommended category (never changes after first classify)
+  ai_type?: string;             // AI-recommended type (never changes after first classify)
+  notes?: string;
   type: 'material' | 'non-material';
   attachments?: Attachment[];
   createdAt: string; // ISO timestamp
@@ -129,6 +133,10 @@ export interface HoursEntryFormData {
   category: string;
   property: string;
   description: string;
+  raw_description?: string;
+  refined_description?: string;
+  ai_category_id?: string;
+  ai_type?: string;
   notes?: string;
   type: 'material' | 'non-material';
 }

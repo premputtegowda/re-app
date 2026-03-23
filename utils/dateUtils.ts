@@ -6,7 +6,8 @@
  * Format a date string to display format (MM/DD/YYYY)
  */
 export const formatDate = (dateString: string): string => {
-  const date = new Date(dateString);
+  const [year, month, day] = dateString.split('T')[0].split('-').map(Number);
+  const date = new Date(year, month - 1, day);
   return date.toLocaleDateString('en-US', {
     month: '2-digit',
     day: '2-digit',
@@ -18,7 +19,8 @@ export const formatDate = (dateString: string): string => {
  * Format a date string to long format (Month DD, YYYY)
  */
 export const formatDateLong = (dateString: string): string => {
-  const date = new Date(dateString);
+  const [year, month, day] = dateString.split('T')[0].split('-').map(Number);
+  const date = new Date(year, month - 1, day);
   return date.toLocaleDateString('en-US', {
     month: 'long',
     day: 'numeric',
@@ -108,9 +110,7 @@ export const isDateInRange = (
  * Get month and year string (YYYY-MM)
  */
 export const getMonthYear = (dateString: string): string => {
-  const date = new Date(dateString);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const [year, month] = dateString.split('T')[0].split('-');
   return `${year}-${month}`;
 };
 

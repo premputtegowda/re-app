@@ -36,6 +36,12 @@ class Entry(Base):
         ENUM(EntryType, name="entry_type", create_type=True), nullable=False
     )
     description: Mapped[str] = mapped_column(Text, nullable=False)
+    raw_description: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    refined_description: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    ai_category_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("categories.id", ondelete="SET NULL"), nullable=True, default=None
+    )
+    ai_type: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -44,6 +50,6 @@ class Entry(Base):
 
     # Relationships
     user = relationship("User", back_populates="entries")
-    category = relationship("Category", back_populates="entries")
+    category = relationship("Category", back_populates="entries", foreign_keys=[category_id])
     property = relationship("Property", back_populates="entries")
     attachments = relationship("Attachment", back_populates="entry", cascade="all, delete-orphan")

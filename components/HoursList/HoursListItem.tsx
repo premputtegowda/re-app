@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Edit2, Trash2, Calendar, Clock, Home, FileText, Loader2, Paperclip,
   AlertCircle, X, Brain, ShieldCheck, Sparkles, RotateCcw, Lightbulb, Pencil,
@@ -120,10 +120,42 @@ export function HoursListItem({ entry }: HoursListItemProps) {
   const [isClassifying, setIsClassifying] = useState(false);
   const [classificationError, setClassificationError] = useState<string | null>(null);
 
-  // ── Description: original vs AI refined (same 3-state logic as add form) ──
+  // ── Stored AI recommendations (from DB, never change after first classify) ──
+  const [aiCategoryId, setAiCategoryId] = useState<string>('');
+  const [aiType, setAiType] = useState<'material' | 'non-material' | ''>('');
+
+  // ── Last user-selected category before reverting to AI ──
+  const [lastUsedCategoryId, setLastUsedCategoryId] = useState<string>('');
+
+  // ── Description: raw (editable) + AI refined (read-only toggle) ──
   const [useRefinedDescription, setUseRefinedDescription] = useState(false);
   const [refinedDescription, setRefinedDescription] = useState('');
   const [originalAiDescription, setOriginalAiDescription] = useState('');
+
+  // ── Auto-reclassify on raw description change (debounced) ──
+  const rawDescChangedRef = useRef(false);
+  useEffect(() => {
+    if (!rawDescChangedRef.current) return;
+    const desc = editData.description.trim();
+    if (!desc) return;
+    const timer = setTimeout(async () => {
+      const cached = getCachedClassification(desc);
+      if (cached) { applyClassificationResult(cached); return; }
+      setIsClassifying(true);
+      setClassificationError(null);
+      try {
+        const result: ClassificationResult = await api.classifyActivity(desc);
+        setCachedClassification(desc, result);
+        applyClassificationResult(result);
+      } catch (err: any) {
+        setClassificationError(err.message || 'Classification failed.');
+      } finally {
+        setIsClassifying(false);
+      }
+    }, 800);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editData.description]);
 
   // ── Attachments ──
   const [deletingAttachmentIds, setDeletingAttachmentIds] = useState<Set<string>>(new Set());
@@ -154,10 +186,15 @@ export function HoursListItem({ entry }: HoursListItemProps) {
   // ── Derived ──
   const isAiDescriptionModified = !!originalAiDescription && refinedDescription !== originalAiDescription;
 
-  const aiCategoryName = classificationResult?.category_name ?? classificationResult?.suggested_new_category ?? '';
+  // AI category name: from fresh classification OR from stored aiCategoryId
+  const aiCategoryName = classificationResult
+    ? (classificationResult.category_name ?? classificationResult.suggested_new_category ?? '')
+    : (aiCategoryId ? (categories.find((c) => c.id === aiCategoryId)?.name ?? '') : '');
 
   const allCategoryOptions = useMemo(() => {
-    const aiName = classificationResult?.category_name ?? classificationResult?.suggested_new_category ?? '';
+    const aiName = classificationResult
+      ? (classificationResult.category_name ?? classificationResult.suggested_new_category ?? '')
+      : (aiCategoryId ? (categories.find((c) => c.id === aiCategoryId)?.name ?? '') : '');
     const opts = categories.map((c) => ({
       id: c.id,
       name: c.name,
@@ -178,14 +215,16 @@ export function HoursListItem({ entry }: HoursListItemProps) {
       }
     }
     return opts;
-  }, [categories, classificationResult]);
+  }, [categories, classificationResult, aiCategoryId]);
 
-  const isCategoryOverridden =
-    !!classificationResult &&
-    !!aiCategoryName &&
-    categoryInput.trim().toLowerCase() !== aiCategoryName.toLowerCase();
+  // Overridden = user picked something different from AI recommendation
+  const isCategoryOverridden = classificationResult
+    ? (!!aiCategoryName && categoryInput.trim().toLowerCase() !== aiCategoryName.toLowerCase())
+    : (!!aiCategoryId && selectedCategoryId !== aiCategoryId);
 
-  const isTypeOverridden = !!classificationResult && selectedType !== classificationResult.type;
+  const isTypeOverridden = classificationResult
+    ? selectedType !== classificationResult.type
+    : (!!aiType && selectedType !== aiType);
 
   const selectedProperty = properties.find((p) => p.id === editData.property);
   const timeLabel =
@@ -205,21 +244,29 @@ export function HoursListItem({ entry }: HoursListItemProps) {
 
   const handleEdit = () => {
     const catName = categories.find((c) => c.id === entry.category)?.name ?? '';
+    // Use stored raw_description if available, else fall back to description
+    const rawDesc = entry.raw_description ?? entry.description;
     setEditData({
       date: entry.date,
       hours: entry.hours,
       minutes: entry.minutes,
       property: entry.property,
-      description: entry.description,
+      description: rawDesc,
     });
     setSelectedCategoryId(entry.category);
     setCategoryInput(catName);
     setSelectedType(entry.type);
     setClassificationResult(null);
     setClassificationError(null);
-    setRefinedDescription('');
-    setOriginalAiDescription('');
-    setUseRefinedDescription(false);
+    // Restore stored AI refined if available
+    const storedRefined = entry.refined_description ?? '';
+    setRefinedDescription(storedRefined);
+    setOriginalAiDescription(storedRefined);
+    setUseRefinedDescription(!!storedRefined && entry.description === storedRefined);
+    setAiCategoryId(entry.ai_category_id ?? '');
+    setAiType((entry.ai_type as 'material' | 'non-material') ?? '');
+    setLastUsedCategoryId('');
+    rawDescChangedRef.current = false;
     setIsClassifying(false);
     setEditingSection(null);
     setIsCreatingCategory(false);
@@ -286,35 +333,51 @@ export function HoursListItem({ entry }: HoursListItemProps) {
   };
 
   const handleRevertCategory = async () => {
-    if (!classificationResult) return;
-    const targetName = classificationResult.category_name ?? classificationResult.suggested_new_category;
-    if (!targetName) return;
-    const existing = categories.find((c) => c.name.toLowerCase() === targetName.toLowerCase());
-    if (existing) {
-      setSelectedCategoryId(existing.id);
-      setCategoryInput(existing.name);
-    } else {
-      const color = CATEGORY_COLORS[categories.length % CATEGORY_COLORS.length];
-      setIsCreatingCategory(true);
-      try {
-        await addCategory({ name: targetName, color });
-        const created = useStore
-          .getState()
-          .categories.find((c) => c.name.toLowerCase() === targetName.toLowerCase());
-        if (created) {
-          setSelectedCategoryId(created.id);
-          setCategoryInput(created.name);
+    // Save current selection as "last used" before reverting to AI
+    if (selectedCategoryId) setLastUsedCategoryId(selectedCategoryId);
+
+    if (classificationResult) {
+      // Fresh classification: find or create the AI-suggested category
+      const targetName = classificationResult.category_name ?? classificationResult.suggested_new_category;
+      if (!targetName) return;
+      const existing = categories.find((c) => c.name.toLowerCase() === targetName.toLowerCase());
+      if (existing) {
+        setSelectedCategoryId(existing.id);
+        setCategoryInput(existing.name);
+      } else {
+        const color = CATEGORY_COLORS[categories.length % CATEGORY_COLORS.length];
+        setIsCreatingCategory(true);
+        try {
+          await addCategory({ name: targetName, color });
+          const created = useStore
+            .getState()
+            .categories.find((c) => c.name.toLowerCase() === targetName.toLowerCase());
+          if (created) {
+            setSelectedCategoryId(created.id);
+            setCategoryInput(created.name);
+          }
+        } catch {
+          setErrors([{ field: 'general', message: 'Failed to create category' }]);
+        } finally {
+          setIsCreatingCategory(false);
         }
-      } catch {
-        setErrors([{ field: 'general', message: 'Failed to create category' }]);
-      } finally {
-        setIsCreatingCategory(false);
+      }
+    } else if (aiCategoryId) {
+      // Stored AI category: look up by ID directly
+      const cat = categories.find((c) => c.id === aiCategoryId);
+      if (cat) {
+        setSelectedCategoryId(cat.id);
+        setCategoryInput(cat.name);
       }
     }
   };
 
   const handleRevertType = () => {
-    if (classificationResult) setSelectedType(classificationResult.type);
+    if (classificationResult) {
+      setSelectedType(classificationResult.type);
+    } else if (aiType) {
+      setSelectedType(aiType);
+    }
   };
 
   const handleSaveEdit = async () => {
@@ -348,6 +411,13 @@ export function HoursListItem({ entry }: HoursListItemProps) {
         category: selectedCategoryId,
         property: editData.property,
         description: activeDescription,
+        raw_description: editData.description,
+        refined_description: originalAiDescription || undefined,
+        // Store AI picks: use newly classified values if available, else preserve existing
+        ai_category_id: classificationResult
+          ? (categories.find((c) => c.name.toLowerCase() === (classificationResult.category_name ?? '').toLowerCase())?.id ?? aiCategoryId ?? undefined)
+          : (aiCategoryId || undefined),
+        ai_type: (classificationResult?.type ?? aiType) || undefined,
         type: selectedType,
       });
 
@@ -552,7 +622,7 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                     {QUICK_HOURS.map((h) => (
                       <button
                         key={h}
-                        onClick={() => setEditData((d) => ({ ...d, hours: h, minutes: 0 }))}
+                        onClick={() => setEditData((d) => d.hours === h && d.minutes === 0 ? { ...d, hours: 0 } : { ...d, hours: h, minutes: 0 })}
                         className={`px-4 py-2 rounded-lg border-2 transition-all ${
                           editData.hours === h && editData.minutes === 0
                             ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400'
@@ -572,7 +642,7 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                     {QUICK_MINUTES.map((m) => (
                       <button
                         key={m}
-                        onClick={() => setEditData((d) => ({ ...d, hours: 0, minutes: m }))}
+                        onClick={() => setEditData((d) => d.hours === 0 && d.minutes === m ? { ...d, minutes: 0 } : { ...d, hours: 0, minutes: m })}
                         className={`px-4 py-2 rounded-lg border-2 transition-all ${
                           editData.hours === 0 && editData.minutes === m
                             ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400'
@@ -682,131 +752,95 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                 </div>
               )}
 
-              {/* Description with AI revert controls */}
+              {/* Description — always show toggle between Your original and AI refined */}
               <div>
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 block">
-                  Activity Description <span className="text-red-500">*</span>
-                </label>
-
-                {/* Mode indicator + revert buttons */}
-                {refinedDescription && (
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500">
-                      {useRefinedDescription ? (
-                        isAiDescriptionModified ? (
-                          <>
-                            <Pencil size={10} className="text-amber-500" />
-                            <span className="text-amber-600 dark:text-amber-400">Edited</span>
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles size={10} className="text-primary-500" />
-                            <span>AI refined</span>
-                          </>
-                        )
-                      ) : (
-                        <>
-                          <FileText size={10} />
-                          <span>Your original</span>
-                        </>
-                      )}
-                    </span>
-                    <div className="flex items-center gap-3">
-                      {useRefinedDescription && isAiDescriptionModified && (
-                        <button
-                          type="button"
-                          onClick={() => setRefinedDescription(originalAiDescription)}
-                          className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
-                        >
-                          <RotateCcw size={10} />
-                          Revert to AI
-                        </button>
-                      )}
-                      {useRefinedDescription ? (
-                        <button
-                          type="button"
-                          onClick={() => setUseRefinedDescription(false)}
-                          className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
-                        >
-                          <RotateCcw size={10} />
-                          Use original
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setUseRefinedDescription(true)}
-                          className="flex items-center gap-1 text-xs text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 transition-colors"
-                        >
-                          <Sparkles size={10} />
-                          {isAiDescriptionModified ? 'Use AI (edited)' : 'Use AI refined'}
-                        </button>
-                      )}
-                    </div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                    Activity Description <span className="text-red-500">*</span>
+                  </label>
+                  <div className="flex items-center rounded-lg border border-slate-200 dark:border-slate-600 overflow-hidden text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setUseRefinedDescription(false)}
+                      className={`px-3 py-1 transition-colors ${!useRefinedDescription ? 'bg-primary-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}
+                    >
+                      Your original
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setUseRefinedDescription(true)}
+                      className={`px-3 py-1 transition-colors ${useRefinedDescription ? 'bg-primary-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}
+                    >
+                      AI refined
+                    </button>
                   </div>
+                </div>
+
+                {/* Your original — always editable */}
+                {!useRefinedDescription && (
+                  <>
+                    <textarea
+                      rows={4}
+                      maxLength={2000}
+                      value={editData.description}
+                      onChange={(e) => {
+                        rawDescChangedRef.current = true;
+                        setEditData((d) => ({ ...d, description: e.target.value }));
+                      }}
+                      className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none text-sm"
+                    />
+                    {refinedDescription && (
+                      <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 italic">Your original will be used for audit.</p>
+                    )}
+                  </>
                 )}
 
-                <textarea
-                  rows={4}
-                  maxLength={2000}
-                  value={useRefinedDescription && refinedDescription ? refinedDescription : editData.description}
-                  onChange={(e) => {
-                    if (useRefinedDescription) {
-                      setRefinedDescription(e.target.value);
-                    } else {
-                      setEditData((d) => ({ ...d, description: e.target.value }));
-                    }
-                  }}
-                  className={`w-full px-3 py-2 border rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none text-sm transition-colors ${
-                    useRefinedDescription && refinedDescription
-                      ? isAiDescriptionModified
-                        ? 'border-amber-300 dark:border-amber-600 focus:ring-amber-400'
-                        : 'border-primary-300 dark:border-primary-600'
-                      : 'border-slate-300 dark:border-slate-600'
-                  }`}
-                />
-                <div className="flex items-start justify-between mt-1.5 gap-2">
-                  <span>
-                    {useRefinedDescription && refinedDescription && !isAiDescriptionModified && (
-                      <p className="text-xs text-slate-400 dark:text-slate-500 italic">
-                        You can edit the AI description above.
-                      </p>
+                {/* AI refined — read-only */}
+                {useRefinedDescription && (
+                  <>
+                    {isClassifying ? (
+                      <div className="w-full px-3 py-2 border border-primary-300 dark:border-primary-600 rounded-lg bg-slate-50 dark:bg-slate-800/60 h-[104px] flex items-center justify-center gap-2 text-xs text-primary-600 dark:text-primary-400">
+                        <Loader2 size={13} className="animate-spin" />
+                        <span>Classifying…</span>
+                      </div>
+                    ) : refinedDescription ? (
+                      <>
+                        <textarea
+                          rows={4}
+                          readOnly
+                          value={refinedDescription}
+                          className="w-full px-3 py-2 border border-primary-300 dark:border-primary-600 rounded-lg bg-slate-50 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 resize-none text-sm cursor-default"
+                        />
+                        <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 italic">AI refined will be used for audit.</p>
+                      </>
+                    ) : (
+                      <div className="w-full px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-800/60 h-[104px] flex items-center justify-center text-xs text-slate-400 dark:text-slate-500">
+                        No AI refinement yet — edit the description to trigger classification.
+                      </div>
                     )}
-                    {getFieldError('description') && (
-                      <p className="text-xs text-red-500">{getFieldError('description')}</p>
-                    )}
-                  </span>
-                  <p className="text-xs text-slate-400 shrink-0">
-                    {(useRefinedDescription && refinedDescription ? refinedDescription : editData.description).length}/2000
-                  </p>
-                </div>
+                  </>
+                )}
+
+                {getFieldError('description') && (
+                  <p className="text-xs text-red-500 mt-1">{getFieldError('description')}</p>
+                )}
               </div>
 
               {/* AI Classification card */}
               <div className="bg-slate-50 dark:bg-slate-700/50 rounded-lg p-4 space-y-4">
 
-                {/* Header row: label + classify/re-classify button */}
-                <div className="flex items-center justify-between">
+                {/* Header row: label only */}
+                <div className="flex items-center gap-2">
                   {classificationResult && !classificationError ? (
-                    <div className="flex items-center gap-2">
+                    <>
                       <ShieldCheck className="text-primary-500 shrink-0" size={16} />
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                         AI Classification
                       </p>
-                    </div>
+                    </>
                   ) : (
                     <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Category & Type</p>
                   )}
-                  <button
-                    type="button"
-                    onClick={runClassification}
-                    disabled={isClassifying || !editData.description.trim()}
-                    className="flex items-center gap-1 text-xs text-primary-600 dark:text-primary-400 hover:underline disabled:opacity-50"
-                  >
-                    {isClassifying
-                      ? <><Loader2 size={10} className="animate-spin" /> Classifying…</>
-                      : <><Sparkles size={10} /> {classificationResult ? 'Re-classify' : 'Classify with AI'}</>
-                    }
-                  </button>
                 </div>
 
                 {/* Refined title */}
@@ -831,6 +865,23 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                         Revert to AI pick
                       </button>
                     )}
+                    {!isCategoryOverridden && !!lastUsedCategoryId && (() => {
+                      const lastCat = categories.find((c) => c.id === lastUsedCategoryId);
+                      if (!lastCat) return null;
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedCategoryId(lastCat.id);
+                            setCategoryInput(lastCat.name);
+                          }}
+                          className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 hover:underline"
+                        >
+                          <RotateCcw size={10} />
+                          Last used: {lastCat.name}
+                        </button>
+                      );
+                    })()}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {allCategoryOptions.map((option) => {
@@ -847,7 +898,7 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                             isSelected
                               ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
                               : option.isAiRecommended
-                              ? 'border-indigo-300 dark:border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 hover:border-indigo-400'
+                              ? 'border-dashed border-slate-400 dark:border-slate-500 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-primary-400 dark:hover:border-primary-500'
                               : 'border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-primary-300 dark:hover:border-primary-500'
                           }`}
                         >
@@ -858,9 +909,6 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                               <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
                             ) : null;
                           })()}
-                          {option.isAiRecommended && !isSelected && !categories.find((c) => c.id === option.id) && (
-                            <Sparkles size={10} />
-                          )}
                           {option.name}
                           {option.isNew && <span className="text-xs opacity-60 ml-0.5">· new</span>}
                         </button>
@@ -893,7 +941,7 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                   <div className="flex gap-2">
                     {(['material', 'non-material'] as const).map((type) => {
                       const isSelected = selectedType === type;
-                      const isAiPick = !!classificationResult && classificationResult.type === type;
+                      const isAiPick = classificationResult ? classificationResult.type === type : aiType === type;
                       return (
                         <button
                           key={type}
@@ -901,15 +949,12 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                           onClick={() => setSelectedType(type)}
                           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all border-2 ${
                             isSelected
-                              ? type === 'material'
-                                ? 'border-green-500 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-                                : 'border-purple-500 bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
+                              ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
                               : isAiPick
-                              ? 'border-indigo-300 dark:border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 hover:border-indigo-400'
+                              ? 'border-dashed border-slate-400 dark:border-slate-500 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-primary-400 dark:hover:border-primary-500'
                               : 'border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-primary-300'
                           }`}
                         >
-                          {isAiPick && !isSelected && <Sparkles size={10} />}
                           {type === 'material' ? 'Material' : 'Non-Material'}
                         </button>
                       );

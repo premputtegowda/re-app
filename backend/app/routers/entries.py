@@ -144,6 +144,10 @@ async def create_entry(
         total_minutes=data.hours * 60 + data.minutes,
         type=ModelEntryType(data.type.value),
         description=data.description,
+        raw_description=data.raw_description,
+        refined_description=data.refined_description,
+        ai_category_id=data.ai_category_id,
+        ai_type=data.ai_type,
         notes=data.notes,
     )
     db.add(entry)
@@ -269,6 +273,14 @@ async def update_entry(
         entry.type = ModelEntryType(data.type.value)
     if data.description is not None:
         entry.description = data.description
+    if data.raw_description is not None:
+        entry.raw_description = data.raw_description
+    if data.refined_description is not None:
+        entry.refined_description = data.refined_description
+    if data.ai_category_id is not None:
+        entry.ai_category_id = data.ai_category_id
+    if data.ai_type is not None:
+        entry.ai_type = data.ai_type
     if data.notes is not None:
         entry.notes = data.notes
 

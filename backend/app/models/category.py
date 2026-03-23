@@ -28,4 +28,4 @@ class Category(Base):
 
     # Relationships
     user = relationship("User", back_populates="categories")
-    entries = relationship("Entry", back_populates="category")
+    entries = relationship("Entry", back_populates="category", foreign_keys="Entry.category_id")

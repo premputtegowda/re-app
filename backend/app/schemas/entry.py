@@ -19,6 +19,10 @@ class EntryBase(BaseModel):
     property_id: UUID
     type: EntryType
     description: str = Field(..., min_length=1, max_length=2000)
+    raw_description: str | None = Field(None, max_length=2000)
+    refined_description: str | None = Field(None, max_length=2000)
+    ai_category_id: UUID | None = None
+    ai_type: str | None = None
     notes: str | None = Field(None, max_length=2000)
 
     @field_validator("date")
@@ -47,6 +51,10 @@ class EntryUpdate(BaseModel):
     property_id: Optional[UUID] = None
     type: Optional[EntryType] = None
     description: Optional[str] = Field(None, min_length=1, max_length=2000)
+    raw_description: Optional[str] = Field(None, max_length=2000)
+    refined_description: Optional[str] = Field(None, max_length=2000)
+    ai_category_id: Optional[UUID] = None
+    ai_type: Optional[str] = None
     notes: Optional[str] = Field(None, max_length=2000)
 
 
@@ -61,6 +69,10 @@ class EntryResponse(BaseModel):
     property_id: UUID
     type: EntryType
     description: str
+    raw_description: str | None = None
+    refined_description: str | None = None
+    ai_category_id: UUID | None = None
+    ai_type: str | None = None
     notes: str | None = None
     attachments: List[AttachmentResponse] = []
     created_at: datetime

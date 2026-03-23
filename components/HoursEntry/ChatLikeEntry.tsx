@@ -36,7 +36,7 @@ function TimeFormBody({ formData, setFormData, errors }: TimeFormBodyProps) {
           {QUICK_HOURS.map((h) => (
             <button
               key={h}
-              onClick={() => setFormData({ ...formData, hours: h })}
+              onClick={() => setFormData({ ...formData, hours: formData.hours === h ? 0 : h })}
               className={`px-4 py-2 rounded-lg border-2 transition-all ${
                 formData.hours === h
                   ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400'
@@ -54,7 +54,7 @@ function TimeFormBody({ formData, setFormData, errors }: TimeFormBodyProps) {
           {QUICK_MINUTES.map((m) => (
             <button
               key={m}
-              onClick={() => setFormData({ ...formData, minutes: m })}
+              onClick={() => setFormData({ ...formData, minutes: formData.minutes === m ? 0 : m })}
               className={`px-4 py-2 rounded-lg border-2 transition-all ${
                 formData.minutes === m
                   ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400'
@@ -492,9 +492,20 @@ export function ChatLikeEntry() {
       ? refinedDescription
       : formData.description;
 
+    // Resolve the AI-recommended category ID (distinct from user's selection)
+    const aiRecommendedCategoryId = classificationResult
+      ? useStore.getState().categories.find(
+          (c) => c.name.toLowerCase() === (classificationResult.category_name ?? classificationResult.suggested_new_category ?? '').toLowerCase()
+        )?.id ?? undefined
+      : undefined;
+
     const finalFormData: HoursEntryFormData = {
       ...formData,
       description: activeDescription,
+      raw_description: formData.description,
+      refined_description: originalAiDescription || undefined,
+      ai_category_id: aiRecommendedCategoryId,
+      ai_type: classificationResult?.type,
       category: categoryId,
       type: selectedType,
     };
@@ -591,8 +602,19 @@ export function ChatLikeEntry() {
         animate={{ opacity: 1, y: 0 }}
         className="mb-6"
       >
-        <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Log Your Hours</h2>
-        <p className="text-slate-600 dark:text-slate-400">Describe what you did — AI will classify it for you</p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-1">Log Your Hours</h2>
+            <p className="text-sm text-slate-600 dark:text-slate-400">Describe what you did — AI will classify it for you</p>
+          </div>
+          <button
+            onClick={() => router.push('/dashboard')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors mt-0.5 shrink-0"
+          >
+            <X size={15} />
+            Cancel
+          </button>
+        </div>
       </motion.div>
 
       {/* Progress indicator */}
@@ -705,9 +727,9 @@ export function ChatLikeEntry() {
           )}
         </AnimatePresence>
 
-        {/* ── Step 3 summary bar (shown when step > 3) ── */}
+        {/* ── Step 3 inline edit (only shown when user taps edit on the description) ── */}
         <AnimatePresence>
-          {step > 3 && (
+          {step > 3 && editingStep === 3 && (
             <motion.div
               key="summary-3"
               initial={{ opacity: 0, y: -8 }}
@@ -935,113 +957,71 @@ export function ChatLikeEntry() {
                     </div>
                   )}
 
-                  {/* Description — editable, with contextual revert controls */}
+                  {/* Description — toggle between Your original (editable) and AI refined (read-only) */}
                   <div>
-                    <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1 block">
-                      Activity Description <span className="text-red-500">*</span>
-                    </label>
-
-                    {/* Original description — shown as readable text when AI refined is active */}
-                    {refinedDescription && useRefinedDescription && formData.description && (
-                      <div className="mb-3 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-200 dark:border-slate-700">
-                        <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Your original description</p>
-                        <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{formData.description}</p>
-                      </div>
-                    )}
-
-                    {/* Mode indicator + revert buttons (only when AI result exists) */}
+                    {/* Toggle — only shown when AI refined is available */}
                     {refinedDescription && (
                       <div className="flex items-center justify-between mb-2">
-                        <span className="flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500">
-                          {useRefinedDescription ? (
-                            isAiDescriptionModified ? (
-                              <>
-                                <Pencil size={10} className="text-amber-500" />
-                                <span className="text-amber-600 dark:text-amber-400">Edited</span>
-                              </>
-                            ) : (
-                              <>
-                                <Sparkles size={10} className="text-primary-500" />
-                                <span>AI refined</span>
-                              </>
-                            )
-                          ) : (
-                            <>
-                              <FileText size={10} />
-                              <span>Your original</span>
-                            </>
-                          )}
-                        </span>
-                        <div className="flex items-center gap-3">
-                          {/* When showing AI modified: offer to restore pristine AI text */}
-                          {useRefinedDescription && isAiDescriptionModified && (
-                            <button
-                              type="button"
-                              onClick={() => setRefinedDescription(originalAiDescription)}
-                              className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
-                            >
-                              <RotateCcw size={10} />
-                              Revert to AI
-                            </button>
-                          )}
-                          {/* Toggle between AI and original */}
-                          {useRefinedDescription ? (
-                            <button
-                              type="button"
-                              onClick={() => setUseRefinedDescription(false)}
-                              className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
-                            >
-                              <RotateCcw size={10} />
-                              Use original
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => setUseRefinedDescription(true)}
-                              className="flex items-center gap-1 text-xs text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 transition-colors"
-                            >
-                              <Sparkles size={10} />
-                              {isAiDescriptionModified ? 'Use AI (edited)' : 'Use AI refined'}
-                            </button>
-                          )}
+                        <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                          Activity Description <span className="text-red-500">*</span>
+                        </label>
+                        <div className="flex items-center rounded-lg border border-slate-200 dark:border-slate-600 overflow-hidden text-xs">
+                          <button
+                            type="button"
+                            onClick={() => setUseRefinedDescription(false)}
+                            className={`px-3 py-1 transition-colors ${!useRefinedDescription ? 'bg-primary-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}
+                          >
+                            Your original
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setUseRefinedDescription(true)}
+                            className={`px-3 py-1 transition-colors ${useRefinedDescription ? 'bg-primary-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}
+                          >
+                            AI refined
+                          </button>
                         </div>
                       </div>
                     )}
 
-                    <textarea
-                      rows={4}
-                      maxLength={2000}
-                      value={useRefinedDescription && refinedDescription ? refinedDescription : formData.description}
-                      onChange={(e) => {
-                        if (useRefinedDescription) {
-                          setRefinedDescription(e.target.value);
-                        } else {
-                          setFormData({ ...formData, description: e.target.value });
-                        }
-                      }}
-                      className={`w-full px-3 py-2 border rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none text-sm transition-colors ${
-                        useRefinedDescription && refinedDescription
-                          ? isAiDescriptionModified
-                            ? 'border-amber-300 dark:border-amber-600 focus:ring-amber-400'
-                            : 'border-primary-300 dark:border-primary-600'
-                          : 'border-slate-300 dark:border-slate-600'
-                      }`}
-                    />
-                    <div className="flex items-start justify-between mt-1.5 gap-2">
-                      <span>
-                        {useRefinedDescription && refinedDescription && !isAiDescriptionModified && (
-                          <p className="text-xs text-slate-400 dark:text-slate-500 italic">
-                            You can edit the AI description above.
-                          </p>
+                    {!refinedDescription && (
+                      <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">
+                        Activity Description <span className="text-red-500">*</span>
+                      </label>
+                    )}
+
+                    {/* Your original — editable, shown when toggle is "Your original" or no AI yet */}
+                    {!useRefinedDescription && (
+                      <>
+                        <textarea
+                          rows={4}
+                          maxLength={2000}
+                          value={formData.description}
+                          onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                          className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none text-sm"
+                        />
+                        {refinedDescription && (
+                          <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 italic">Your original will be used for audit.</p>
                         )}
-                        {getFieldError(errors, 'description') && (
-                          <p className="text-xs text-red-500">{getFieldError(errors, 'description')}</p>
-                        )}
-                      </span>
-                      <p className="text-xs text-slate-400 shrink-0">
-                        {(useRefinedDescription && refinedDescription ? refinedDescription : formData.description).length}/2000
-                      </p>
-                    </div>
+                      </>
+                    )}
+
+                    {/* AI refined — read-only, shown when toggle is "AI refined" */}
+                    {useRefinedDescription && refinedDescription && (
+                      <>
+                        <textarea
+                          rows={4}
+                          readOnly
+                          value={refinedDescription}
+                          className="w-full px-3 py-2 border border-primary-300 dark:border-primary-600 rounded-lg bg-slate-50 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 resize-none text-sm cursor-default"
+                        />
+                        <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 italic">AI refined will be used for audit.</p>
+                      </>
+                    )}
+
+                    {getFieldError(errors, 'description') && (
+                      <p className="text-xs text-red-500 mt-1">{getFieldError(errors, 'description')}</p>
+                    )}
                   </div>
 
                   {/* AI Classification card */}
@@ -1093,11 +1073,10 @@ export function ChatLikeEntry() {
                                 isSelected
                                   ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
                                   : option.isAiRecommended
-                                  ? 'border-indigo-300 dark:border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 hover:border-indigo-400'
+                                  ? 'border-dashed border-slate-400 dark:border-slate-500 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-primary-400 dark:hover:border-primary-500'
                                   : 'border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-primary-300 dark:hover:border-primary-500'
                               }`}
                             >
-                              {option.isAiRecommended && !isSelected && <Sparkles size={10} />}
                               {option.name}
                               {option.isNew && <span className="text-xs opacity-60 ml-0.5">· new</span>}
                             </button>
@@ -1138,15 +1117,12 @@ export function ChatLikeEntry() {
                               onClick={() => setSelectedType(type)}
                               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all border-2 ${
                                 isSelected
-                                  ? type === 'material'
-                                    ? 'border-green-500 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-                                    : 'border-purple-500 bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300'
+                                  ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
                                   : isAiPick
-                                  ? 'border-indigo-300 dark:border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 hover:border-indigo-400'
+                                  ? 'border-dashed border-slate-400 dark:border-slate-500 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-primary-400 dark:hover:border-primary-500'
                                   : 'border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-primary-300'
                               }`}
                             >
-                              {isAiPick && !isSelected && <Sparkles size={10} />}
                               {type === 'material' ? 'Material' : 'Non-Material'}
                             </button>
                           );
