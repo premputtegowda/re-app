@@ -820,7 +820,7 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                           <Loader2 size={11} className="animate-spin shrink-0" />
                           Classifying…
                         </span>
-                      ) : (isTextareaFocused || isDescriptionDirty) ? (
+                      ) : isTextareaFocused ? (
                         <button
                           type="button"
                           onMouseDown={(e) => e.preventDefault()}
