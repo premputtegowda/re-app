@@ -139,7 +139,15 @@ export function MonthlyTrendChart({ data }: MonthlyTrendChartProps) {
         <ResponsiveContainer width="100%" height={300}>
           <LineChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-            <XAxis dataKey="month" tick={{ fontSize: 12 }} />
+            <XAxis
+              dataKey="month"
+              tick={{ fontSize: 11 }}
+              tickFormatter={(val: string) => {
+                const parts = val.split(' ');
+                if (parts.length === 2) return `${parts[0].slice(0, 3)} '${parts[1].slice(2)}`;
+                return val;
+              }}
+            />
             <YAxis tick={{ fontSize: 12 }} />
             <Tooltip formatter={(v: number) => [`${v}h`, 'Hours']} />
             <Legend />

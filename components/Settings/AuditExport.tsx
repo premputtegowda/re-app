@@ -88,15 +88,15 @@ export function AuditExport() {
             <p className="text-2xl font-bold text-slate-900 dark:text-white">{attachmentCount}</p>
           </div>
 
-          <div className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-4 py-3 text-center shadow-sm">
-            <div className="flex items-center justify-center gap-1.5 mb-1">
+          <div className="rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-3 text-center shadow-sm">
+            <div className="flex items-center justify-center gap-1 mb-1">
               <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Year</span>
               <ChevronDown size={12} className="text-slate-400" />
             </div>
             <select
               value={year}
               onChange={(e) => setYear(Number(e.target.value))}
-              className="w-full text-center text-xl font-bold text-slate-900 dark:text-white bg-transparent border-none outline-none cursor-pointer"
+              className="w-full text-center text-base font-bold text-slate-900 dark:text-white bg-transparent border-none outline-none cursor-pointer"
             >
               {YEARS.map((y) => (
                 <option key={y} value={y}>{y}</option>
