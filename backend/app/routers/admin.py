@@ -1,6 +1,9 @@
+import logging
 import secrets
 from datetime import datetime, timedelta
 from uuid import UUID
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
@@ -266,9 +269,9 @@ async def create_invitation(
                 subject="You've been invited to DealstackRE",
                 body=body_text,
             )
-        except Exception:
-            # Don't fail the request if email fails — admin can share the link manually
-            pass
+            logger.info("Invite email sent to %s", body.email)
+        except Exception as exc:
+            logger.error("Failed to send invite email to %s: %s", body.email, exc, exc_info=True)
 
     return InvitationSummary(
         id=invitation.id,
@@ -372,8 +375,9 @@ async def approve_access_request(
         try:
             sender = get_smtp_sender()
             await sender.send_plain(to_email=req.email, subject="You're in! Your DealstackRE invite", body=body_text)
-        except Exception:
-            pass
+            logger.info("Approval email sent to %s", req.email)
+        except Exception as exc:
+            logger.error("Failed to send approval email to %s: %s", req.email, exc, exc_info=True)
 
     return InvitationSummary(
         id=invitation.id,
