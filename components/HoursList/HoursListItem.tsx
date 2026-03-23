@@ -781,7 +781,7 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                   <div className="flex items-center rounded-lg border border-slate-200 dark:border-slate-600 overflow-hidden text-xs">
                     <button
                       type="button"
-                      onClick={() => setUseRefinedDescription(false)}
+                      onClick={() => { setUseRefinedDescription(false); setIsTextareaFocused(false); }}
                       disabled={isClassifying}
                       className={`px-3 py-1 transition-colors disabled:opacity-60 ${!useRefinedDescription ? 'bg-primary-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}
                     >
