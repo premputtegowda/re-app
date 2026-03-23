@@ -561,7 +561,7 @@ export function HoursListItem({ entry }: HoursListItemProps) {
       {/* ── Edit Modal ── */}
       <Modal
         isOpen={isEditModalOpen}
-        onClose={() => { setIsEditModalOpen(false); setErrors([]); }}
+        onClose={() => { if (!isClassifying) { setIsEditModalOpen(false); setErrors([]); } }}
         title="Edit Entry"
         size="lg"
       >
@@ -602,7 +602,7 @@ export function HoursListItem({ entry }: HoursListItemProps) {
               icon={<Home size={18} />}
               label="Property"
               value={selectedProperty?.name ?? '—'}
-              onEdit={() => setEditingSection('property')}
+              onEdit={() => { if (!isClassifying) setEditingSection('property'); }}
             />
           )}
 
@@ -722,7 +722,7 @@ export function HoursListItem({ entry }: HoursListItemProps) {
               icon={<Clock size={18} />}
               label="Time & Date"
               value={`${timeLabel} · ${editData.date}`}
-              onEdit={() => setEditingSection('datetime')}
+              onEdit={() => { if (!isClassifying) setEditingSection('datetime'); }}
             />
           )}
 
@@ -733,6 +733,17 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                 <Brain className="text-primary-600 dark:text-primary-400" size={24} />
                 <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Review & Edit</h3>
               </div>
+
+              {/* AI classifying banner — blocks all interactions */}
+              {isClassifying && (
+                <div className="bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-700 rounded-lg p-3 flex items-center gap-3">
+                  <Loader2 size={16} className="animate-spin text-primary-600 dark:text-primary-400 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-primary-700 dark:text-primary-300">AI is classifying your activity…</p>
+                    <p className="text-xs text-primary-500 dark:text-primary-400 mt-0.5">Save and other actions are disabled until done.</p>
+                  </div>
+                </div>
+              )}
 
               {/* Classification error */}
               {classificationError && (
@@ -762,14 +773,16 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                     <button
                       type="button"
                       onClick={() => setUseRefinedDescription(false)}
-                      className={`px-3 py-1 transition-colors ${!useRefinedDescription ? 'bg-primary-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}
+                      disabled={isClassifying}
+                      className={`px-3 py-1 transition-colors disabled:opacity-60 ${!useRefinedDescription ? 'bg-primary-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}
                     >
                       Your original
                     </button>
                     <button
                       type="button"
                       onClick={() => setUseRefinedDescription(true)}
-                      className={`px-3 py-1 transition-colors ${useRefinedDescription ? 'bg-primary-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}
+                      disabled={isClassifying}
+                      className={`px-3 py-1 transition-colors disabled:opacity-60 ${useRefinedDescription ? 'bg-primary-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}
                     >
                       AI refined
                     </button>
@@ -858,7 +871,7 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                       <button
                         type="button"
                         onClick={handleRevertCategory}
-                        disabled={isCreatingCategory}
+                        disabled={isCreatingCategory || isClassifying}
                         className="flex items-center gap-1 text-xs text-primary-600 dark:text-primary-400 hover:underline disabled:opacity-50"
                       >
                         <RotateCcw size={10} />
@@ -893,7 +906,7 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                           key={option.id}
                           type="button"
                           onClick={() => handleCategorySelect(option)}
-                          disabled={isCreatingCategory}
+                          disabled={isCreatingCategory || isClassifying}
                           className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium transition-all border-2 disabled:opacity-60 ${
                             isSelected
                               ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
@@ -931,7 +944,8 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                       <button
                         type="button"
                         onClick={handleRevertType}
-                        className="flex items-center gap-1 text-xs text-primary-600 dark:text-primary-400 hover:underline"
+                        disabled={isClassifying}
+                        className="flex items-center gap-1 text-xs text-primary-600 dark:text-primary-400 hover:underline disabled:opacity-50"
                       >
                         <RotateCcw size={10} />
                         Revert to AI pick
@@ -947,7 +961,8 @@ export function HoursListItem({ entry }: HoursListItemProps) {
                           key={type}
                           type="button"
                           onClick={() => setSelectedType(type)}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all border-2 ${
+                          disabled={isClassifying}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all border-2 disabled:opacity-60 ${
                             isSelected
                               ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300'
                               : isAiPick
@@ -1145,13 +1160,13 @@ export function HoursListItem({ entry }: HoursListItemProps) {
 
               {/* Save / Cancel */}
               <div className="flex gap-3 pt-1">
-                <Button variant="secondary" onClick={() => setIsEditModalOpen(false)} fullWidth>
+                <Button variant="secondary" onClick={() => setIsEditModalOpen(false)} fullWidth disabled={isClassifying}>
                   Cancel
                 </Button>
                 <Button
                   onClick={handleSaveEdit}
                   fullWidth
-                  disabled={isSaving || isCreatingCategory || !selectedCategoryId}
+                  disabled={isSaving || isCreatingCategory || !selectedCategoryId || isClassifying}
                 >
                   {isSaving ? (
                     <span className="flex items-center gap-2">
