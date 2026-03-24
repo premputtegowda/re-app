@@ -2,7 +2,29 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { api, getTokens, clearTokens } from './api';
+import { api, getTokens, clearTokens, refreshAccessToken } from './api';
+
+// Background token refresh — runs every 4 minutes, refreshes if expiring within 60s
+let _refreshTimer: ReturnType<typeof setInterval> | null = null;
+
+export function startTokenRefreshTimer() {
+  if (_refreshTimer) return;
+  _refreshTimer = setInterval(async () => {
+    const { refreshToken, accessTokenExpiresAt } = getTokens();
+    if (!refreshToken || !accessTokenExpiresAt) return;
+    const expiresInMs = accessTokenExpiresAt - Date.now();
+    if (expiresInMs < 60_000) {
+      await refreshAccessToken();
+    }
+  }, 4 * 60 * 1000); // check every 4 minutes
+}
+
+export function stopTokenRefreshTimer() {
+  if (_refreshTimer) {
+    clearInterval(_refreshTimer);
+    _refreshTimer = null;
+  }
+}
 
 export interface User {
   id: string;
@@ -10,6 +32,7 @@ export interface User {
   name: string;
   picture_url: string | null;
   is_admin: boolean;
+  has_complimentary_access: boolean;
 }
 
 interface AuthStore {
@@ -44,6 +67,7 @@ export const useAuthStore = create<AuthStore>()(
             isAuthenticated: true,
             isLoading: false,
           });
+          startTokenRefreshTimer();
         } catch (error) {
           set({
             error: error instanceof Error ? error.message : 'Login failed',
@@ -54,6 +78,7 @@ export const useAuthStore = create<AuthStore>()(
       },
 
       logout: async () => {
+        stopTokenRefreshTimer();
         set({ isLoading: true });
         try {
           await api.logout();
@@ -79,13 +104,23 @@ export const useAuthStore = create<AuthStore>()(
           const user = await api.getCurrentUser();
           if (user) {
             set({ user, isAuthenticated: true, isLoading: false });
+            startTokenRefreshTimer();
           } else {
-            clearTokens();
+            // getCurrentUser returned null — explicit 401, tokens already cleared
             set({ user: null, isAuthenticated: false, isLoading: false });
           }
-        } catch {
-          clearTokens();
-          set({ user: null, isAuthenticated: false, isLoading: false });
+        } catch (err) {
+          // Network error or server error — keep the user logged in, don't clear tokens
+          // They may just be offline or the backend is temporarily down
+          const isAuthError = err instanceof Error && err.message.includes('401');
+          if (isAuthError) {
+            clearTokens();
+            set({ user: null, isAuthenticated: false, isLoading: false });
+          } else {
+            // Preserve existing auth state — don't log the user out
+            set({ isLoading: false });
+            startTokenRefreshTimer();
+          }
         }
       },
 

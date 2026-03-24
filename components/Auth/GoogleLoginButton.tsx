@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import { useAuthStore } from '@/lib/authStore';
 
 declare global {
@@ -41,7 +41,8 @@ export default function GoogleLoginButton({
 }: GoogleLoginButtonProps) {
   const { login, isLoading } = useAuthStore();
 
-  const handleCredentialResponse = useCallback(
+  const callbackRef = useRef<(response: { credential: string }) => void>();
+  callbackRef.current = useCallback(
     async (response: { credential: string }) => {
       try {
         await login(response.credential);
@@ -60,36 +61,42 @@ export default function GoogleLoginButton({
       return;
     }
 
-    // Load Google Identity Services script
+    const initGoogle = () => {
+      if (!window.google) return;
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: (response) => callbackRef.current?.(response),
+      });
+      const buttonDiv = document.getElementById('google-signin-button');
+      if (buttonDiv) {
+        window.google.accounts.id.renderButton(buttonDiv, {
+          theme: 'outline',
+          size: 'large',
+          text: 'signin_with',
+          shape: 'rectangular',
+          width: 280,
+        });
+      }
+    };
+
+    // If script already loaded, initialize directly
+    if (window.google) {
+      initGoogle();
+      return;
+    }
+
+    // Avoid injecting duplicate script tags
+    if (document.querySelector('script[src="https://accounts.google.com/gsi/client"]')) {
+      return;
+    }
+
     const script = document.createElement('script');
     script.src = 'https://accounts.google.com/gsi/client';
     script.async = true;
     script.defer = true;
-    script.onload = () => {
-      if (window.google) {
-        window.google.accounts.id.initialize({
-          client_id: clientId,
-          callback: handleCredentialResponse,
-        });
-
-        const buttonDiv = document.getElementById('google-signin-button');
-        if (buttonDiv) {
-          window.google.accounts.id.renderButton(buttonDiv, {
-            theme: 'outline',
-            size: 'large',
-            text: 'signin_with',
-            shape: 'rectangular',
-            width: 280,
-          });
-        }
-      }
-    };
+    script.onload = initGoogle;
     document.body.appendChild(script);
-
-    return () => {
-      document.body.removeChild(script);
-    };
-  }, [handleCredentialResponse]);
+  }, []);
 
   if (isLoading) {
     return (

@@ -6,7 +6,8 @@
  * Format a date string to display format (MM/DD/YYYY)
  */
 export const formatDate = (dateString: string): string => {
-  const date = new Date(dateString);
+  const [year, month, day] = dateString.split('T')[0].split('-').map(Number);
+  const date = new Date(year, month - 1, day);
   return date.toLocaleDateString('en-US', {
     month: '2-digit',
     day: '2-digit',
@@ -18,7 +19,8 @@ export const formatDate = (dateString: string): string => {
  * Format a date string to long format (Month DD, YYYY)
  */
 export const formatDateLong = (dateString: string): string => {
-  const date = new Date(dateString);
+  const [year, month, day] = dateString.split('T')[0].split('-').map(Number);
+  const date = new Date(year, month - 1, day);
   return date.toLocaleDateString('en-US', {
     month: 'long',
     day: 'numeric',
@@ -31,7 +33,10 @@ export const formatDateLong = (dateString: string): string => {
  */
 export const getTodayDate = (): string => {
   const today = new Date();
-  return today.toISOString().split('T')[0];
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
 /**
@@ -52,15 +57,13 @@ export const isFutureDate = (dateString: string): boolean => {
 };
 
 /**
- * Get the start of the current week (Sunday)
+ * Get the start of the rolling 7-day window (today minus 6 days)
  */
 export const getWeekStart = (): Date => {
-  const today = new Date();
-  const day = today.getDay();
-  const diff = today.getDate() - day;
-  const weekStart = new Date(today.setDate(diff));
-  weekStart.setHours(0, 0, 0, 0);
-  return weekStart;
+  const start = new Date();
+  start.setDate(start.getDate() - 6);
+  start.setHours(0, 0, 0, 0);
+  return start;
 };
 
 /**
@@ -107,9 +110,7 @@ export const isDateInRange = (
  * Get month and year string (YYYY-MM)
  */
 export const getMonthYear = (dateString: string): string => {
-  const date = new Date(dateString);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const [year, month] = dateString.split('T')[0].split('-');
   return `${year}-${month}`;
 };
 

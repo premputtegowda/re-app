@@ -3,20 +3,17 @@
 import React from 'react';
 import { Header } from './Header';
 import { Navigation } from './Navigation';
-import type { ViewMode } from '@/types';
 
 interface LayoutProps {
   children: React.ReactNode;
-  currentView: ViewMode;
-  onViewChange: (view: ViewMode) => void;
 }
 
-export function Layout({ children, currentView, onViewChange }: LayoutProps) {
+export function Layout({ children }: LayoutProps) {
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
       <Header />
 
-      <Navigation currentView={currentView} onViewChange={onViewChange} />
+      <Navigation />
 
       {/* Main content — bottom padding accounts for mobile tab bar */}
       <main className="lg:ml-64 pt-4 pb-20 lg:pb-8">

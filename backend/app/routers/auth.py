@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import User, RefreshToken, Category, Property
+from app.models import User, RefreshToken, Category, Property, Invitation, AccessRequest
 from app.schemas import TokenResponse, GoogleAuthRequest, RefreshRequest, UserResponse
 from app.services.oauth import verify_google_token, get_google_auth_url, exchange_code_for_tokens, GoogleOAuthError
 from app.utils.security import (
@@ -33,8 +33,7 @@ DEFAULT_CATEGORIES = [
 
 
 async def create_default_data(db: AsyncSession, user: User) -> None:
-    """Create default categories and a sample property for new users."""
-    # Create default categories
+    """Create default categories for new users."""
     for cat_data in DEFAULT_CATEGORIES:
         category = Category(
             user_id=user.id,
@@ -43,20 +42,30 @@ async def create_default_data(db: AsyncSession, user: User) -> None:
         )
         db.add(category)
 
-    # Create a default property
-    default_property = Property(
-        user_id=user.id,
-        name="My First Property",
-        address="",
-    )
-    db.add(default_property)
-
     await db.commit()
+
+
+async def apply_pending_invite(db: AsyncSession, user: User) -> None:
+    """If a non-expired, unaccepted invite exists for this email, apply complimentary access."""
+    now = datetime.utcnow()
+    result = await db.execute(
+        select(Invitation).where(
+            Invitation.email == user.email,
+            Invitation.accepted_at.is_(None),
+            Invitation.expires_at > now,
+        )
+    )
+    invite = result.scalar_one_or_none()
+    if invite:
+        user.has_complimentary_access = True
+        invite.accepted_at = now
+        await db.commit()
 
 
 async def get_or_create_user(db: AsyncSession, user_info: dict) -> tuple[User, bool]:
     """
     Get existing user or create new one.
+    New users without a valid invite are blocked — an AccessRequest is saved instead.
     Returns (user, is_new_user)
     """
     # Check if user exists by google_id
@@ -73,6 +82,40 @@ async def get_or_create_user(db: AsyncSession, user_info: dict) -> tuple[User, b
         await db.commit()
         await db.refresh(user)
         return user, False
+
+    # New user — check invite gate
+    if settings.invite_only:
+        now = datetime.utcnow()
+        invite_result = await db.execute(
+            select(Invitation).where(
+                Invitation.email == user_info["email"],
+                Invitation.accepted_at.is_(None),
+                Invitation.expires_at > now,
+            )
+        )
+        has_invite = invite_result.scalar_one_or_none() is not None
+
+        if not has_invite:
+            # Save or update an access request so admin can approve it
+            existing_req = await db.execute(
+                select(AccessRequest).where(
+                    AccessRequest.email == user_info["email"],
+                    AccessRequest.status == "pending",
+                )
+            )
+            already_pending = existing_req.scalar_one_or_none() is not None
+            if not already_pending:
+                db.add(AccessRequest(
+                    email=user_info["email"],
+                    name=user_info["name"],
+                    picture_url=user_info.get("picture"),
+                ))
+                await db.commit()
+
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="ACCESS_REQUEST_PENDING" if already_pending else "ACCESS_REQUEST_SUBMITTED",
+            )
 
     # Create new user
     user = User(
@@ -144,6 +187,8 @@ async def google_callback(
         if is_new:
             await create_default_data(db, user)
 
+        await apply_pending_invite(db, user)
+
         # Create tokens
         token_response = await create_tokens(db, user)
 
@@ -175,6 +220,8 @@ async def google_token(
 
         if is_new:
             await create_default_data(db, user)
+
+        await apply_pending_invite(db, user)
 
         return await create_tokens(db, user)
 

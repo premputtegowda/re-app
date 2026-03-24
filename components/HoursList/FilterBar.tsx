@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Search, Filter, X, Download } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { Button } from '@/components/UI/Button';
@@ -17,10 +17,33 @@ interface FilterBarProps {
 
 export function FilterBar({ filter, onFilterChange }: FilterBarProps) {
   const entries = useStore((s) => s.entries);
-  const categories = useStore((s) => s.categories);
-  const properties = useStore((s) => s.properties);
+  const allCategories = useStore((s) => s.categories);
+  const allProperties = useStore((s) => s.properties);
   const [showFilters, setShowFilters] = useState(false);
   const filteredEntries = useFilteredHours(entries, filter);
+
+  // Only show filter chips for categories/properties that exist in actual entries
+  const usedCategoryIds = new Set(entries.map((e) => e.category));
+  const usedPropertyIds = new Set(entries.map((e) => e.property));
+  const categories = allCategories.filter((c) => usedCategoryIds.has(c.id));
+  const properties = allProperties.filter((p) => usedPropertyIds.has(p.id));
+
+  // Drop any selected filter IDs that are no longer in the derived lists
+  useEffect(() => {
+    const validCategoryIds = new Set(categories.map((c) => c.id));
+    const validPropertyIds = new Set(properties.map((p) => p.id));
+    const cleanedCategories = (filter.categories ?? []).filter((id) => validCategoryIds.has(id));
+    const cleanedProperties = (filter.properties ?? []).filter((id) => validPropertyIds.has(id));
+    const categoriesChanged = cleanedCategories.length !== (filter.categories ?? []).length;
+    const propertiesChanged = cleanedProperties.length !== (filter.properties ?? []).length;
+    if (categoriesChanged || propertiesChanged) {
+      onFilterChange({
+        ...filter,
+        categories: cleanedCategories,
+        properties: cleanedProperties,
+      });
+    }
+  }, [categories, properties]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSearchChange = (value: string) => {
     onFilterChange({ ...filter, searchQuery: value });

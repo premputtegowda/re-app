@@ -22,7 +22,13 @@ const transformEntry = (backendEntry: any): HoursEntry => ({
   category: backendEntry.category_id,
   property: backendEntry.property_id,
   description: backendEntry.description,
+  raw_description: backendEntry.raw_description ?? undefined,
+  refined_description: backendEntry.refined_description ?? undefined,
+  ai_category_id: backendEntry.ai_category_id ?? undefined,
+  ai_type: backendEntry.ai_type ?? undefined,
+  notes: backendEntry.notes ?? undefined,
   type: backendEntry.type === 'non-material' ? 'non-material' : 'material',
+  attachments: backendEntry.attachments ?? [],
   createdAt: backendEntry.created_at,
   updatedAt: backendEntry.updated_at,
 });
@@ -55,9 +61,10 @@ interface AppStore {
   isSynced: boolean;
 
   // Entry actions
-  addEntry: (entry: Omit<HoursEntry, 'id' | 'totalMinutes' | 'createdAt' | 'updatedAt'>) => Promise<void>;
+  addEntry: (entry: Omit<HoursEntry, 'id' | 'totalMinutes' | 'createdAt' | 'updatedAt'>) => Promise<HoursEntry>;
   updateEntry: (entry: HoursEntry) => Promise<void>;
   deleteEntry: (id: string) => Promise<void>;
+  patchEntryAttachments: (entryId: string, attachments: import('@/types').Attachment[]) => void;
 
   // Category actions
   addCategory: (category: Omit<Category, 'id' | 'createdAt'>) => Promise<void>;
@@ -106,6 +113,11 @@ export const useStore = create<AppStore>()(
             property_id: entry.property,
             type: entry.type,
             description: entry.description,
+            raw_description: entry.raw_description,
+            refined_description: entry.refined_description,
+            ai_category_id: entry.ai_category_id,
+            ai_type: entry.ai_type,
+            notes: entry.notes,
           });
 
           const newEntry = transformEntry(response);
@@ -114,6 +126,7 @@ export const useStore = create<AppStore>()(
             isLoading: false,
           }));
           toast.success('Hours entry added successfully');
+          return newEntry;
         } catch (error) {
           set({ isLoading: false });
           const message = error instanceof Error ? error.message : 'Failed to add entry';
@@ -133,8 +146,12 @@ export const useStore = create<AppStore>()(
             property_id: entry.property,
             type: entry.type,
             description: entry.description,
+            raw_description: entry.raw_description,
+            refined_description: entry.refined_description,
+            ai_category_id: entry.ai_category_id,
+            ai_type: entry.ai_type,
+            notes: entry.notes,
           };
-          console.log('Updating entry with:', JSON.stringify(updateData, null, 2));
           const response = await api.updateEntry(entry.id, updateData);
 
           const updatedEntry = transformEntry(response);
@@ -166,6 +183,14 @@ export const useStore = create<AppStore>()(
           toast.error(message);
           throw error;
         }
+      },
+
+      patchEntryAttachments: (entryId, attachments) => {
+        set((state) => ({
+          entries: state.entries.map((e) =>
+            e.id === entryId ? { ...e, attachments } : e
+          ),
+        }));
       },
 
       // Category actions

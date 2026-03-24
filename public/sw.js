@@ -1,83 +1,66 @@
-const CACHE_NAME = 'reps-tracker-v1';
-const urlsToCache = [
-  '/',
-  '/index.html',
-  '/manifest.json'
-];
+// Increment this version string every time you deploy a new build.
+// The activate event deletes all caches whose name doesn't match,
+// so users immediately receive the new version on their next visit.
+const CACHE_VERSION = 'reps-tracker-v3';
+const OFFLINE_CACHE = ['/manifest.json', '/icon-192.png', '/icon-512.png'];
 
-// Install event - cache resources
+// ── Install ──────────────────────────────────────────────────────────────────
 self.addEventListener('install', (event) => {
+  // Pre-cache only the bare minimum (icons/manifest) needed for offline shell.
+  // JS/CSS bundles are NOT pre-cached — they are fetched fresh on every load.
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => {
-        console.log('Opened cache');
-        return cache.addAll(urlsToCache);
-      })
-      .catch((error) => {
-        console.error('Cache installation failed:', error);
-      })
+    caches.open(CACHE_VERSION).then((cache) => cache.addAll(OFFLINE_CACHE))
   );
+  // Activate this SW immediately instead of waiting for old tabs to close.
   self.skipWaiting();
 });
 
-// Fetch event - serve from cache, fallback to network
-self.addEventListener('fetch', (event) => {
-  event.respondWith(
-    caches.match(event.request)
-      .then((response) => {
-        // Cache hit - return response
-        if (response) {
-          return response;
-        }
-
-        return fetch(event.request).then(
-          (response) => {
-            // Check if valid response
-            if (!response || response.status !== 200 || response.type !== 'basic') {
-              return response;
-            }
-
-            // Clone the response
-            const responseToCache = response.clone();
-
-            caches.open(CACHE_NAME)
-              .then((cache) => {
-                cache.put(event.request, responseToCache);
-              });
-
-            return response;
-          }
-        );
-      })
-      .catch(() => {
-        // Return offline page if available
-        return caches.match('/index.html');
-      })
-  );
-});
-
-// Activate event - clean up old caches
+// ── Activate ─────────────────────────────────────────────────────────────────
 self.addEventListener('activate', (event) => {
-  const cacheWhitelist = [CACHE_NAME];
-
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheWhitelist.indexOf(cacheName) === -1) {
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    })
+    caches.keys().then((keys) =>
+      Promise.all(
+        keys
+          .filter((key) => key !== CACHE_VERSION)
+          .map((key) => caches.delete(key))
+      )
+    )
   );
-
   self.clients.claim();
 });
 
-// Handle messages from clients
+// ── Fetch ─────────────────────────────────────────────────────────────────────
+// Strategy: Network-first for all requests.
+// • Always try the network so users get the latest code.
+// • Fall back to cache only when the network is unavailable (offline).
+// • Static icons/manifest are the only things served from cache when offline.
+self.addEventListener('fetch', (event) => {
+  // Skip non-GET and cross-origin requests (API calls, etc.)
+  if (
+    event.request.method !== 'GET' ||
+    !event.request.url.startsWith(self.location.origin)
+  ) {
+    return;
+  }
+
+  event.respondWith(
+    fetch(event.request)
+      .then((networkResponse) => {
+        // Successful network response — return it directly (no caching of JS/HTML).
+        return networkResponse;
+      })
+      .catch(() => {
+        // Network failed (offline) — try the cache as a fallback.
+        return caches.match(event.request).then(
+          (cached) => cached ?? caches.match('/manifest.json')
+        );
+      })
+  );
+});
+
+// ── Messages ─────────────────────────────────────────────────────────────────
 self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
+  if (event.data?.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
 });

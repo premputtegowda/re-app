@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Clock, Calendar, TrendingUp, Activity, PlusCircle } from 'lucide-react';
+import { Clock, Calendar, TrendingUp, PlusCircle } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { SummaryCard } from './SummaryCard';
 import { CategoryChart, PropertyChart, MonthlyTrendChart, TypeComparisonChart } from './HoursChart';
@@ -16,13 +16,10 @@ import {
   formatDuration,
 } from '@/utils/calculations';
 import { useRecentEntries } from '@/hooks/useHoursData';
-import type { ViewMode } from '@/types';
+import { useRouter } from 'next/navigation';
 
-interface DashboardProps {
-  onViewChange: (view: ViewMode) => void;
-}
-
-export function Dashboard({ onViewChange }: DashboardProps) {
+export function Dashboard() {
+  const router = useRouter();
   const entries = useStore((s) => s.entries);
   const categories = useStore((s) => s.categories);
   const properties = useStore((s) => s.properties);
@@ -47,19 +44,18 @@ export function Dashboard({ onViewChange }: DashboardProps) {
           <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Dashboard</h2>
           <p className="text-slate-600 dark:text-slate-400">Overview of your REPS hours tracking</p>
         </div>
-        <Button onClick={() => onViewChange('entry')} className="flex items-center gap-2">
+        <Button onClick={() => router.push('/entry')} className="flex items-center gap-2">
           <PlusCircle size={20} />
           Add Hours
         </Button>
       </motion.div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {[
           { title: "Total Hours", value: formatDuration(summary.totalMinutes), subtitle: `${summary.entriesCount} entries`, icon: Clock, iconColor: "text-primary-600" },
-          { title: "This Month", value: formatDuration(summary.monthHours * 60), subtitle: "Current month", icon: Calendar, iconColor: "text-secondary-600" },
-          { title: "This Week", value: formatDuration(summary.weekHours * 60), subtitle: "Last 7 days", icon: TrendingUp, iconColor: "text-accent-600" },
-          { title: "Top Category", value: topCategory ? topCategory.categoryName : 'N/A', subtitle: topCategory ? formatDuration(topCategory.totalMinutes) : 'No data', icon: Activity, iconColor: "text-purple-600" },
+          { title: "This Month", value: formatDuration(summary.monthMinutes), subtitle: "Current month", icon: Calendar, iconColor: "text-secondary-600" },
+          { title: "This Week", value: formatDuration(summary.weekMinutes), subtitle: "Last 7 days", icon: TrendingUp, iconColor: "text-accent-600" },
         ].map((card, index) => (
           <motion.div
             key={card.title}
@@ -80,8 +76,8 @@ export function Dashboard({ onViewChange }: DashboardProps) {
         className="grid grid-cols-1 lg:grid-cols-2 gap-6"
       >
         <TypeComparisonChart
-          materialHours={summary.materialHours}
-          nonMaterialHours={summary.nonMaterialHours}
+          materialMinutes={summary.materialMinutes}
+          nonMaterialMinutes={summary.nonMaterialMinutes}
         />
 
         {/* Quick Stats */}
@@ -106,6 +102,12 @@ export function Dashboard({ onViewChange }: DashboardProps) {
                 {summary.entriesCount > 0
                   ? formatDuration(Math.floor(summary.totalMinutes / summary.entriesCount))
                   : '0h'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-slate-600 dark:text-slate-400 shrink-0">Top Category</span>
+              <span className="text-lg font-semibold text-slate-900 dark:text-white truncate text-right" title={topCategory?.categoryName}>
+                {topCategory ? topCategory.categoryName : 'N/A'}
               </span>
             </div>
           </div>
@@ -140,7 +142,7 @@ export function Dashboard({ onViewChange }: DashboardProps) {
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Recent Entries</h3>
           {recentEntries.length > 0 && (
-            <Button variant="ghost" onClick={() => onViewChange('list')} size="sm">
+            <Button variant="ghost" onClick={() => router.push('/list')} size="sm">
               View All
             </Button>
           )}
@@ -152,7 +154,7 @@ export function Dashboard({ onViewChange }: DashboardProps) {
               <Clock className="mx-auto text-slate-300 dark:text-slate-600 mb-4" size={64} />
               <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">No entries yet</h3>
               <p className="text-slate-600 dark:text-slate-400 mb-4">Start tracking your REPS hours by adding your first entry.</p>
-              <Button onClick={() => onViewChange('entry')}>Add First Entry</Button>
+              <Button onClick={() => router.push('/entry')}>Add First Entry</Button>
             </div>
           </Card>
         ) : (

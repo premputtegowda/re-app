@@ -2,17 +2,26 @@ from uuid import UUID
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from pydantic import BaseModel
 from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import Settings, get_settings
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import User, Entry, Category, Property
+from app.models.attachment import Attachment
+from sqlalchemy.orm import selectinload
 from app.models.entry import EntryType as ModelEntryType
 from app.schemas import EntryCreate, EntryUpdate, EntryResponse
 from app.schemas.entry import EntryType, EntryFilter
+from app.services.classification import ClassificationResult, get_classifier
 
 router = APIRouter(prefix="/entries", tags=["Entries"])
+
+
+class ClassifyRequest(BaseModel):
+    description: str
 
 
 async def validate_category_and_property(
@@ -49,6 +58,30 @@ async def validate_category_and_property(
         )
 
 
+@router.post("/classify", response_model=ClassificationResult)
+async def classify_activity(
+    data: ClassifyRequest,
+    current_user: User = Depends(get_current_user),
+    settings: Settings = Depends(get_settings),
+):
+    """Classify an activity description using Gemini AI."""
+    if not settings.gemini_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI classification is not configured",
+        )
+
+    classifier = get_classifier(settings)
+
+    try:
+        return await classifier.classify(data.description)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"AI classification failed: {exc}",
+        ) from exc
+
+
 @router.get("", response_model=List[EntryResponse])
 async def list_entries(
     current_user: User = Depends(get_current_user),
@@ -63,7 +96,7 @@ async def list_entries(
     limit: int = Query(20, ge=1, le=100),
 ):
     """List entries with optional filters and pagination."""
-    query = select(Entry).where(Entry.user_id == current_user.id)
+    query = select(Entry).options(selectinload(Entry.attachments)).where(Entry.user_id == current_user.id)
 
     # Apply filters
     if date_from:
@@ -111,12 +144,19 @@ async def create_entry(
         total_minutes=data.hours * 60 + data.minutes,
         type=ModelEntryType(data.type.value),
         description=data.description,
+        raw_description=data.raw_description,
+        refined_description=data.refined_description,
+        ai_category_id=data.ai_category_id,
+        ai_type=data.ai_type,
+        notes=data.notes,
     )
     db.add(entry)
     await db.commit()
-    await db.refresh(entry)
 
-    return entry
+    result = await db.execute(
+        select(Entry).options(selectinload(Entry.attachments)).where(Entry.id == entry.id)
+    )
+    return result.scalar_one()
 
 
 @router.post("/bulk", response_model=List[EntryResponse], status_code=status.HTTP_201_CREATED)
@@ -171,7 +211,7 @@ async def get_entry(
 ):
     """Get a specific entry by ID."""
     result = await db.execute(
-        select(Entry).where(
+        select(Entry).options(selectinload(Entry.attachments)).where(
             Entry.id == entry_id,
             Entry.user_id == current_user.id,
         )
@@ -233,6 +273,16 @@ async def update_entry(
         entry.type = ModelEntryType(data.type.value)
     if data.description is not None:
         entry.description = data.description
+    if data.raw_description is not None:
+        entry.raw_description = data.raw_description
+    if data.refined_description is not None:
+        entry.refined_description = data.refined_description
+    if data.ai_category_id is not None:
+        entry.ai_category_id = data.ai_category_id
+    if data.ai_type is not None:
+        entry.ai_type = data.ai_type
+    if data.notes is not None:
+        entry.notes = data.notes
 
     # Recalculate total_minutes
     entry.total_minutes = entry.hours * 60 + entry.minutes
@@ -245,9 +295,11 @@ async def update_entry(
         )
 
     await db.commit()
-    await db.refresh(entry)
 
-    return entry
+    result = await db.execute(
+        select(Entry).options(selectinload(Entry.attachments)).where(Entry.id == entry.id)
+    )
+    return result.scalar_one()
 
 
 @router.delete("/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)

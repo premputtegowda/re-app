@@ -8,13 +8,18 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 
 from app.database import Base
-from app.models import User, Category, Property, Entry, RefreshToken
+from app.models import User, Category, Property, Entry, RefreshToken, Attachment, Invitation, AccessRequest
 from app.config import get_settings
 
 settings = get_settings()
 config = context.config
 
-config.set_main_option("sqlalchemy.url", settings.database_url)
+database_url = settings.database_url.replace(
+    "postgresql://", "postgresql+asyncpg://", 1
+).replace(
+    "postgres://", "postgresql+asyncpg://", 1
+)
+config.set_main_option("sqlalchemy.url", database_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
@@ -47,6 +52,7 @@ async def run_async_migrations() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args={"timeout": 30, "command_timeout": 60},
     )
 
     async with connectable.connect() as connection:

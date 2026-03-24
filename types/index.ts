@@ -5,6 +5,7 @@ export interface User {
   name: string;
   picture_url: string | null;
   is_admin: boolean;
+  has_complimentary_access: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -24,8 +25,14 @@ export interface HoursEntry {
   totalMinutes: number; // Calculated field: hours * 60 + minutes
   category: string; // category_id
   property: string; // property_id
-  description: string;
+  description: string;          // active description (used for audit)
+  raw_description?: string;     // user's original text
+  refined_description?: string; // AI-generated text
+  ai_category_id?: string;      // AI-recommended category (never changes after first classify)
+  ai_type?: string;             // AI-recommended type (never changes after first classify)
+  notes?: string;
   type: 'material' | 'non-material';
+  attachments?: Attachment[];
   createdAt: string; // ISO timestamp
   updatedAt: string; // ISO timestamp
 }
@@ -58,8 +65,12 @@ export interface HoursFilter {
 export interface SummaryData {
   totalHours: number;
   totalMinutes: number;
+  monthMinutes: number;
+  weekMinutes: number;
   monthHours: number;
   weekHours: number;
+  materialMinutes: number;
+  nonMaterialMinutes: number;
   materialHours: number;
   nonMaterialHours: number;
   entriesCount: number;
@@ -89,6 +100,31 @@ export interface MonthlyData {
   entryCount: number;
 }
 
+// AI Classification types
+export interface ClassificationResult {
+  refined_title: string;
+  refined_description: string;            // Purpose + Result
+  evidence_note: string;                  // Evidence suggestion → pre-fills Notes field
+  category_name: string | null;           // null when AI suggests a brand-new category
+  suggested_new_category?: string | null; // set when category_name is null
+  type: 'material' | 'non-material';
+  audit_strength: 'high' | 'medium' | 'low';
+  justification: string;
+  audit_tip: string;
+}
+
+// Attachment stored in user's Google Drive or linked manually
+export interface Attachment {
+  id: string;
+  entry_id: string;
+  file_ref: string;
+  attachment_url: string;
+  original_filename: string;
+  content_type: string;
+  file_size: number;
+  created_at: string;
+}
+
 // Form types
 export interface HoursEntryFormData {
   date: string;
@@ -97,6 +133,11 @@ export interface HoursEntryFormData {
   category: string;
   property: string;
   description: string;
+  raw_description?: string;
+  refined_description?: string;
+  ai_category_id?: string;
+  ai_type?: string;
+  notes?: string;
   type: 'material' | 'non-material';
 }
 
@@ -157,7 +198,7 @@ export interface SortConfig {
 }
 
 // View types
-export type ViewMode = 'dashboard' | 'list' | 'entry' | 'settings' | 'cashOnCash';
+export type ViewMode = 'dashboard' | 'list' | 'entry' | 'settings' | 'admin' | 'cashOnCash';
 
 // Toast/Notification types
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
