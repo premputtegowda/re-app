@@ -1,7 +1,7 @@
 'use client';
 
 import { Input } from '@/components/UI/Input';
-import { formatCurrency } from '@/utils/cashOnCashCalc';
+import { formatCurrency } from '@/utils/dealAnalyzerCalc';
 import type { CoCOperations, CoCPropertyType, CoCUnitMixEntry } from '@/types';
 
 interface StepOperationsProps {

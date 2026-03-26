@@ -6,6 +6,7 @@ export interface User {
   picture_url: string | null;
   is_admin: boolean;
   has_complimentary_access: boolean;
+  features: string[];
   created_at: string;
   updated_at: string;
 }
@@ -198,7 +199,7 @@ export interface SortConfig {
 }
 
 // View types
-export type ViewMode = 'dashboard' | 'list' | 'entry' | 'settings' | 'admin' | 'cashOnCash';
+export type ViewMode = 'dashboard' | 'list' | 'entry' | 'settings' | 'admin' | 'dealAnalyzer';
 
 // Toast/Notification types
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
@@ -225,7 +226,9 @@ export interface CoCUnitMixEntry {
   beds: number;
   baths: number;
   count: number;
-  rentMonthly: number;
+  inPlaceRent: number;   // current avg rent
+  preStabRent: number;   // rent during lease-up/renovation period
+  rentMonthly: number;   // target (stabilized) rent
 }
 
 export interface CoCAcquisition {
@@ -234,12 +237,16 @@ export interface CoCAcquisition {
   units: number;
   sfrBeds: number;
   sfrBaths: number;
+  sfrInPlaceRent: number;
+  sfrPreStabRent: number;
+  sfrTargetRent: number;
   unitMix: CoCUnitMixEntry[];   // when non-empty, overrides units + grossRentMonthly
   purchasePrice: number;
   arv: number;
   downPaymentPct: number;
   closingCostsPct: number;
   points: number;                       // discount/origination points; 1 point = 1% of loan
+  additionalFeeItems: CoCCostItem[];    // other financing fees: origination, appraisal, title, etc.
   hardCostItems: CoCCostItem[];         // direct construction: labor, materials, permits
   softCostItems: CoCCostItem[];         // indirect: design, legal, financing fees, inspections
   opportunityCostItems: CoCCostItem[];  // lost revenue, carry costs during renovation
@@ -249,6 +256,8 @@ export interface CoCAcquisition {
   ioPeriodMonths: number;
   stabilizedMonth: number;
   projectionYears: number;
+  exitCapRate: number;  // % — used for IRR terminal value; 0 = fall back to ARV
+  exitClosingCostPct: number;  // % of sale price; default 3
 }
 
 export interface CoCOperations {
@@ -262,9 +271,57 @@ export interface CoCOperations {
 export interface CoCRefinance {
   enabled: boolean;
   refiYear: number;
+  refiMarketValue: number;
   newLTV: number;
   newInterestRate: number;
   newLoanTermYears: number;
+}
+
+// Pro Forma types
+export interface ProFormaItem {
+  id: string;
+  name: string;
+  isPercentOfEGI: boolean;   // true for property mgmt (shows "X% EGI" instead of "$/mo")
+  t12Value: number;           // $/mo, or % if isPercentOfEGI
+  stabValue: number | null;   // null = inherited from t12
+  stabilizedValue: number;
+  growthPct: number;          // annual growth applied to stabilized value
+}
+
+export interface ProFormaData {
+  grossRent: {
+    t12: number;
+    stab: number | null;
+    stabilized: number;
+    growthPct: number;
+  };
+  otherIncome: {
+    t12: number;
+    stab: number | null;
+    stabilized: number;
+    growthPct: number;
+  };
+  vacancyPct: {
+    t12: number;
+    stab: number | null;
+    stabilized: number;
+  };
+  creditLossPct: {
+    t12: number;
+    stab: number | null;
+    stabilized: number;
+  };
+  expenses: ProFormaItem[];
+  yearOverrides?: Record<number, {
+    grossRent?: number;
+    grossRentGrowthPct?: number;     // growth rate FROM prev year TO this year
+    otherIncome?: number;
+    otherIncomeGrowthPct?: number;
+    vacancyPct?: number;
+    creditLossPct?: number;
+    expenses?: Record<string, number>; // expenseId -> overridden value
+    expenseGrowthPcts?: Record<string, number>; // expenseId -> growth rate
+  }>;
 }
 
 export interface CoCScenario {
@@ -273,6 +330,7 @@ export interface CoCScenario {
   scenarioType: CoCScenarioType;
   acquisition: CoCAcquisition;
   operations: CoCOperations;
+  proForma?: ProFormaData;      // optional pro forma grid data
   refinance: CoCRefinance;
   createdAt: string;
   updatedAt: string;
@@ -293,11 +351,25 @@ export interface CoCYearlyProjection {
   cumulativeCashFlow: number;
 }
 
+export interface SavedDeal {
+  id: string;
+  name: string;
+  acquisition: CoCAcquisition;
+  operations: CoCOperations;
+  proForma: ProFormaData;
+  refinance: CoCRefinance;
+  results: Partial<Record<CoCScenarioType, CoCResult>>;
+  savedAt: string;
+  updatedAt: string;
+}
+
 export interface CoCResult {
   // Cost basis breakdown
   downPayment: number;
   closingCosts: number;
   pointsCost: number;
+  additionalFeeItems: CoCCostItem[];
+  additionalFees: number;
   hardCostItems: CoCCostItem[];
   hardCosts: number;
   softCostItems: CoCCostItem[];
@@ -314,4 +386,9 @@ export interface CoCResult {
   avgCoCReturn: number;
   peakCoCReturn: number;
   totalCashFlow: number;
+  // Exit summary
+  terminalPropertyValue: number;
+  exitClosingCosts: number;
+  terminalEquity: number;
+  irrCashFlows: number[];
 }

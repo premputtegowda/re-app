@@ -16,6 +16,7 @@ import { getTodayDate } from '@/utils/dateUtils';
 import type { HoursEntryFormData, ClassificationResult } from '@/types';
 import { getCachedClassification, setCachedClassification } from '@/utils/classificationCache';
 import { labelFromUrl } from '@/utils/attachmentUtils';
+import { PageHeader } from '@/components/UI/PageHeader';
 
 const QUICK_HOURS = [1, 2, 3, 4, 6, 8];
 const QUICK_MINUTES = [15, 30, 45];
@@ -597,25 +598,19 @@ export function ChatLikeEntry() {
 
   return (
     <div className="max-w-2xl mx-auto mt-8">
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="mb-6"
-      >
-        <div className="flex items-start justify-between">
-          <div>
-            <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-1">Log Your Hours</h2>
-            <p className="text-sm text-slate-600 dark:text-slate-400">Describe what you did — AI will classify it for you</p>
-          </div>
+      <PageHeader
+        title="Log Your Hours"
+        subtitle="Describe what you did — AI will classify it for you"
+        action={
           <button
             onClick={() => router.push('/dashboard')}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors mt-0.5 shrink-0"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
           >
             <X size={15} />
             Cancel
           </button>
-        </div>
-      </motion.div>
+        }
+      />
 
       {/* Progress indicator */}
       <div className="flex items-center gap-2 mb-6">

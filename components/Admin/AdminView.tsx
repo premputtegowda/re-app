@@ -7,6 +7,12 @@ import {
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/lib/authStore';
+import { PageHeader } from '@/components/UI/PageHeader';
+
+const AVAILABLE_FEATURES: { key: string; label: string; color: string }[] = [
+  { key: 'reps', label: 'REPS Tracker', color: 'blue' },
+  { key: 'deal_analyzer', label: 'Deal Analyzer', color: 'violet' },
+];
 
 interface AdminUser {
   id: string;
@@ -15,6 +21,7 @@ interface AdminUser {
   picture_url: string | null;
   is_admin: boolean;
   has_complimentary_access: boolean;
+  features: string[];
   created_at: string;
   last_active: string | null;
   entry_count: number;
@@ -107,6 +114,21 @@ export function AdminView() {
     }
   };
 
+  const handleToggleFeature = async (user: AdminUser, featureKey: string) => {
+    const hasFeature = user.features.includes(featureKey);
+    setActionLoading(`feat-${user.id}-${featureKey}`);
+    try {
+      const updated = await api.adminPatchUser(user.id, {
+        ...(hasFeature ? { remove_feature: featureKey } : { add_feature: featureKey }),
+      });
+      setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const handleDeleteConfirmed = async () => {
     if (!confirmDelete) return;
     setActionLoading(`del-${confirmDelete.id}`);
@@ -186,10 +208,7 @@ export function AdminView() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
-      <div className="flex items-center gap-3">
-        <ShieldCheck className="text-primary-600 dark:text-primary-400" size={24} />
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Admin</h1>
-      </div>
+      <PageHeader title="Admin" subtitle="Manage users, invitations, and access requests" />
 
       {error && (
         <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 flex items-start gap-2">
@@ -272,6 +291,13 @@ export function AdminView() {
                               <GiftIcon size={10} /> Comp
                             </span>
                           )}
+                          {AVAILABLE_FEATURES.map((f) =>
+                            user.features.includes(f.key) ? (
+                              <span key={f.key} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300">
+                                {f.label}
+                              </span>
+                            ) : null
+                          )}
                         </div>
                       </div>
                     </td>
@@ -279,7 +305,31 @@ export function AdminView() {
                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400 hidden md:table-cell">{user.last_active ?? '—'}</td>
                     <td className="px-4 py-3 text-right font-medium text-slate-700 dark:text-slate-300">{user.entry_count}</td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-1">
+                      <div className="flex items-center justify-end gap-1 flex-wrap">
+                        {/* Toggle features */}
+                        {AVAILABLE_FEATURES.map((f) => {
+                          const hasFeature = user.features.includes(f.key);
+                          const loadingKey = `feat-${user.id}-${f.key}`;
+                          return (
+                            <button
+                              key={f.key}
+                              onClick={() => handleToggleFeature(user, f.key)}
+                              disabled={!!actionLoading}
+                              title={hasFeature ? `Revoke ${f.label}` : `Grant ${f.label}`}
+                              className={`px-2 py-1 rounded text-xs font-medium transition-colors disabled:opacity-40 border ${
+                                hasFeature
+                                  ? 'border-primary-400 text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20 hover:bg-primary-100'
+                                  : 'border-slate-300 dark:border-slate-600 text-slate-400 hover:border-primary-400 hover:text-primary-600'
+                              }`}
+                            >
+                              {actionLoading === loadingKey ? (
+                                <Loader2 size={11} className="animate-spin" />
+                              ) : (
+                                f.label
+                              )}
+                            </button>
+                          );
+                        })}
                         {/* Toggle complimentary access */}
                         <button
                           onClick={() => handleToggleComplimentary(user)}

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from uuid import UUID
 from pydantic import BaseModel, EmailStr
 
@@ -23,6 +23,7 @@ class UserResponse(BaseModel):
     picture_url: Optional[str]
     is_admin: bool
     has_complimentary_access: bool
+    features: List[str]
     created_at: datetime
     updated_at: datetime
 

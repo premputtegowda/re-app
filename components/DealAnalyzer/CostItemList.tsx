@@ -1,7 +1,7 @@
 'use client';
 
 import { Plus, Trash2 } from 'lucide-react';
-import { formatCurrency } from '@/utils/cashOnCashCalc';
+import { formatCurrency } from '@/utils/dealAnalyzerCalc';
 import type { CoCCostItem } from '@/types';
 
 interface CostItemListProps {

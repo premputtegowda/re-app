@@ -4,17 +4,12 @@ import { motion } from 'framer-motion';
 import { CategoryManager } from './CategoryManager';
 import { PropertyManager } from './PropertyManager';
 import { AuditExport } from './AuditExport';
+import { PageHeader } from '@/components/UI/PageHeader';
 
 export function Settings() {
   return (
     <div className="space-y-8">
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-      >
-        <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Settings</h2>
-        <p className="text-slate-600 dark:text-slate-400">Manage your categories and properties</p>
-      </motion.div>
+      <PageHeader title="Settings" subtitle="Manage your categories and properties" />
 
       <motion.div
         id="categories"

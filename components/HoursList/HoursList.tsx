@@ -8,6 +8,7 @@ import { FilterBar } from './FilterBar';
 import { HoursListItem } from './HoursListItem';
 import { useFilteredHours } from '@/hooks/useHoursData';
 import type { HoursFilter, SortConfig } from '@/types';
+import { PageHeader } from '@/components/UI/PageHeader';
 
 export function HoursList() {
   const entries = useStore((s) => s.entries);
@@ -36,13 +37,7 @@ export function HoursList() {
 
   return (
     <div className="space-y-6">
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-      >
-        <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">View Hours</h2>
-        <p className="text-slate-600 dark:text-slate-400">Review and manage your logged hours</p>
-      </motion.div>
+      <PageHeader title="View Hours" subtitle="Review and manage your logged hours" />
 
       <motion.div
         initial={{ opacity: 0 }}

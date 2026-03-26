@@ -1,9 +1,9 @@
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from sqlalchemy import String, Boolean, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, ARRAY
 
 from app.database import Base
 
@@ -20,6 +20,7 @@ class User(Base):
     google_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     has_complimentary_access: Mapped[bool] = mapped_column(Boolean, default=False)
+    features: Mapped[List[str]] = mapped_column(ARRAY(String), nullable=False, default=lambda: ['reps'])
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow

@@ -1,67 +1,45 @@
 'use client';
 
 import { Input } from '@/components/UI/Input';
-import type { CoCAcquisition } from '@/types';
+import { CostItemList } from '../CostItemList';
+import type { CoCAcquisition, CoCCostItem } from '@/types';
 
 type FinancingFields = Pick<
   CoCAcquisition,
   | 'purchasePrice'
-  | 'arv'
   | 'downPaymentPct'
   | 'closingCostsPct'
   | 'points'
+  | 'additionalFeeItems'
   | 'interestRate'
   | 'loanTermYears'
   | 'ioPeriodMonths'
   | 'projectionYears'
 >;
 
+const newItem = (): CoCCostItem => ({
+  id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+  description: '',
+  amount: 0,
+});
+
 interface StepFinancingProps {
   data: FinancingFields;
-  onChange: (field: keyof CoCAcquisition, value: number) => void;
+  onChange: (field: keyof CoCAcquisition, value: unknown) => void;
 }
 
 export function StepFinancing({ data, onChange }: StepFinancingProps) {
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <Input
-          label="Purchase Price ($)"
-          type="number"
-          fullWidth
-          min={0}
-          placeholder="e.g. 350,000"
-          value={data.purchasePrice || ''}
-          onChange={(e) => onChange('purchasePrice', Number(e.target.value))}
-        />
-        <div>
-          <div className="flex items-center justify-between mb-1">
-            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-              Estimated Market Value ($)
-            </label>
-            {data.purchasePrice > 0 && data.arv !== data.purchasePrice && (
-              <button
-                type="button"
-                onClick={() => onChange('arv', data.purchasePrice)}
-                className="text-xs text-primary-600 dark:text-primary-400 hover:underline"
-              >
-                Same as purchase price
-              </button>
-            )}
-          </div>
-          <input
-            type="number"
-            className="input"
-            min={0}
-            placeholder="e.g. 420,000"
-            value={data.arv || ''}
-            onChange={(e) => onChange('arv', Number(e.target.value))}
-          />
-          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            Used for equity &amp; refi calculations. No renovation? Set to current market value.
-          </p>
-        </div>
-      </div>
+      <Input
+        label="Purchase Price ($)"
+        type="number"
+        fullWidth
+        min={0}
+        placeholder="e.g. 350,000"
+        value={data.purchasePrice || ''}
+        onChange={(e) => onChange('purchasePrice', Number(e.target.value))}
+      />
 
       <Input
         label="Down Payment (%)"
@@ -73,6 +51,9 @@ export function StepFinancing({ data, onChange }: StepFinancingProps) {
         placeholder="e.g. 20"
         value={data.downPaymentPct || ''}
         onChange={(e) => onChange('downPaymentPct', Number(e.target.value))}
+        helperText={data.purchasePrice > 0 && data.downPaymentPct > 0
+          ? `= $${Math.round(data.purchasePrice * data.downPaymentPct / 100).toLocaleString()}`
+          : '% of purchase price'}
       />
 
       <div className="grid grid-cols-2 gap-4">
@@ -86,7 +67,9 @@ export function StepFinancing({ data, onChange }: StepFinancingProps) {
           placeholder="e.g. 2"
           value={data.closingCostsPct || ''}
           onChange={(e) => onChange('closingCostsPct', Number(e.target.value))}
-          helperText="% of purchase price"
+          helperText={data.purchasePrice > 0 && data.closingCostsPct > 0
+            ? `= $${Math.round(data.purchasePrice * data.closingCostsPct / 100).toLocaleString()}`
+            : '% of purchase price'}
         />
         <Input
           label="Loan Points"
@@ -98,7 +81,29 @@ export function StepFinancing({ data, onChange }: StepFinancingProps) {
           placeholder="0"
           value={data.points || ''}
           onChange={(e) => onChange('points', Number(e.target.value))}
-          helperText="1 point = 1% of loan"
+          helperText={data.purchasePrice > 0 && data.downPaymentPct > 0 && data.points > 0
+            ? `= $${Math.round(data.purchasePrice * (1 - data.downPaymentPct / 100) * data.points / 100).toLocaleString()}`
+            : '1 point = 1% of loan'}
+        />
+      </div>
+
+      <div>
+        <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+          Additional Fees
+          <span className="ml-1.5 text-xs font-normal text-slate-400">(origination, appraisal, title, etc.)</span>
+        </p>
+        <CostItemList
+          items={data.additionalFeeItems ?? []}
+          placeholder="e.g. Appraisal, Title Insurance…"
+          onAdd={() => onChange('additionalFeeItems', [...(data.additionalFeeItems ?? []), newItem()])}
+          onUpdate={(id, field, value) =>
+            onChange('additionalFeeItems', (data.additionalFeeItems ?? []).map(item =>
+              item.id === id ? { ...item, [field]: value } : item
+            ))
+          }
+          onRemove={(id) =>
+            onChange('additionalFeeItems', (data.additionalFeeItems ?? []).filter(item => item.id !== id))
+          }
         />
       </div>
 

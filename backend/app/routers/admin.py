@@ -30,6 +30,7 @@ class AdminUserSummary(BaseModel):
     picture_url: str | None
     is_admin: bool
     has_complimentary_access: bool
+    features: list[str]
     created_at: str
     last_active: str | None
     entry_count: int
@@ -41,6 +42,8 @@ class AdminUserSummary(BaseModel):
 class PatchUserRequest(BaseModel):
     is_admin: bool | None = None
     has_complimentary_access: bool | None = None
+    add_feature: str | None = None
+    remove_feature: str | None = None
 
 
 class InviteRequest(BaseModel):
@@ -77,6 +80,7 @@ async def _user_summary(user: User, db: AsyncSession) -> AdminUserSummary:
         picture_url=user.picture_url,
         is_admin=user.is_admin,
         has_complimentary_access=user.has_complimentary_access,
+        features=user.features or [],
         created_at=user.created_at.date().isoformat(),
         last_active=str(last_active) if last_active else None,
         entry_count=entry_count,
@@ -112,6 +116,7 @@ async def list_users(
             picture_url=u.picture_url,
             is_admin=u.is_admin,
             has_complimentary_access=u.has_complimentary_access,
+            features=u.features or [],
             created_at=u.created_at.date().isoformat(),
             last_active=last_active.get(u.id),
             entry_count=counts.get(u.id, 0),
@@ -143,6 +148,13 @@ async def patch_user(
         user.is_admin = body.is_admin
     if body.has_complimentary_access is not None:
         user.has_complimentary_access = body.has_complimentary_access
+    if body.add_feature is not None:
+        current = list(user.features or [])
+        if body.add_feature not in current:
+            current.append(body.add_feature)
+        user.features = current
+    if body.remove_feature is not None:
+        user.features = [f for f in (user.features or []) if f != body.remove_feature]
 
     await db.commit()
     await db.refresh(user)

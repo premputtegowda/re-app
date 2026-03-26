@@ -1,20 +1,25 @@
 'use client';
 
 import { useRouter, usePathname } from 'next/navigation';
-import { LayoutDashboard, List, PlusCircle, Settings, Calculator, ShieldCheck } from 'lucide-react';
+import { LayoutDashboard, List, PlusCircle, Settings, ShieldCheck, Tag, Folder } from 'lucide-react';
 import { useAuthStore } from '@/lib/authStore';
+
+const REPS_ROUTES = ['/dashboard', '/entry', '/list', '/settings', '/admin'];
 
 export function Navigation() {
   const router = useRouter();
   const pathname = usePathname();
   const isAdmin = useAuthStore((s) => s.user?.is_admin ?? false);
 
+  // Don't show sidebar navigation on Deal Analyzer pages
+  const isDealAnalyzer = pathname.startsWith('/deal-analyzer');
+  if (isDealAnalyzer) return null;
+
   const navItems = [
     { href: '/dashboard', label: 'Home', icon: LayoutDashboard },
     { href: '/entry', label: 'Add', icon: PlusCircle },
     { href: '/list', label: 'List', icon: List },
     { href: '/settings', label: 'Settings', icon: Settings },
-    { href: '/cash-on-cash', label: 'CoC', icon: Calculator },
     ...(isAdmin ? [{ href: '/admin', label: 'Admin', icon: ShieldCheck }] : []),
   ];
 

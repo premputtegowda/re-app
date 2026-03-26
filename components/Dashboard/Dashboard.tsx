@@ -17,6 +17,7 @@ import {
 } from '@/utils/calculations';
 import { useRecentEntries } from '@/hooks/useHoursData';
 import { useRouter } from 'next/navigation';
+import { PageHeader } from '@/components/UI/PageHeader';
 
 export function Dashboard() {
   const router = useRouter();
@@ -35,20 +36,16 @@ export function Dashboard() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-between"
-      >
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Dashboard</h2>
-          <p className="text-slate-600 dark:text-slate-400">Overview of your REPS hours tracking</p>
-        </div>
-        <Button onClick={() => router.push('/entry')} className="flex items-center gap-2">
-          <PlusCircle size={20} />
-          Add Hours
-        </Button>
-      </motion.div>
+      <PageHeader
+        title="Dashboard"
+        subtitle="Overview of your REPS hours tracking"
+        action={
+          <Button onClick={() => router.push('/entry')} className="flex items-center gap-2">
+            <PlusCircle size={20} />
+            Add Hours
+          </Button>
+        }
+      />
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

@@ -83,8 +83,8 @@ export function StepBar({ steps, currentStep, completedSteps, onStepClick }: Ste
       <div className="sm:hidden">
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-semibold text-slate-900 dark:text-white">
-            {steps[currentStep].label}
-            {steps[currentStep].optional && (
+            {steps[Math.min(currentStep, steps.length - 1)]?.label}
+            {steps[Math.min(currentStep, steps.length - 1)]?.optional && (
               <span className="ml-1.5 text-xs font-normal text-slate-400">(optional)</span>
             )}
           </span>

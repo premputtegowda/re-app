@@ -33,6 +33,7 @@ export interface User {
   picture_url: string | null;
   is_admin: boolean;
   has_complimentary_access: boolean;
+  features: string[];
 }
 
 interface AuthStore {
