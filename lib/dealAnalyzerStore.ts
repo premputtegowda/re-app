@@ -32,9 +32,10 @@ interface CoCStore {
   duplicateScenario: (id: string) => string;
   saveDraft: (draft: DealAnalyzerDraft) => void;
   clearDraft: () => void;
-  saveDeal: (name: string, draft: DealAnalyzerDraft, results: Partial<Record<CoCScenarioType, CoCResult>>) => string;
-  updateSavedDeal: (id: string, name: string, results: Partial<Record<CoCScenarioType, CoCResult>>, draft?: DealAnalyzerDraft) => void;
+  saveDeal: (name: string, draft: DealAnalyzerDraft, results: Partial<Record<CoCScenarioType, CoCResult>>, mcRanges?: SavedDeal['mcRanges'], mcResults?: SavedDeal['mcResults']) => string;
+  updateSavedDeal: (id: string, name: string, results: Partial<Record<CoCScenarioType, CoCResult>>, draft?: DealAnalyzerDraft, mcRanges?: SavedDeal['mcRanges'], mcResults?: SavedDeal['mcResults']) => void;
   deleteSavedDeal: (id: string) => void;
+  updateMCData: (id: string, mcRanges?: SavedDeal['mcRanges'], mcResults?: SavedDeal['mcResults']) => void;
 }
 
 export const useDealAnalyzerStore = create<CoCStore>()(
@@ -94,7 +95,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
       saveDraft: (draft) => set({ draft }),
       clearDraft: () => set({ draft: null }),
 
-      saveDeal: (name, draft, results) => {
+      saveDeal: (name, draft, results, mcRanges?, mcResults?) => {
         const id = generateId();
         const deal: SavedDeal = {
           id,
@@ -104,6 +105,8 @@ export const useDealAnalyzerStore = create<CoCStore>()(
           proForma: draft.proForma,
           refinance: draft.refinance,
           results,
+          ...(mcRanges ? { mcRanges } : {}),
+          ...(mcResults !== undefined ? { mcResults } : {}),
           savedAt: now(),
           updatedAt: now(),
         };
@@ -111,7 +114,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
         return id;
       },
 
-      updateSavedDeal: (id, name, results, draft?) => {
+      updateSavedDeal: (id, name, results, draft?, mcRanges?, mcResults?) => {
         set((state) => ({
           savedDeals: state.savedDeals.map((d) =>
             d.id === id ? {
@@ -124,6 +127,8 @@ export const useDealAnalyzerStore = create<CoCStore>()(
                 proForma: draft.proForma,
                 refinance: draft.refinance,
               } : {}),
+              ...(mcRanges !== undefined ? { mcRanges } : {}),
+              ...(mcResults !== undefined ? { mcResults } : {}),
               updatedAt: now(),
             } : d
           ),
@@ -132,6 +137,19 @@ export const useDealAnalyzerStore = create<CoCStore>()(
 
       deleteSavedDeal: (id) => {
         set((state) => ({ savedDeals: state.savedDeals.filter((d) => d.id !== id) }));
+      },
+
+      updateMCData: (id, mcRanges?, mcResults?) => {
+        set((state) => ({
+          savedDeals: state.savedDeals.map((d) =>
+            d.id === id ? {
+              ...d,
+              ...(mcRanges !== undefined ? { mcRanges } : {}),
+              ...(mcResults !== undefined ? { mcResults } : {}),
+              updatedAt: now(),
+            } : d
+          ),
+        }));
       },
     }),
     {

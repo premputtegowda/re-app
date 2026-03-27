@@ -3,9 +3,12 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Card } from '@/components/UI/Card';
-import type { CoCResult } from '@/types';
+import type { CoCResult, CoCAcquisition, CoCOperations, CoCRefinance, ProFormaData } from '@/types';
 import { formatCurrency, formatPct, formatMultiple } from '@/utils/dealAnalyzerCalc';
 import { DealCharts } from './DealAnalyzerCharts';
+import { WhatIfPanel } from './WhatIfPanel';
+import { MonteCarloPanel } from './MonteCarloPanel';
+import type { MCRanges, SavedMCResults } from '@/utils/monteCarlo';
 
 // ── Verdict badge ───────────────────────────────────────────────────────────────
 
@@ -268,20 +271,57 @@ function ProjectionTable({ result }: { result: CoCResult }) {
   );
 }
 
+// ── Tab types ───────────────────────────────────────────────────────────────────
+
+type ResultTab = 'summary' | 'projections' | 'whatif' | 'montecarlo';
+
+const TAB_LABELS: Record<ResultTab, string> = {
+  summary:     'Summary',
+  projections: 'Projections',
+  whatif:      'What If',
+  montecarlo:  'Monte Carlo',
+};
+
 // ── Main ────────────────────────────────────────────────────────────────────────
 
 interface ResultsPanelProps {
   result: CoCResult;
+  acquisition: CoCAcquisition;
+  operations: CoCOperations;
+  proForma: ProFormaData;
+  refinance: CoCRefinance;
+  mcRanges?: MCRanges | null;
+  onMcRangesChange?: (r: MCRanges) => void;
+  mcResults?: SavedMCResults | null;
+  onMcResultsChange?: (r: SavedMCResults) => void;
 }
 
-export function ResultsPanel({ result }: ResultsPanelProps) {
+function computeAvgRents(acquisition: CoCAcquisition): { units: number; avgTargetRent: number; avgPreStabRent: number } {
+  if (acquisition.propertyType === 'sfr') {
+    return { units: 1, avgTargetRent: acquisition.sfrTargetRent || 0, avgPreStabRent: acquisition.sfrPreStabRent || 0 };
+  }
+  if (acquisition.unitMix && acquisition.unitMix.length > 0) {
+    const totalUnits = acquisition.unitMix.reduce((s, u) => s + u.count, 0);
+    if (totalUnits === 0) return { units: 0, avgTargetRent: 0, avgPreStabRent: 0 };
+    return {
+      units: totalUnits,
+      avgTargetRent: acquisition.unitMix.reduce((s, u) => s + u.rentMonthly * u.count, 0) / totalUnits,
+      avgPreStabRent: acquisition.unitMix.reduce((s, u) => s + u.preStabRent * u.count, 0) / totalUnits,
+    };
+  }
+  return { units: acquisition.units || 1, avgTargetRent: 0, avgPreStabRent: 0 };
+}
+
+export function ResultsPanel({ result, acquisition, operations, proForma, refinance, mcRanges, onMcRangesChange, mcResults, onMcResultsChange }: ResultsPanelProps) {
+  const [activeTab, setActiveTab] = useState<ResultTab>('summary');
+  const { units, avgTargetRent, avgPreStabRent } = computeAvgRents(acquisition);
   const { totalInvested, avgCoCReturn, irr, equityMultiple, peakCoCReturn, totalCashFlow } = result;
   const v = verdict(irr, avgCoCReturn);
 
   return (
     <div className="space-y-4">
 
-      {/* ── Hero scoreboard ── */}
+      {/* ── Hero scoreboard (always visible) ── */}
       <Card>
         {/* Verdict + invested */}
         <div className="flex items-center justify-between mb-4">
@@ -316,17 +356,69 @@ export function ResultsPanel({ result }: ResultsPanelProps) {
         </div>
       </Card>
 
-      {/* ── Charts (tabbed) ── */}
-      <DealCharts projections={result.yearlyProjections} />
+      {/* ── Tab chips ── */}
+      <div className="flex gap-2">
+        {(Object.keys(TAB_LABELS) as ResultTab[]).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => setActiveTab(tab)}
+            className={`px-4 py-1.5 rounded-full text-sm font-medium border transition-all ${
+              activeTab === tab
+                ? 'bg-primary-600 text-white border-primary-600'
+                : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-primary-400 dark:hover:border-primary-500'
+            }`}
+          >
+            {TAB_LABELS[tab]}
+          </button>
+        ))}
+      </div>
 
-      {/* ── Exit summary ── */}
-      <ExitSummary result={result} />
+      {/* ── Tab content ── */}
+      {activeTab === 'summary' && (
+        <div className="space-y-4">
+          <ExitSummary result={result} />
+          <CostBasis result={result} />
+        </div>
+      )}
 
-      {/* ── Projection table ── */}
-      <ProjectionTable result={result} />
+      {activeTab === 'projections' && (
+        <div className="space-y-4">
+          <DealCharts projections={result.yearlyProjections} />
+          <ProjectionTable result={result} />
+        </div>
+      )}
 
-      {/* ── Cost basis (collapsed by default) ── */}
-      <CostBasis result={result} />
+      {activeTab === 'whatif' && (
+        <Card>
+          <div className="pb-1">
+            <WhatIfPanel
+              acquisition={acquisition}
+              operations={operations}
+              proForma={proForma}
+              refinance={refinance}
+              baseResult={result}
+              embedded
+            />
+          </div>
+        </Card>
+      )}
+
+      {activeTab === 'montecarlo' && (
+        <MonteCarloPanel
+          acquisition={acquisition}
+          operations={operations}
+          proForma={proForma}
+          refinance={refinance}
+          avgTargetRentPerUnit={avgTargetRent}
+          avgPreStabPerUnit={avgPreStabRent}
+          units={units}
+          savedRanges={mcRanges ?? null}
+          onRangesChange={onMcRangesChange}
+          savedResults={mcResults ?? null}
+          onResultsChange={onMcResultsChange}
+        />
+      )}
     </div>
   );
 }

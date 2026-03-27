@@ -275,6 +275,7 @@ export interface CoCRefinance {
   newLTV: number;
   newInterestRate: number;
   newLoanTermYears: number;
+  refiCostPct: number; // closing costs as % of new loan amount
 }
 
 // Pro Forma types
@@ -314,6 +315,7 @@ export interface ProFormaData {
   expenses: ProFormaItem[];
   yearOverrides?: Record<number, {
     grossRent?: number;
+    grossRentSystem?: boolean;       // true = set by rent schedule / calculator (not manual)
     grossRentGrowthPct?: number;     // growth rate FROM prev year TO this year
     otherIncome?: number;
     otherIncomeGrowthPct?: number;
@@ -351,6 +353,8 @@ export interface CoCYearlyProjection {
   cumulativeCashFlow: number;
 }
 
+export interface MCRangeEntry { min: number; mode: number; max: number; }
+
 export interface SavedDeal {
   id: string;
   name: string;
@@ -359,6 +363,8 @@ export interface SavedDeal {
   proForma: ProFormaData;
   refinance: CoCRefinance;
   results: Partial<Record<CoCScenarioType, CoCResult>>;
+  mcRanges?: Record<string, MCRangeEntry>;
+  mcResults?: unknown; // SavedMCResults — typed as unknown to avoid circular import
   savedAt: string;
   updatedAt: string;
 }

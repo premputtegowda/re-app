@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, cloneElement } from 'react';
 import { flushSync } from 'react-dom';
-import { Plus, X, RotateCcw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, X, RotateCcw, ChevronLeft, ChevronRight, TrendingUp } from 'lucide-react';
 import type { ProFormaData, ProFormaItem } from '@/types';
 import { computeEGI } from '@/utils/dealAnalyzerCalc';
 
@@ -11,7 +11,7 @@ import { computeEGI } from '@/utils/dealAnalyzerCalc';
 const SFR_PRESETS: Omit<ProFormaItem, 'id'>[] = [
   { name: 'Property Taxes',        isPercentOfEGI: false, t12Value: 0, stabValue: null, stabilizedValue: 0, growthPct: 2 },
   { name: 'Insurance',             isPercentOfEGI: false, t12Value: 0, stabValue: null, stabilizedValue: 0, growthPct: 2 },
-  { name: 'Maintenance & Repairs', isPercentOfEGI: false, t12Value: 0, stabValue: null, stabilizedValue: 0, growthPct: 3 },
+  { name: 'Maintenance & Repairs', isPercentOfEGI: true,  t12Value: 5, stabValue: null, stabilizedValue: 5, growthPct: 0 },
   { name: 'CapEx Reserves',        isPercentOfEGI: false, t12Value: 0, stabValue: null, stabilizedValue: 0, growthPct: 0 },
   { name: 'Property Management',   isPercentOfEGI: true,  t12Value: 8, stabValue: null, stabilizedValue: 8, growthPct: 0 },
 ];
@@ -22,7 +22,7 @@ const MFR_PRESETS: Omit<ProFormaItem, 'id'>[] = [
   { name: 'Common Area Utilities', isPercentOfEGI: false, t12Value: 0, stabValue: null, stabilizedValue: 0, growthPct: 3 },
   { name: 'Landscaping',           isPercentOfEGI: false, t12Value: 0, stabValue: null, stabilizedValue: 0, growthPct: 2 },
   { name: 'Trash Removal',         isPercentOfEGI: false, t12Value: 0, stabValue: null, stabilizedValue: 0, growthPct: 2 },
-  { name: 'Maintenance & Repairs', isPercentOfEGI: false, t12Value: 0, stabValue: null, stabilizedValue: 0, growthPct: 3 },
+  { name: 'Maintenance & Repairs', isPercentOfEGI: true,  t12Value: 5, stabValue: null, stabilizedValue: 5, growthPct: 0 },
   { name: 'CapEx Reserves',        isPercentOfEGI: false, t12Value: 0, stabValue: null, stabilizedValue: 0, growthPct: 0 },
   { name: 'Property Management',   isPercentOfEGI: true,  t12Value: 8, stabValue: null, stabilizedValue: 8, growthPct: 0 },
 ];
@@ -65,10 +65,13 @@ function makeChainedValue(yearOverrides: ProFormaData['yearOverrides']) {
   ): number {
     if (targetYear <= 1) return stabilized;
     let value = stabilized;
+    let lastGrowthPct = defaultGrowthPct;
     for (let y = 2; y <= targetYear; y++) {
       const prev = yearOverrides?.[y - 1]?.[overrideField];
       if (prev !== undefined) value = prev;
-      value = value * (1 + (yearOverrides?.[y]?.[growthPctField] ?? defaultGrowthPct) / 100);
+      const rateOverride = yearOverrides?.[y]?.[growthPctField];
+      if (rateOverride !== undefined) lastGrowthPct = rateOverride;
+      value = value * (1 + lastGrowthPct / 100);
     }
     return value;
   };
@@ -78,10 +81,13 @@ function makeChainedExpenseValue(yearOverrides: ProFormaData['yearOverrides']) {
   return function (expense: ProFormaItem, targetYear: number): number {
     if (targetYear <= 1) return expense.stabilizedValue;
     let value = expense.stabilizedValue;
+    let lastGrowthPct = expense.growthPct;
     for (let y = 2; y <= targetYear; y++) {
       const prev = yearOverrides?.[y - 1]?.expenses?.[expense.id];
       if (prev !== undefined) value = prev;
-      value = value * (1 + (yearOverrides?.[y]?.expenseGrowthPcts?.[expense.id] ?? expense.growthPct) / 100);
+      const rateOverride = yearOverrides?.[y]?.expenseGrowthPcts?.[expense.id];
+      if (rateOverride !== undefined) lastGrowthPct = rateOverride;
+      value = value * (1 + lastGrowthPct / 100);
     }
     return value;
   };
@@ -144,6 +150,36 @@ function YearCell({ computed, override, format, onOverride, onClearOverride }: {
   );
 }
 
+// ── StabilizingCell ───────────────────────────────────────────────────────────
+
+function StabilizingCell({ value, anticipated, onClearOverride }: {
+  value: number; anticipated: number; onClearOverride: () => void;
+}) {
+  const pct = anticipated > 0 ? Math.min(100, Math.round((value / anticipated) * 100)) : 0;
+  return (
+    <div className="flex flex-col items-end gap-1 group/sc">
+      <div className="flex items-center justify-end gap-1 w-full">
+        <TrendingUp size={10} className="text-amber-400 dark:text-amber-500 shrink-0" />
+        <span className="text-sm tabular-nums font-medium text-amber-600 dark:text-amber-400">{fmt$(value)}</span>
+        <button
+          type="button"
+          onClick={e => { e.stopPropagation(); onClearOverride(); }}
+          title="Reset to formula"
+          className="opacity-0 group-hover/sc:opacity-100 p-1 rounded text-primary-500 bg-primary-50 dark:bg-primary-900/40 hover:bg-primary-100 transition-all shrink-0"
+        >
+          <RotateCcw size={10} />
+        </button>
+      </div>
+      <div className="w-full flex items-center gap-1">
+        <div className="flex-1 h-1 rounded-full bg-slate-200 dark:bg-slate-600 overflow-hidden">
+          <div className="h-full rounded-full bg-amber-400 dark:bg-amber-500 transition-all" style={{ width: `${pct}%` }} />
+        </div>
+        <span className="text-[9px] tabular-nums text-amber-500 dark:text-amber-400 shrink-0">{pct}%</span>
+      </div>
+    </div>
+  );
+}
+
 // ── LabelCell ─────────────────────────────────────────────────────────────────
 
 function LabelCell({ value, onChange, placeholder = 'Expense name', autoFocus }: {
@@ -182,6 +218,18 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGr
   const [newExpenseName, setNewExpenseName] = useState('');
   const [addingRow, setAddingRow] = useState(false);
   const [page, setPage] = useState(0);
+  const [cascadeHint, setCascadeHint] = useState<{
+    year: number;
+    field: 'grossRent' | 'otherIncome' | 'vacancyPct' | 'creditLossPct';
+    years: number[];
+  } | null>(null);
+
+  // Years where grossRent override is below stabilized — these are calculator-driven transition years
+  const stabilizingYears = new Set(
+    Object.entries(data.yearOverrides ?? {})
+      .filter(([, ov]) => ov?.grossRent !== undefined && ov.grossRent < data.grossRent.stabilized)
+      .map(([y]) => Number(y))
+  );
 
   // All columns: T12 then Yr1..YrN — paginated in groups of PAGE_SIZE
   const allCols: Col[] = [
@@ -197,14 +245,42 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGr
 
   const setYearOverride = useCallback((year: number, field: 'grossRent' | 'otherIncome' | 'vacancyPct' | 'creditLossPct', value: number) => {
     const prev = data.yearOverrides ?? {};
-    onChange({ ...data, yearOverrides: { ...prev, [year]: { ...prev[year], [field]: value } } });
-  }, [data, onChange]);
+    const extra = field === 'grossRent' ? { grossRentSystem: false } : {};
+    onChange({ ...data, yearOverrides: { ...prev, [year]: { ...prev[year], [field]: value, ...extra } } });
+    // Detect downstream overrides (manual or system) that block the cascade
+    const downstream: number[] = [];
+    for (let y = year + 1; y <= projectionYears; y++) {
+      const ov = data.yearOverrides?.[y];
+      if (!ov) continue;
+      if (field === 'grossRent' && ov.grossRent !== undefined) downstream.push(y);
+      else if (field !== 'grossRent' && ov[field] !== undefined) downstream.push(y);
+    }
+    setCascadeHint(downstream.length > 0 ? { year, field, years: downstream } : null);
+  }, [data, onChange, projectionYears]);
 
   const clearYearOverride = useCallback((year: number, field: 'grossRent' | 'otherIncome' | 'vacancyPct' | 'creditLossPct') => {
     const prev = data.yearOverrides ?? {};
-    const e = { ...prev[year] }; delete e[field];
+    const e = { ...prev[year] };
+    delete e[field];
+    if (field === 'grossRent') delete e.grossRentSystem;
     onChange({ ...data, yearOverrides: { ...prev, [year]: e } });
+    setCascadeHint(null);
   }, [data, onChange]);
+
+  const cascadeThrough = useCallback(() => {
+    if (!cascadeHint) return;
+    const { field, years } = cascadeHint;
+    const ovs = { ...(data.yearOverrides ?? {}) };
+    years.forEach(y => {
+      if (!ovs[y]) return;
+      const e = { ...ovs[y] };
+      delete e[field];
+      if (field === 'grossRent') delete e.grossRentSystem;
+      if (Object.keys(e).length > 0) ovs[y] = e; else delete ovs[y];
+    });
+    onChange({ ...data, yearOverrides: ovs });
+    setCascadeHint(null);
+  }, [cascadeHint, data, onChange]);
 
   const setExpenseYearOverride = useCallback((year: number, expenseId: string, value: number) => {
     const prev = data.yearOverrides ?? {};
@@ -274,12 +350,23 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGr
     return computeEGI(rent, other, vac, clv);
   }
 
+  function getEffectivePctForYear(expenseId: string, stabilizedPct: number, year: number): number {
+    let lastPct = stabilizedPct;
+    for (let y = 1; y <= year; y++) {
+      const ov = data.yearOverrides?.[y]?.expenses?.[expenseId];
+      if (ov !== undefined) lastPct = ov;
+    }
+    return lastPct;
+  }
+
   function getOpExForYear(year: number, egi: number): number {
     return data.expenses.reduce((sum, e) => {
+      if (e.isPercentOfEGI) {
+        const pct = getEffectivePctForYear(e.id, e.stabilizedValue, year);
+        return sum + egi * (pct / 100);
+      }
       const ov = data.yearOverrides?.[year]?.expenses?.[e.id];
-      if (ov !== undefined) return sum + (e.isPercentOfEGI ? egi * (ov / 100) : ov);
-      const computed = e.isPercentOfEGI ? e.stabilizedValue : chainedExpenseValue(e, year);
-      return sum + (e.isPercentOfEGI ? egi * (computed / 100) : computed);
+      return sum + (ov !== undefined ? ov : chainedExpenseValue(e, year));
     }, 0);
   }
 
@@ -293,8 +380,9 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGr
       if (col.type !== 'year') return false;
       const ov = data.yearOverrides?.[col.year];
       if (!ov) return false;
-      const { expenses, expenseGrowthPcts, ...rest } = ov;
-      return Object.values(rest).some(v => v !== undefined) || (!!expenses && Object.keys(expenses).length > 0);
+      const { expenses, expenseGrowthPcts, grossRent, grossRentSystem, ...rest } = ov;
+      const hasManualGrossRent = grossRent !== undefined && grossRentSystem !== true;
+      return hasManualGrossRent || Object.values(rest).some(v => v !== undefined) || (!!expenses && Object.keys(expenses).length > 0);
     });
   }
 
@@ -303,13 +391,19 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGr
   function colHeader(col: Col): { label: string; sub: string; color: string; isExit: boolean } {
     if (col.type === 't12') return { label: 'T12', sub: 'Actuals/yr', color: 'text-slate-500 dark:text-slate-400', isExit: false };
     const isExit = col.year === exitYear;
-    const isYr1 = col.year === 1;
-    const hasPreStab = isYr1 && data.yearOverrides?.[1]?.grossRent !== undefined;
-    const hasOv = !isYr1 && data.yearOverrides?.[col.year]?.grossRent !== undefined;
+    const isStabilizing = stabilizingYears.has(col.year);
+    const ov = data.yearOverrides?.[col.year];
+    const hasOv = !isStabilizing && ov?.grossRent !== undefined && ov.grossRentSystem !== true;
     return {
       label: `Yr ${col.year}${isExit ? ' ★' : ''}`,
-      sub: hasPreStab ? 'Pre-Stab' : isYr1 ? 'Base + growth' : hasOv ? 'Override' : 'Formula',
-      color: isExit ? 'text-amber-600 dark:text-amber-400' : isYr1 ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400',
+      sub: isStabilizing ? '↗ Stabilizing' : col.year === 1 ? 'Base + growth' : hasOv ? 'Override' : 'Formula',
+      color: isExit
+        ? 'text-amber-600 dark:text-amber-400'
+        : isStabilizing
+        ? 'text-amber-500 dark:text-amber-400'
+        : col.year === 1
+        ? 'text-emerald-600 dark:text-emerald-400'
+        : 'text-slate-500 dark:text-slate-400',
       isExit,
     };
   }
@@ -327,6 +421,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGr
     onGrowthPct: (v: number) => void,
     t12Val: number,
   ) {
+    const isGrossRent = overrideKey === 'grossRent';
     const fmt = isPercent ? 'percent' : 'currency';
     const growthRateKey = overrideKey === 'grossRent' ? 'grossRentGrowthPct' as const : overrideKey === 'otherIncome' ? 'otherIncomeGrowthPct' as const : null;
 
@@ -343,24 +438,55 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGr
     const bg = isExit ? 'bg-amber-50/40 dark:bg-amber-900/10' : '';
 
     if (year === 1) {
-      const yr1Override = data.yearOverrides?.[1]?.[overrideKey];
+      const yr1Ov = data.yearOverrides?.[1];
+      const yr1Override = yr1Ov?.[overrideKey];
+      const isSystem = isGrossRent && yr1Ov?.grossRentSystem === true;
+      const isStabilizing = isGrossRent && typeof yr1Override === 'number' && yr1Override < stabilized;
+      // System value: render like a normal cell (no blue, no reset), user can type to make it manual
+      const displayVal = isSystem ? (yr1Override as number) : stabilized;
       return (
         <td className={`px-2 py-2.5 align-top ${bg}`}>
           <div className="flex flex-col items-end gap-0.5">
-            {typeof yr1Override === 'number' ? (
-              <>
-                <YearCell computed={stabilized} override={yr1Override} format={fmt}
-                  onOverride={v => setYearOverride(1, overrideKey, v)}
-                  onClearOverride={() => clearYearOverride(1, overrideKey)} />
-                <span className="text-[10px] text-blue-400 dark:text-blue-500">Pre-Stab</span>
-              </>
+            {isStabilizing ? (
+              <StabilizingCell
+                value={yr1Override as number}
+                anticipated={stabilized}
+                onClearOverride={() => clearYearOverride(1, overrideKey)}
+              />
+            ) : isSystem ? (
+              <Cell value={displayVal} onChange={v => setYearOverride(1, overrideKey, v)} format={fmt} />
+            ) : typeof yr1Override === 'number' ? (
+              <YearCell computed={stabilized} override={yr1Override} format={fmt}
+                onOverride={v => setYearOverride(1, overrideKey, v)}
+                onClearOverride={() => clearYearOverride(1, overrideKey)} />
             ) : (
-              <Cell value={stabilized} onChange={onStabilized} format={fmt} />
+              <Cell value={stabilized} onChange={v => {
+                onStabilized(v);
+                const downstream: number[] = [];
+                for (let y = 2; y <= projectionYears; y++) {
+                  const ov = data.yearOverrides?.[y];
+                  if (!ov) continue;
+                  if (ov[overrideKey] !== undefined) downstream.push(y);
+                }
+                setCascadeHint(downstream.length > 0 ? { year: 1, field: overrideKey, years: downstream } : null);
+              }} format={fmt} />
             )}
-            {!isPercent && (
+            {!isPercent && !isStabilizing && (
               <div className="flex items-center gap-0.5">
                 <Cell value={growthPct} onChange={onGrowthPct} format="growthPct" />
                 <span className="text-[10px] text-slate-400">/yr</span>
+              </div>
+            )}
+            {cascadeHint?.year === 1 && cascadeHint?.field === overrideKey && (
+              <div className="mt-1 pt-1 border-t border-slate-100 dark:border-slate-700 w-full flex flex-col items-end gap-0.5">
+                <span className="text-[9px] text-slate-400 leading-tight">↓ {cascadeHint.years.length} yr{cascadeHint.years.length > 1 ? 's' : ''} blocked</span>
+                <button
+                  type="button"
+                  onClick={cascadeThrough}
+                  className="text-[9px] font-semibold text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/30 hover:bg-primary-100 dark:hover:bg-primary-900/50 px-1.5 py-0.5 rounded transition-colors leading-tight"
+                >
+                  cascade →
+                </button>
               </div>
             )}
           </div>
@@ -369,22 +495,58 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGr
     }
 
     // Year 2+
-    const yrOverride = data.yearOverrides?.[year]?.[overrideKey];
+    const yrOv = data.yearOverrides?.[year];
+    const yrOverride = yrOv?.[overrideKey];
+    const isSystem = isGrossRent && yrOv?.grossRentSystem === true;
+    const isStabilizing = isGrossRent && typeof yrOverride === 'number' && yrOverride < stabilized;
+    const anticipated = stabilized * Math.pow(1 + growthPct / 100, year - 1);
     const computedVal = isPercent || !growthRateKey
       ? stabilized
       : chainedValue(overrideKey as 'grossRent' | 'otherIncome', growthRateKey, stabilized, growthPct, year);
-    const yrGrowthPct = growthRateKey ? (data.yearOverrides?.[year]?.[growthRateKey] ?? growthPct) : growthPct;
+    const yrGrowthPct = growthRateKey ? (yrOv?.[growthRateKey as 'grossRentGrowthPct' | 'otherIncomeGrowthPct'] ?? growthPct) : growthPct;
 
     return (
       <td key={year} className={`px-2 py-2.5 align-top ${bg}`}>
         <div className="flex flex-col items-end gap-0.5">
-          <YearCell computed={computedVal} override={typeof yrOverride === 'number' ? yrOverride : undefined} format={fmt}
-            onOverride={v => setYearOverride(year, overrideKey, v)}
-            onClearOverride={() => clearYearOverride(year, overrideKey)} />
-          {!isPercent && growthRateKey && (
-            <div className="flex items-center gap-0.5">
-              <Cell value={yrGrowthPct} onChange={v => setYearGrowthPct(year, growthRateKey, v)} format="growthPct" />
-              <span className="text-[10px] text-slate-400">/yr</span>
+          {isStabilizing ? (
+            <StabilizingCell
+              value={yrOverride as number}
+              anticipated={anticipated}
+              onClearOverride={() => clearYearOverride(year, overrideKey)}
+            />
+          ) : isSystem ? (
+            <>
+              <Cell value={yrOverride as number} onChange={v => setYearOverride(year, overrideKey, v)} format={fmt} />
+              {!isPercent && growthRateKey && (
+                <div className="flex items-center gap-0.5">
+                  <Cell value={yrGrowthPct} onChange={v => setYearGrowthPct(year, growthRateKey, v)} format="growthPct" />
+                  <span className="text-[10px] text-slate-400">/yr</span>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <YearCell computed={computedVal} override={typeof yrOverride === 'number' ? yrOverride : undefined} format={fmt}
+                onOverride={v => setYearOverride(year, overrideKey, v)}
+                onClearOverride={() => clearYearOverride(year, overrideKey)} />
+              {!isPercent && growthRateKey && (
+                <div className="flex items-center gap-0.5">
+                  <Cell value={yrGrowthPct} onChange={v => setYearGrowthPct(year, growthRateKey, v)} format="growthPct" />
+                  <span className="text-[10px] text-slate-400">/yr</span>
+                </div>
+              )}
+            </>
+          )}
+          {cascadeHint?.year === year && cascadeHint?.field === overrideKey && (
+            <div className="mt-1 pt-1 border-t border-slate-100 dark:border-slate-700 w-full flex flex-col items-end gap-0.5">
+              <span className="text-[9px] text-slate-400 leading-tight">↓ {cascadeHint.years.length} yr{cascadeHint.years.length > 1 ? 's' : ''} blocked</span>
+              <button
+                type="button"
+                onClick={cascadeThrough}
+                className="text-[9px] font-semibold text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/30 hover:bg-primary-100 dark:hover:bg-primary-900/50 px-1.5 py-0.5 rounded transition-colors leading-tight"
+              >
+                cascade →
+              </button>
             </div>
           )}
         </div>
@@ -484,7 +646,15 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGr
                     <th key={i} className={`px-2 py-2.5 w-[120px] ${isExit ? 'bg-amber-50/40 dark:bg-amber-900/10' : ''}`}>
                       <div className={`text-right ${color}`}>
                         <p className="text-xs font-bold uppercase tracking-wide">{label}</p>
-                        <p className="text-[10px] opacity-70 mt-0.5 whitespace-nowrap">{sub}</p>
+                        <div className="flex justify-end mt-0.5">
+                          {sub === 'Override' ? (
+                            <span className="inline-block text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400">Override</span>
+                          ) : sub === '↗ Stabilizing' ? (
+                            <span className="inline-block text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400">↗ Stabilizing</span>
+                          ) : (
+                            <span className="text-[10px] opacity-60">{sub}</span>
+                          )}
+                        </div>
                       </div>
                     </th>
                   );
@@ -554,7 +724,12 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGr
                       if (col.type === 't12') {
                         return (
                           <td key={i} className="px-2 py-2.5 align-top">
-                            <Cell value={expense.t12Value} onChange={v => updateExpense(expense.id, { t12Value: v })} format={fmt} />
+                            <div className="flex flex-col items-end gap-0.5">
+                              <Cell value={expense.t12Value} onChange={v => updateExpense(expense.id, { t12Value: v })} format={fmt} />
+                              {expense.isPercentOfEGI && t12EGI > 0 && (
+                                <span className="text-[10px] text-slate-400 tabular-nums">{fmt$(t12EGI * expense.t12Value / 100)}</span>
+                              )}
+                            </div>
                           </td>
                         );
                       }
@@ -582,7 +757,9 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGr
                       }
 
                       const yrExpOv = data.yearOverrides?.[year]?.expenses?.[expense.id];
-                      const computed = expense.isPercentOfEGI ? expense.stabilizedValue : chainedExpenseValue(expense, year);
+                      const computed = expense.isPercentOfEGI
+                        ? getEffectivePctForYear(expense.id, expense.stabilizedValue, year)
+                        : chainedExpenseValue(expense, year);
                       const displayVal = yrExpOv ?? computed;
                       const yrGrowth = data.yearOverrides?.[year]?.expenseGrowthPcts?.[expense.id] ?? expense.growthPct;
 
@@ -671,7 +848,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGr
               <tr>
                 <td colSpan={totalCols} className="px-3 py-2 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-700">
                   <span className="text-[10px] text-slate-400 dark:text-slate-500">
-                    Click any value to edit · <span className="text-blue-400 font-medium">Blue</span> = override (↺ reset) · Gray = formula cascades from previous · <span className="text-amber-500 font-medium">★</span> = exit year
+                    Click any value to edit · <span className="text-blue-400 font-medium">Blue</span> = override (↺ reset) · <span className="text-amber-500 font-medium">↗</span> = stabilizing (below target) · Gray = formula · <span className="text-amber-500 font-medium">★</span> = exit year
                   </span>
                 </td>
               </tr>
