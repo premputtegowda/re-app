@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useRef, useCallback, cloneElement } from 'react';
+import { useState, useRef, useCallback, cloneElement, useEffect } from 'react';
 import { flushSync } from 'react-dom';
 import { Plus, X, RotateCcw, ChevronLeft, ChevronRight, TrendingUp } from 'lucide-react';
 import type { ProFormaData, ProFormaItem } from '@/types';
 import { computeEGI } from '@/utils/dealAnalyzerCalc';
+import { makeChainedValue, makeChainedExpenseValue, buildCascadeDownstream, applyCascade } from '@/utils/proFormaChaining';
+import type { CascadeField } from '@/utils/proFormaChaining';
 
 // ── Preset expense templates ──────────────────────────────────────────────────
 
@@ -52,46 +54,6 @@ function fmt$(n: number): string {
 function fmtPct(n: number): string { return `${(n ?? 0).toFixed(2)}%`; }
 function uid(): string { return Math.random().toString(36).slice(2, 9); }
 
-/**
- * Chained projection — a previous year's override cascades as the new base.
- */
-function makeChainedValue(yearOverrides: ProFormaData['yearOverrides']) {
-  return function (
-    overrideField: 'grossRent' | 'otherIncome',
-    growthPctField: 'grossRentGrowthPct' | 'otherIncomeGrowthPct',
-    stabilized: number,
-    defaultGrowthPct: number,
-    targetYear: number
-  ): number {
-    if (targetYear <= 1) return stabilized;
-    let value = stabilized;
-    let lastGrowthPct = defaultGrowthPct;
-    for (let y = 2; y <= targetYear; y++) {
-      const prev = yearOverrides?.[y - 1]?.[overrideField];
-      if (prev !== undefined) value = prev;
-      const rateOverride = yearOverrides?.[y]?.[growthPctField];
-      if (rateOverride !== undefined) lastGrowthPct = rateOverride;
-      value = value * (1 + lastGrowthPct / 100);
-    }
-    return value;
-  };
-}
-
-function makeChainedExpenseValue(yearOverrides: ProFormaData['yearOverrides']) {
-  return function (expense: ProFormaItem, targetYear: number): number {
-    if (targetYear <= 1) return expense.stabilizedValue;
-    let value = expense.stabilizedValue;
-    let lastGrowthPct = expense.growthPct;
-    for (let y = 2; y <= targetYear; y++) {
-      const prev = yearOverrides?.[y - 1]?.expenses?.[expense.id];
-      if (prev !== undefined) value = prev;
-      const rateOverride = yearOverrides?.[y]?.expenseGrowthPcts?.[expense.id];
-      if (rateOverride !== undefined) lastGrowthPct = rateOverride;
-      value = value * (1 + lastGrowthPct / 100);
-    }
-    return value;
-  };
-}
 
 // ── Sticky label ──────────────────────────────────────────────────────────────
 
@@ -138,7 +100,7 @@ function YearCell({ computed, override, format, onOverride, onClearOverride }: {
 
   return (
     <div className="flex items-center justify-end gap-0.5 group/yc">
-      <button onClick={start} className={`text-sm tabular-nums text-right font-medium w-full cursor-text transition-colors ${isOverridden ? 'text-blue-600 dark:text-blue-400' : val === 0 ? 'text-slate-300 dark:text-slate-600 hover:text-primary-600' : 'text-slate-400 dark:text-slate-500 hover:text-primary-600 dark:hover:text-primary-400'}`}>
+      <button onClick={start} className={`text-sm tabular-nums text-right font-medium w-full cursor-text transition-colors ${isOverridden ? 'text-blue-600 dark:text-blue-400' : val === 0 ? 'text-slate-300 dark:text-slate-600 hover:text-slate-600 dark:hover:text-slate-300' : 'text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200'}`}>
         {display}
       </button>
       {isOverridden && (
@@ -222,7 +184,14 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGr
     year: number;
     field: 'grossRent' | 'otherIncome' | 'vacancyPct' | 'creditLossPct';
     years: number[];
+    value?: number;
   } | null>(null);
+
+  useEffect(() => {
+    if (!cascadeHint) return;
+    const t = setTimeout(() => setCascadeHint(null), 4000);
+    return () => clearTimeout(t);
+  }, [cascadeHint]);
 
   // Years where grossRent override is below stabilized — these are calculator-driven transition years
   const stabilizingYears = new Set(
@@ -243,19 +212,12 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGr
 
   // ── Year override helpers ──
 
-  const setYearOverride = useCallback((year: number, field: 'grossRent' | 'otherIncome' | 'vacancyPct' | 'creditLossPct', value: number) => {
+  const setYearOverride = useCallback((year: number, field: CascadeField, value: number) => {
     const prev = data.yearOverrides ?? {};
     const extra = field === 'grossRent' ? { grossRentSystem: false } : {};
     onChange({ ...data, yearOverrides: { ...prev, [year]: { ...prev[year], [field]: value, ...extra } } });
-    // Detect downstream overrides (manual or system) that block the cascade
-    const downstream: number[] = [];
-    for (let y = year + 1; y <= projectionYears; y++) {
-      const ov = data.yearOverrides?.[y];
-      if (!ov) continue;
-      if (field === 'grossRent' && ov.grossRent !== undefined) downstream.push(y);
-      else if (field !== 'grossRent' && ov[field] !== undefined) downstream.push(y);
-    }
-    setCascadeHint(downstream.length > 0 ? { year, field, years: downstream } : null);
+    const downstream = buildCascadeDownstream(field, year, projectionYears, data.yearOverrides);
+    setCascadeHint(downstream.length > 0 ? { year, field, years: downstream, value } : null);
   }, [data, onChange, projectionYears]);
 
   const clearYearOverride = useCallback((year: number, field: 'grossRent' | 'otherIncome' | 'vacancyPct' | 'creditLossPct') => {
@@ -269,16 +231,8 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGr
 
   const cascadeThrough = useCallback(() => {
     if (!cascadeHint) return;
-    const { field, years } = cascadeHint;
-    const ovs = { ...(data.yearOverrides ?? {}) };
-    years.forEach(y => {
-      if (!ovs[y]) return;
-      const e = { ...ovs[y] };
-      delete e[field];
-      if (field === 'grossRent') delete e.grossRentSystem;
-      if (Object.keys(e).length > 0) ovs[y] = e; else delete ovs[y];
-    });
-    onChange({ ...data, yearOverrides: ovs });
+    const { field, years, value } = cascadeHint;
+    onChange({ ...data, yearOverrides: applyCascade(field, years, value, data.yearOverrides) });
     setCascadeHint(null);
   }, [cascadeHint, data, onChange]);
 
@@ -412,7 +366,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGr
 
   function renderIncomeCell(
     col: Col,
-    overrideKey: 'grossRent' | 'otherIncome' | 'vacancyPct' | 'creditLossPct',
+    overrideKey: CascadeField,
     stabilized: number,
     growthPct: number,
     isPercent: boolean,
@@ -426,9 +380,13 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGr
     const growthRateKey = overrideKey === 'grossRent' ? 'grossRentGrowthPct' as const : overrideKey === 'otherIncome' ? 'otherIncomeGrowthPct' as const : null;
 
     if (col.type === 't12') {
+      const grossT12 = data.grossRent.t12;
       return (
         <td className="px-2 py-2.5 align-top">
-          <Cell value={t12Val} onChange={onT12} format={fmt} />
+          <div className="flex flex-col items-end gap-0.5">
+            <Cell value={t12Val} onChange={onT12} format={fmt} />
+            {isPercent && grossT12 > 0 && <span className="text-[10px] text-slate-400 tabular-nums">{fmt$(grossT12 * t12Val / 100)}</span>}
+          </div>
         </td>
       );
     }
@@ -462,13 +420,8 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGr
             ) : (
               <Cell value={stabilized} onChange={v => {
                 onStabilized(v);
-                const downstream: number[] = [];
-                for (let y = 2; y <= projectionYears; y++) {
-                  const ov = data.yearOverrides?.[y];
-                  if (!ov) continue;
-                  if (ov[overrideKey] !== undefined) downstream.push(y);
-                }
-                setCascadeHint(downstream.length > 0 ? { year: 1, field: overrideKey, years: downstream } : null);
+                const downstream = buildCascadeDownstream(overrideKey, 1, projectionYears, data.yearOverrides);
+                setCascadeHint(downstream.length > 0 ? { year: 1, field: overrideKey, years: downstream, value: v } : null);
               }} format={fmt} />
             )}
             {!isPercent && !isStabilizing && (
@@ -477,16 +430,27 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGr
                 <span className="text-[10px] text-slate-400">/yr</span>
               </div>
             )}
+            {isPercent && !isStabilizing && (() => {
+              const yr1Ov2 = data.yearOverrides?.[1];
+              const gross = yr1Ov2?.grossRent ?? data.grossRent.stabilized;
+              const pct = typeof yr1Ov2?.[overrideKey] === 'number' ? (yr1Ov2![overrideKey] as number) : stabilized;
+              return gross > 0 ? <span className="text-[10px] text-slate-400 tabular-nums">{fmt$(gross * pct / 100)}</span> : null;
+            })()}
             {cascadeHint?.year === 1 && cascadeHint?.field === overrideKey && (
-              <div className="mt-1 pt-1 border-t border-slate-100 dark:border-slate-700 w-full flex flex-col items-end gap-0.5">
-                <span className="text-[9px] text-slate-400 leading-tight">↓ {cascadeHint.years.length} yr{cascadeHint.years.length > 1 ? 's' : ''} blocked</span>
-                <button
-                  type="button"
-                  onClick={cascadeThrough}
-                  className="text-[9px] font-semibold text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/30 hover:bg-primary-100 dark:hover:bg-primary-900/50 px-1.5 py-0.5 rounded transition-colors leading-tight"
-                >
-                  cascade →
-                </button>
+              <div className="mt-1 pt-1 border-t border-slate-100 dark:border-slate-700 w-full">
+                <span className="text-[9px] text-slate-400 leading-tight block text-right">
+                  ↓ yrs {cascadeHint.years[0]}{cascadeHint.years.length > 1 ? `–${cascadeHint.years[cascadeHint.years.length - 1]}` : ''}?
+                </span>
+                <div className="flex justify-end gap-1 mt-0.5">
+                  <button type="button" onClick={cascadeThrough}
+                    className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 px-1.5 py-0.5 rounded transition-colors leading-tight">
+                    ✓
+                  </button>
+                  <button type="button" onClick={() => setCascadeHint(null)}
+                    className="text-[10px] font-semibold text-slate-400 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 px-1.5 py-0.5 rounded transition-colors leading-tight">
+                    ✕
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -537,16 +501,26 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGr
               )}
             </>
           )}
+          {isPercent && !isStabilizing && (() => {
+            const gross = chainedValue('grossRent', 'grossRentGrowthPct', data.grossRent.stabilized, data.grossRent.growthPct, year);
+            const pct = typeof yrOverride === 'number' ? yrOverride : computedVal;
+            return gross > 0 ? <span className="text-[10px] text-slate-400 tabular-nums">{fmt$(gross * pct / 100)}</span> : null;
+          })()}
           {cascadeHint?.year === year && cascadeHint?.field === overrideKey && (
-            <div className="mt-1 pt-1 border-t border-slate-100 dark:border-slate-700 w-full flex flex-col items-end gap-0.5">
-              <span className="text-[9px] text-slate-400 leading-tight">↓ {cascadeHint.years.length} yr{cascadeHint.years.length > 1 ? 's' : ''} blocked</span>
-              <button
-                type="button"
-                onClick={cascadeThrough}
-                className="text-[9px] font-semibold text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/30 hover:bg-primary-100 dark:hover:bg-primary-900/50 px-1.5 py-0.5 rounded transition-colors leading-tight"
-              >
-                cascade →
-              </button>
+            <div className="mt-1 pt-1 border-t border-slate-100 dark:border-slate-700 w-full">
+              <span className="text-[9px] text-slate-400 leading-tight block text-right">
+                ↓ yrs {cascadeHint.years[0]}{cascadeHint.years.length > 1 ? `–${cascadeHint.years[cascadeHint.years.length - 1]}` : ''}?
+              </span>
+              <div className="flex justify-end gap-1 mt-0.5">
+                <button type="button" onClick={cascadeThrough}
+                  className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 px-1.5 py-0.5 rounded transition-colors leading-tight">
+                  ✓
+                </button>
+                <button type="button" onClick={() => setCascadeHint(null)}
+                  className="text-[10px] font-semibold text-slate-400 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 px-1.5 py-0.5 rounded transition-colors leading-tight">
+                  ✕
+                </button>
+              </div>
             </div>
           )}
         </div>

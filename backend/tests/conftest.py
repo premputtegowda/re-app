@@ -1,8 +1,14 @@
 import asyncio
+import json
+import sqlite3
 import sys
 from typing import AsyncGenerator, Generator
 from unittest.mock import AsyncMock, MagicMock, patch
 import uuid
+
+# Register SQLite adapter for Python lists (used by ARRAY columns).
+# Serializes list → JSON string on INSERT/UPDATE; SQLite stores as TEXT.
+sqlite3.register_adapter(list, lambda v: json.dumps(v))
 
 # ---------------------------------------------------------------------------
 # Stub optional packages before any app module is imported.
@@ -39,8 +45,13 @@ def _sqlite_visit_ENUM(self, type_, **kw):  # noqa: N802
     return "VARCHAR(50)"
 
 
+def _sqlite_visit_ARRAY(self, type_, **kw):  # noqa: N802
+    return "TEXT"
+
+
 _STC.visit_UUID = _sqlite_visit_UUID  # type: ignore[attr-defined]
 _STC.visit_ENUM = _sqlite_visit_ENUM  # type: ignore[attr-defined]
+_STC.visit_ARRAY = _sqlite_visit_ARRAY  # type: ignore[attr-defined]
 
 # Suppress CREATE TYPE / DROP TYPE DDL for PostgreSQL ENUM on non-PG dialects.
 _pg_enum_create_orig = _PG_ENUM.create
