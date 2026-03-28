@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { ArrowLeft, BookmarkPlus, BookmarkCheck, Check, Pencil, Calculator } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { ArrowLeft, Check, Pencil, Calculator } from 'lucide-react';
 import { Card } from '@/components/UI/Card';
 import { Button } from '@/components/UI/Button';
 import { StepProperty } from './steps/StepProperty';
@@ -84,19 +85,7 @@ const DEFAULT_REFINANCE: CoCRefinance = {
   refiCostPct: 2,
 };
 
-// ── Scenario chip styles ───────────────────────────────────────────────────────
-
-const CHIP_ACTIVE: Record<CoCScenarioType, string> = {
-  base: 'bg-primary-600 text-white border-primary-600',
-  bull: 'bg-secondary-600 text-white border-secondary-600',
-  bear: 'bg-red-600 text-white border-red-600',
-};
-
-const CHIP_INACTIVE: Record<CoCScenarioType, string> = {
-  base: 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-primary-400 dark:hover:border-primary-500',
-  bull: 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-secondary-400 dark:hover:border-secondary-500',
-  bear: 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-red-400 dark:hover:border-red-500',
-};
+// ── Scenario names ─────────────────────────────────────────────────────────────
 
 const CHIP_LABELS: Record<CoCScenarioType, string> = {
   base: 'Base Case',
@@ -175,22 +164,21 @@ function defaultSaveName(acquisition: CoCAcquisition): string {
 
 interface DealAnalyzerFormProps {
   initialDeal?: SavedDeal;
-  onBack: () => void;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export function DealAnalyzerForm({ initialDeal, onBack }: DealAnalyzerFormProps) {
-  const { addScenario, saveDraft, saveDeal, updateSavedDeal, updateMCData, draft } = useDealAnalyzerStore();
-
-  const formSource = initialDeal ?? draft;
+export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
+  const router = useRouter();
+  const onBack = () => router.push('/deal-analyzer');
+  const { addScenario, saveDeal, updateSavedDeal, updateMCData, updateCurrentStep } = useDealAnalyzerStore();
 
   // Stepper state
   const [activeStep, setActiveStep] = useState<number>(
-    initialDeal ? 4 : Math.min(draft?.currentStep ?? 0, 4)
+    initialDeal?.currentStep ?? (initialDeal ? 4 : 0)
   );
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(
-    new Set(initialDeal ? [0, 1, 2, 3, 4] : (draft?.visitedSteps ?? []))
+    new Set(initialDeal ? [0, 1, 2, 3, 4] : [])
   );
   const [editingStep, setEditingStep] = useState<number | null>(null);
   const [pausedActiveStep, setPausedActiveStep] = useState<number | null>(null);
@@ -200,23 +188,48 @@ export function DealAnalyzerForm({ initialDeal, onBack }: DealAnalyzerFormProps)
 
   // Form data
   const [acquisition, setAcquisition] = useState<CoCAcquisition>(
-    formSource?.acquisition ?? DEFAULT_ACQUISITION
+    initialDeal?.acquisition ?? DEFAULT_ACQUISITION
   );
   const [operations, setOperations] = useState<CoCOperations>(
-    formSource?.operations ?? DEFAULT_OPERATIONS
+    initialDeal?.operations ?? DEFAULT_OPERATIONS
   );
   const [refinance, setRefinance] = useState<CoCRefinance>(
-    formSource?.refinance ?? DEFAULT_REFINANCE
+    initialDeal?.refinance ?? DEFAULT_REFINANCE
   );
-  const [proForma, setProForma] = useState<ProFormaData>(
-    formSource?.proForma ?? defaultProForma(DEFAULT_ACQUISITION.propertyType)
-  );
-  const [activeType, setActiveType] = useState<CoCScenarioType>(
-    initialDeal ? 'base' : (draft?.activeType ?? 'base')
-  );
+  const [proForma, setProForma] = useState<ProFormaData>(() => {
+    let pf = initialDeal?.proForma ?? defaultProForma(DEFAULT_ACQUISITION.propertyType);
+    if (initialDeal?.operations.annualRentGrowthPct) {
+      pf = { ...pf, grossRent: { ...pf.grossRent, growthPct: initialDeal.operations.annualRentGrowthPct } };
+    }
+    // Clear stale year-2 rent pin when preStab >= target (no actual gap to bridge)
+    if (pf.yearOverrides?.[2]?.grossRentSystem) {
+      const targetAnnual = initialDeal
+        ? (initialDeal.acquisition.propertyType === 'mfr'
+            ? initialDeal.acquisition.unitMix.reduce((s, e) => s + e.count * (e.rentMonthly || 0), 0) * 12
+            : (initialDeal.acquisition.sfrTargetRent || 0) * 12)
+        : 0;
+      const preStabAnnual = initialDeal
+        ? (initialDeal.acquisition.propertyType === 'mfr'
+            ? initialDeal.acquisition.unitMix.reduce((s, e) => s + e.count * (e.preStabRent || 0), 0) * 12
+            : (initialDeal.acquisition.sfrPreStabRent || 0) * 12)
+        : 0;
+      if (!(preStabAnnual > 0 && preStabAnnual < targetAnnual)) {
+        const { grossRent: _r, grossRentSystem: _s, ...rest } = pf.yearOverrides[2];
+        const ovs = { ...pf.yearOverrides };
+        if (Object.keys(rest).length) { ovs[2] = rest; } else { delete ovs[2]; }
+        pf = { ...pf, yearOverrides: ovs };
+      }
+    }
+    return pf;
+  });
+  const activeType: CoCScenarioType = 'base';
   const [scenarioResults, setScenarioResults] = useState<Partial<Record<CoCScenarioType, CoCResult>>>(
     initialDeal?.results ?? {}
   );
+
+  // Inline address editing
+  const [editingAddress, setEditingAddress] = useState(false);
+  const [addressDraft, setAddressDraft] = useState('');
 
   // MC ranges state — persisted with deal
   const [mcRanges, setMcRanges] = useState<MCRanges | null>(
@@ -230,9 +243,6 @@ export function DealAnalyzerForm({ initialDeal, onBack }: DealAnalyzerFormProps)
   // Save state
   const [savedDealId, setSavedDealId] = useState<string | null>(initialDeal?.id ?? null);
   const [saveName, setSaveName] = useState(initialDeal?.name ?? '');
-  const [showSaveBar, setShowSaveBar] = useState(false);
-  const [justSaved, setJustSaved] = useState(false);
-  const [savedAsDraft, setSavedAsDraft] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showExitWarning, setShowExitWarning] = useState(false);
 
@@ -258,21 +268,6 @@ export function DealAnalyzerForm({ initialDeal, onBack }: DealAnalyzerFormProps)
 
   const resultsRef = useRef<HTMLDivElement>(null);
   const recalcTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const draftRef = useRef<DealAnalyzerDraft | null>(null);
-
-  useEffect(() => {
-    draftRef.current = {
-      acquisition, operations, proForma, refinance,
-      currentStep: activeStep,
-      visitedSteps: Array.from(completedSteps),
-      activeType,
-    };
-  });
-
-  useEffect(() => {
-    return () => { if (draftRef.current) saveDraft(draftRef.current); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Recompute results when opening a saved deal
   useEffect(() => {
@@ -310,7 +305,9 @@ export function DealAnalyzerForm({ initialDeal, onBack }: DealAnalyzerFormProps)
           if (!ovs[1]) delete ovs[1];
         }
       }
-      if (targetAnnual > 0) {
+      // Only pin year 2 to target when there's a pre-stab period in year 1;
+      // otherwise let year 2 grow naturally from stabilized via growth rate.
+      if (targetAnnual > 0 && preStabAnnual > 0 && preStabAnnual < targetAnnual) {
         ovs[2] = { ...ovs[2], grossRent: targetAnnual, grossRentSystem: true };
       } else {
         if (ovs[2]) {
@@ -364,16 +361,6 @@ export function DealAnalyzerForm({ initialDeal, onBack }: DealAnalyzerFormProps)
     setProForma(defaultProForma(acquisition.propertyType));
   }, [acquisition.propertyType]);
 
-  // Persist draft on every change
-  useEffect(() => {
-    saveDraft({
-      acquisition, operations, proForma, refinance,
-      currentStep: activeStep,
-      visitedSteps: Array.from(completedSteps),
-      activeType,
-    });
-  }, [acquisition, operations, proForma, refinance, activeStep, completedSteps, activeType, saveDraft]);
-
   // Auto-fill save name when address changes
   useEffect(() => {
     if (!saveName) setSaveName(defaultSaveName(acquisition));
@@ -403,8 +390,12 @@ export function DealAnalyzerForm({ initialDeal, onBack }: DealAnalyzerFormProps)
   const updateAcquisition = (field: keyof CoCAcquisition, value: unknown) =>
     setAcquisition((prev) => ({ ...prev, [field]: value }));
 
-  const updateOperations = (field: keyof CoCOperations, value: number) =>
+  const updateOperations = (field: keyof CoCOperations, value: number) => {
     setOperations((prev) => ({ ...prev, [field]: value }));
+    if (field === 'annualRentGrowthPct') {
+      setProForma((prev) => ({ ...prev, grossRent: { ...prev.grossRent, growthPct: value } }));
+    }
+  };
 
   const updateRefinance = (field: keyof CoCRefinance, value: number | boolean) =>
     setRefinance((prev) => ({ ...prev, [field]: value }));
@@ -469,7 +460,9 @@ export function DealAnalyzerForm({ initialDeal, onBack }: DealAnalyzerFormProps)
       setEditingStep(null);
       setPausedActiveStep(null);
     } else {
-      setActiveStep(stepId + 1);
+      const next = stepId + 1;
+      setActiveStep(next);
+      if (savedDealId) updateCurrentStep(savedDealId, next);
     }
   };
 
@@ -498,17 +491,8 @@ export function DealAnalyzerForm({ initialDeal, onBack }: DealAnalyzerFormProps)
     }
 
     setSaveName(name);
-    setShowSaveBar(false);
     savedSnapshot.current = JSON.stringify({ acquisition, operations, proForma, refinance });
-
-    const isComplete = acquisition.purchasePrice > 0 && Object.keys(scenarioResults).length > 0;
-    if (isComplete) {
-      setJustSaved(true);
-      setTimeout(() => setJustSaved(false), 3000);
-    } else {
-      setSavedAsDraft(true);
-      setTimeout(() => setSavedAsDraft(false), 4000);
-    }
+    onBack();
   };
 
   const handleSaveAndExit = () => {
@@ -745,63 +729,82 @@ export function DealAnalyzerForm({ initialDeal, onBack }: DealAnalyzerFormProps)
     <div className="min-h-screen pb-24 overflow-x-hidden">
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-5">
 
-        {/* Back nav + title + save */}
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => (isDirty || hasNewDealData) ? setShowExitWarning(true) : onBack()}
-              className="flex items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
-            >
-              <ArrowLeft size={16} />
-              <span>Deals</span>
-            </button>
-            <span className="text-slate-300 dark:text-slate-600">/</span>
-            <h1 className="text-sm font-medium text-slate-700 dark:text-slate-300 truncate max-w-[200px]">
-              {saveName || (hasAddress ? acquisition.propertyAddress : 'New Analysis')}
-            </h1>
-          </div>
+        {/* Back nav + save */}
+        <div className="flex items-center justify-between gap-4">
+          <button
+            type="button"
+            onClick={() => (isDirty || hasNewDealData) ? setShowExitWarning(true) : onBack()}
+            className="flex items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
+          >
+            <ArrowLeft size={16} />
+            <span>Deals</span>
+          </button>
 
           {(hasAnyResult || hasAddress) && (
             <div className="flex items-center gap-2 shrink-0">
-              {justSaved && (
-                <span className="flex items-center gap-1 text-xs text-secondary-600 dark:text-secondary-400">
-                  <BookmarkCheck size={14} /> Saved
-                </span>
-              )}
-              {savedAsDraft && (
-                <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
-                  <BookmarkCheck size={14} /> Saved as Draft
-                </span>
-              )}
               {saveError && (
                 <span className="text-xs text-red-600 dark:text-red-400 max-w-[180px] text-right leading-tight">
                   {saveError}
                 </span>
               )}
-              {showSaveBar ? (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={saveName}
-                    onChange={(e) => setSaveName(e.target.value)}
-                    placeholder="Name this analysis…"
-                    className="text-sm border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-1.5 bg-white dark:bg-slate-800 text-slate-900 dark:text-white w-44 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    autoFocus
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') setShowSaveBar(false); }}
-                  />
-                  <Button variant="primary" size="sm" onClick={handleSave}>
-                    {savedDealId ? 'Update' : 'Save'}
-                  </Button>
-                  <button type="button" onClick={() => setShowSaveBar(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1">✕</button>
-                </div>
-              ) : (
-                <Button variant="secondary" size="sm" onClick={() => { setSaveName(saveName || defaultSaveName(acquisition)); setShowSaveBar(true); }}>
-                  <BookmarkPlus size={14} className="mr-1.5" />
-                  {savedDealId ? 'Update' : 'Save'}
-                </Button>
-              )}
+              <Button variant="ghost" size="sm" onClick={() => (isDirty || hasNewDealData) ? setShowExitWarning(true) : onBack()}>
+                Cancel
+              </Button>
+              <Button variant="primary" size="sm" disabled={savedDealId ? !isDirty : false} onClick={() => { setSaveName(saveName || defaultSaveName(acquisition)); handleSave(); }}>
+                {savedDealId ? 'Update' : 'Save'}
+              </Button>
             </div>
+          )}
+        </div>
+
+        {/* Property address header */}
+        <div className="flex items-center gap-2">
+          {editingAddress ? (
+            <>
+              <input
+                type="text"
+                autoFocus
+                value={addressDraft}
+                onChange={(e) => setAddressDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    updateAcquisition('propertyAddress', addressDraft.trim());
+                    setEditingAddress(false);
+                  }
+                  if (e.key === 'Escape') setEditingAddress(false);
+                }}
+                placeholder="Enter property address…"
+                className="text-lg font-semibold border-b border-primary-400 dark:border-primary-500 bg-transparent text-slate-900 dark:text-white focus:outline-none w-full max-w-sm pb-0.5"
+              />
+              <button
+                type="button"
+                onClick={() => { updateAcquisition('propertyAddress', addressDraft.trim()); setEditingAddress(false); }}
+                className="flex items-center justify-center w-6 h-6 rounded-full bg-primary-100 dark:bg-primary-900/40 text-primary-600 dark:text-primary-400 hover:bg-primary-200 dark:hover:bg-primary-800/60 transition-colors shrink-0"
+              >
+                <Check size={13} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingAddress(false)}
+                className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 px-1"
+              >
+                ✕
+              </button>
+            </>
+          ) : (
+            <>
+              <h1 className="text-xl font-semibold text-slate-900 dark:text-white truncate">
+                {acquisition.propertyAddress.trim() || 'New Analysis'}
+              </h1>
+              <button
+                type="button"
+                onClick={() => { setAddressDraft(acquisition.propertyAddress); setEditingAddress(true); }}
+                className="flex items-center justify-center w-6 h-6 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors shrink-0"
+                title="Edit address"
+              >
+                <Pencil size={13} />
+              </button>
+            </>
           )}
         </div>
 
@@ -809,38 +812,19 @@ export function DealAnalyzerForm({ initialDeal, onBack }: DealAnalyzerFormProps)
         {showExitWarning && (
           <div className="rounded-lg border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 p-4 space-y-3">
             <p className="text-sm text-amber-800 dark:text-amber-300">
-              {hasNewDealData && !savedDealId
-                ? "Your changes won't be saved. Save as Draft to keep this analysis."
-                : 'You have unsaved changes. Leave without saving?'}
+              {savedDealId ? 'You have unsaved changes.' : "Your changes won't be saved. Save as Draft to keep this analysis."}
             </p>
             <div className="flex gap-2">
               <button type="button" onClick={() => setShowExitWarning(false)} className="text-sm px-3 py-1.5 rounded-lg border border-amber-300 dark:border-amber-600 text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-800/30">Cancel</button>
-              {hasAddress && (
+              {savedDealId ? (
+                <button type="button" onClick={handleSaveAndExit} className="text-sm px-3 py-1.5 rounded-lg bg-primary-600 text-white hover:bg-primary-700">Save</button>
+              ) : hasAddress && (
                 <button type="button" onClick={handleSaveAndExit} className="text-sm px-3 py-1.5 rounded-lg bg-primary-600 text-white hover:bg-primary-700">Save as Draft</button>
               )}
               <button type="button" onClick={onBack} className="text-sm px-3 py-1.5 rounded-lg bg-amber-600 text-white hover:bg-amber-700">Leave without saving</button>
             </div>
           </div>
         )}
-
-        {/* Scenario chips */}
-        <div className="flex gap-2">
-          {(['base', 'bull', 'bear'] as CoCScenarioType[]).map((type) => (
-            <button
-              key={type}
-              type="button"
-              onClick={() => setActiveType(type)}
-              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-medium border transition-all ${
-                activeType === type ? CHIP_ACTIVE[type] : CHIP_INACTIVE[type]
-              }`}
-            >
-              {CHIP_LABELS[type]}
-              {scenarioResults[type] && activeType !== type && (
-                <span className="w-1.5 h-1.5 rounded-full bg-current opacity-60" />
-              )}
-            </button>
-          ))}
-        </div>
 
         {/* ── Vertical stepper ── */}
         <div>

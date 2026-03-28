@@ -21,9 +21,6 @@ interface StepPropertyProps {
 
 export function StepProperty({ data, onChange }: StepPropertyProps) {
   const totalUnits = data.unitMix.reduce((sum, e) => sum + e.count, 0);
-  const totalInPlace = data.unitMix.reduce((s, e) => s + e.count * (e.inPlaceRent || 0), 0);
-  const totalPreStab = data.unitMix.reduce((s, e) => s + e.count * (e.preStabRent || 0), 0);
-  const totalTarget = data.unitMix.reduce((s, e) => s + e.count * (e.rentMonthly || 0), 0);
 
   const addUnitEntry = () =>
     onChange('unitMix', [...data.unitMix, newUnitEntry()]);
@@ -124,50 +121,6 @@ export function StepProperty({ data, onChange }: StepPropertyProps) {
               />
             </div>
           </div>
-          <div className="mt-3">
-            <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">Rent Schedule ($/mo)</p>
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 block">
-                  In-Place Rent
-                </label>
-                <input
-                  type="number"
-                  className="input text-sm"
-                  min={0}
-                  placeholder="$1,800"
-                  value={data.sfrInPlaceRent || ''}
-                  onChange={(e) => onChange('sfrInPlaceRent', Number(e.target.value))}
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 block">
-                  Pre-Stab Rent
-                </label>
-                <input
-                  type="number"
-                  className="input text-sm"
-                  min={0}
-                  placeholder="$2,000"
-                  value={data.sfrPreStabRent || ''}
-                  onChange={(e) => onChange('sfrPreStabRent', Number(e.target.value))}
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 block">
-                  Target Rent
-                </label>
-                <input
-                  type="number"
-                  className="input text-sm"
-                  min={0}
-                  placeholder="$2,200"
-                  value={data.sfrTargetRent || ''}
-                  onChange={(e) => onChange('sfrTargetRent', Number(e.target.value))}
-                />
-              </div>
-            </div>
-          </div>
         </div>
       )}
 
@@ -238,62 +191,12 @@ export function StepProperty({ data, onChange }: StepPropertyProps) {
                     </button>
                   </div>
 
-                  {/* Row 2: rent schedule */}
-                  <div className="grid grid-cols-3 gap-2 mt-1.5">
-                    <div>
-                      <span className="text-xs font-medium text-slate-400 dark:text-slate-500 block mb-1">In-Place /mo</span>
-                      <input
-                        type="number"
-                        className="input text-sm"
-                        min={0}
-                        placeholder="0"
-                        value={(entry.inPlaceRent || 0) === 0 ? '' : entry.inPlaceRent}
-                        onChange={(e) => updateUnitEntry(entry.id, 'inPlaceRent', Number(e.target.value))}
-                      />
-                    </div>
-                    <div>
-                      <span className="text-xs font-medium text-slate-400 dark:text-slate-500 block mb-1">Pre-Stab /mo</span>
-                      <input
-                        type="number"
-                        className="input text-sm"
-                        min={0}
-                        placeholder="0"
-                        value={(entry.preStabRent || 0) === 0 ? '' : entry.preStabRent}
-                        onChange={(e) => updateUnitEntry(entry.id, 'preStabRent', Number(e.target.value))}
-                      />
-                    </div>
-                    <div>
-                      <span className="text-xs font-medium text-slate-400 dark:text-slate-500 block mb-1">Target /mo</span>
-                      <input
-                        type="number"
-                        className="input text-sm"
-                        min={0}
-                        placeholder="0"
-                        value={entry.rentMonthly === 0 ? '' : entry.rentMonthly}
-                        onChange={(e) => updateUnitEntry(entry.id, 'rentMonthly', Number(e.target.value))}
-                      />
-                    </div>
-                  </div>
                 </div>
               ))}
 
               {/* Totals row */}
-              <div className="pt-1.5 border-t border-slate-100 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-400 space-y-0.5">
-                <div className="flex flex-wrap gap-x-4 gap-y-1">
-                  <span>
-                    <span className="font-medium text-slate-700 dark:text-slate-300">In-Place:</span>{' '}
-                    ${totalInPlace.toLocaleString()}/mo
-                  </span>
-                  <span>
-                    <span className="font-medium text-slate-700 dark:text-slate-300">Pre-Stab:</span>{' '}
-                    ${totalPreStab.toLocaleString()}/mo
-                  </span>
-                  <span>
-                    <span className="font-medium text-slate-700 dark:text-slate-300">Target:</span>{' '}
-                    ${totalTarget.toLocaleString()}/mo
-                  </span>
-                  <span className="ml-auto font-semibold text-slate-700 dark:text-slate-300">{totalUnits} units total</span>
-                </div>
+              <div className="pt-1.5 border-t border-slate-100 dark:border-slate-700 text-xs">
+                <span className="font-semibold text-slate-700 dark:text-slate-300">{totalUnits} units total</span>
               </div>
             </div>
           )}

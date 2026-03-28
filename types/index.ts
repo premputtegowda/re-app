@@ -365,6 +365,7 @@ export interface SavedDeal {
   results: Partial<Record<CoCScenarioType, CoCResult>>;
   mcRanges?: Record<string, MCRangeEntry>;
   mcResults?: unknown; // SavedMCResults — typed as unknown to avoid circular import
+  currentStep?: number;
   savedAt: string;
   updatedAt: string;
 }

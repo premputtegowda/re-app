@@ -258,6 +258,62 @@ pytest -v
 - Ensure backend is running on port 8000
 - Check `.env.local` has correct `NEXT_PUBLIC_API_URL`
 
+## Deal Analyzer
+
+### Deal Rating — Results Panel
+
+The base-case verdict uses a weighted score:
+
+```
+score = IRR × 0.6 + avgCoC × 0.4
+```
+
+IRR is weighted higher (60%) because it captures the full picture — cash flow, equity build-up, and exit — while average Cash-on-Cash (40%) only reflects annual yield.
+
+| Score | Label       | Typical IRR / CoC range       |
+|-------|-------------|-------------------------------|
+| ≥ 15  | Strong Deal | IRR ~20%+, CoC ~8%+           |
+| ≥ 8   | Solid Deal  | IRR ~12%+, CoC ~6%+           |
+| ≥ 4   | Marginal    | IRR ~6%+, CoC ~3%+            |
+| < 4   | Weak Deal   | Below minimum hurdle rates    |
+
+---
+
+### Deal Rating — Monte Carlo Panel
+
+The Monte Carlo verdict is probabilistic — it answers "how often does this deal hit your targets across 10,000 simulated market scenarios?"
+
+```
+overallPct = (% runs hitting CoC target + % runs hitting IRR target) / 2
+```
+
+Default targets: **CoC ≥ 8%**, **IRR ≥ 12%** (adjustable in the panel).
+
+| overallPct | Label         |
+|------------|---------------|
+| ≥ 70%      | Strong deal   |
+| ≥ 50%      | Moderate deal |
+| < 50%      | Risky deal    |
+
+A deal must perform well on **both** CoC and IRR across simulated scenarios to be rated Strong. A deal that excels on cash flow but has a weak exit (or vice versa) is penalized.
+
+#### Monte Carlo Simulation Variables
+
+Each run samples six inputs from a triangular distribution (min / base / max):
+
+| Variable           | Default range               | Direction       |
+|--------------------|-----------------------------|-----------------|
+| Rent achievement   | −15% to +10% of base        | Higher = better |
+| Vacancy rate       | −2% to +8% of base          | Lower = better  |
+| Rent growth        | −1% to +2% of base          | Higher = better |
+| Exit cap rate      | −0.5% to +1.5% of base      | Lower = better  |
+| Renovation overrun | 0% to +30% of base cost     | Lower = better  |
+| Interest rate      | −0.5% to +2.0% of base      | Lower = better  |
+
+Ranges are asymmetric by design — real estate risk tends to surprise to the downside (higher vacancy, renovation overruns, cap rate expansion).
+
+---
+
 ## Future Plans
 
 - Offline-first with IndexedDB

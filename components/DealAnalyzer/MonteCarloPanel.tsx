@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import React from 'react';
 import { Play, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react';
 import { formatCurrency, formatPct, formatMultiple } from '@/utils/dealAnalyzerCalc';
@@ -397,7 +397,16 @@ export function MonteCarloPanel({
     [],
   );
 
-  const [ranges, setRanges] = useState<MCRanges>(savedRanges ?? defaults);
+  const initialRanges = savedRanges ?? defaults;
+  const [ranges, setRanges] = useState<MCRanges>(initialRanges);
+
+  // Sync initial ranges to parent so they're always persisted on save,
+  // even if the user never edits them.
+  useEffect(() => {
+    onRangesChange?.(initialRanges);
+    // Only on mount — intentionally omitting deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleRangesChange = useCallback((r: MCRanges) => {
     setRanges(r);

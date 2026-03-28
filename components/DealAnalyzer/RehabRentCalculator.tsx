@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { ChevronDown, ChevronRight, Zap } from 'lucide-react';
+import { Zap } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -118,6 +118,11 @@ interface RehabRentCalculatorProps {
   appliedYears: Record<number, number>;
   onApply: (overrides: Record<number, number>) => void;
   onClear: () => void;
+  /** Called with blended monthly rent per unit, indexed by unit type */
+  onApplyPreStab?: (values: number[]) => void;
+  onOpenChange?: (v: boolean) => void;
+  /** Used to growth-adjust the stabilized anchor override */
+  grossRentGrowthPct?: number;
 }
 
 export function RehabRentCalculator({
@@ -126,8 +131,11 @@ export function RehabRentCalculator({
   appliedYears,
   onApply,
   onClear,
+  onApplyPreStab,
+  onOpenChange,
+  grossRentGrowthPct = 0,
 }: RehabRentCalculatorProps) {
-  const [open, setOpen] = useState(false);
+  const setOpen = (v: boolean) => { onOpenChange?.(v); };
   const [pace, setPace] = useState(1);
   const [duration, setDuration] = useState(1);
 
@@ -148,7 +156,22 @@ export function RehabRentCalculator({
 
   const showTypesBreakdown = unitTypes.length > 1 && result !== null;
 
-  if (!hasRentData) return null;
+  // Blended monthly per unit per type — average across transition years
+  const blendedMonthlyPerType = useMemo<number[]>(() => {
+    if (!result || transitionYears.length === 0) return [];
+    return unitTypes.map((t, i) => {
+      const typeRents = result.perTypeYearlyRents[i] ?? [];
+      const total = transitionYears.reduce((sum, y) => sum + (typeRents[y - 1] ?? 0), 0);
+      return t.count > 0 ? total / transitionYears.length / t.count / 12 : 0;
+    });
+  }, [result, transitionYears, unitTypes]);
+
+  if (!hasRentData) return (
+    <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30 px-3.5 py-3 flex items-center gap-2">
+      <Zap size={14} className="text-slate-300 dark:text-slate-600 shrink-0" />
+      <span className="text-sm text-slate-400 dark:text-slate-500">Enter in-place and target rents above to use the calculator</span>
+    </div>
+  );
 
   return (
     <div className={`rounded-xl border transition-colors mb-4 ${
@@ -157,11 +180,7 @@ export function RehabRentCalculator({
         : 'border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30'
     }`}>
       {/* Header */}
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-3.5 py-3 text-left"
-      >
+      <div className="flex items-center justify-between px-3.5 py-3">
         <div className="flex items-center gap-2">
           <Zap size={14} className={isApplied ? 'text-blue-500' : 'text-slate-400'} />
           <span className={`text-sm font-medium ${isApplied ? 'text-blue-700 dark:text-blue-300' : 'text-slate-600 dark:text-slate-400'}`}>
@@ -173,11 +192,9 @@ export function RehabRentCalculator({
             </span>
           )}
         </div>
-        {open ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
-      </button>
+      </div>
 
-      {open && (
-        <div className="px-3.5 pb-4 space-y-4 border-t border-slate-200 dark:border-slate-700 pt-3">
+      <div className="px-3.5 pb-4 space-y-4 border-t border-slate-200 dark:border-slate-700 pt-3">
 
           {/* Inputs */}
           <div className="grid grid-cols-2 gap-3">
@@ -250,76 +267,86 @@ export function RehabRentCalculator({
             </p>
           )}
 
-          {/* Results table */}
-          {result && (
-            <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="bg-slate-100 dark:bg-slate-700/50">
-                    <th className="px-3 py-2 text-left font-medium text-slate-500 dark:text-slate-400">Year</th>
-                    {showTypesBreakdown && unitTypes.map((t, i) => (
-                      <th key={i} className="px-2 py-2 text-right font-medium text-slate-400 dark:text-slate-500 hidden sm:table-cell">
-                        {t.label}
-                      </th>
-                    ))}
-                    <th className="px-3 py-2 text-right font-medium text-slate-500 dark:text-slate-400">Total/yr</th>
-                    <th className="px-3 py-2 text-right font-medium text-slate-500 dark:text-slate-400">Avg/unit</th>
-                    <th className="px-3 py-2 text-right font-medium text-slate-500 dark:text-slate-400">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result.yearlyRents.map((rent, i) => {
-                    const year = i + 1;
-                    if (year > projectionYears) return null;
-                    const avgPerUnit = totalUnits > 0 ? rent / 12 / totalUnits : 0;
-                    const isTransition = transitionYears.includes(year);
-                    return (
+          {/* Results table — transition years only */}
+          {result && transitionYears.length > 0 && (() => {
+            const inPlacePerUnit = totalUnits > 0
+              ? unitTypes.reduce((s, t) => s + t.count * t.inPlaceRent, 0) / totalUnits : 0;
+            const targetPerUnit = totalUnits > 0
+              ? unitTypes.reduce((s, t) => s + t.count * t.targetRent, 0) / totalUnits : 0;
+            const blendedByYear = transitionYears.map(y =>
+              totalUnits > 0 ? result.yearlyRents[y - 1] / 12 / totalUnits : 0
+            );
+
+            return (
+              <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-slate-100 dark:bg-slate-700/50">
+                      <th className="px-3 py-2 text-left font-medium text-slate-500 dark:text-slate-400">Year</th>
+                      <th className="px-3 py-2 text-right font-medium text-slate-500 dark:text-slate-400">In-Place/mo</th>
+                      <th className="px-3 py-2 text-right font-medium text-amber-600 dark:text-amber-400">Pre-Stab/mo</th>
+                      <th className="px-3 py-2 text-right font-medium text-emerald-600 dark:text-emerald-400">Target/mo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {transitionYears.map((year, yi) => (
                       <tr key={year} className="border-t border-slate-100 dark:border-slate-700/50">
                         <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-300">Yr {year}</td>
-                        {showTypesBreakdown && result.perTypeYearlyRents.map((tr, ti) => (
-                          <td key={ti} className="px-2 py-2 text-right tabular-nums text-slate-400 dark:text-slate-500 hidden sm:table-cell">
-                            {fmt$(tr[i])}
-                          </td>
-                        ))}
-                        <td className="px-3 py-2 text-right font-semibold tabular-nums text-slate-800 dark:text-slate-200">{fmt$(rent)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums text-slate-500 dark:text-slate-400">{fmt$(avgPerUnit)}/mo</td>
-                        <td className="px-3 py-2 text-right">
-                          {isTransition
-                            ? <span className="text-amber-600 dark:text-amber-400">Blended</span>
-                            : <span className="text-emerald-600 dark:text-emerald-400">Stabilized</span>}
-                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-slate-500 dark:text-slate-400">{fmt$(inPlacePerUnit)}/mo</td>
+                        <td className="px-3 py-2 text-right tabular-nums font-semibold text-amber-600 dark:text-amber-400">{fmt$(blendedByYear[yi])}/mo</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-slate-500 dark:text-slate-400">{fmt$(targetPerUnit)}/mo</td>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
 
           {/* Actions */}
           <div className="flex items-center gap-2">
             <button
               type="button"
+              disabled={!result}
               onClick={() => {
                 if (!result) return;
                 const overrides: Record<number, number> = {};
+                // Transition years: blended actual rent from simulation
                 transitionYears.forEach(y => { overrides[y] = result.yearlyRents[y - 1]; });
+                // First stabilized year: target rent grown from acquisition (Year 0 basis)
+                // targetRent × (1+g)^stabYear ensures Year N = what market would pay at that point
+                const stabYear = Math.ceil(result.stabilizationMonth / 12);
+                const firstStabilizedYear = stabYear + 1;
+                if (firstStabilizedYear <= projectionYears && transitionYears.length > 0) {
+                  const totalTargetAnnual = unitTypes.reduce((s, t) => s + t.count * t.targetRent, 0) * 12;
+                  overrides[firstStabilizedYear] = totalTargetAnnual * Math.pow(1 + grossRentGrowthPct / 100, stabYear);
+                }
                 onApply(overrides);
+                setOpen(false);
               }}
-              disabled={!result}
-              className="flex-1 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white text-sm font-medium transition-colors"
+              className="flex-1 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-40 text-white text-sm font-medium transition-colors"
             >
               Apply to Pro Forma
             </button>
-            {isApplied && (
-              <button
-                type="button"
-                onClick={onClear}
-                className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm text-slate-500 dark:text-slate-400 hover:text-red-500 hover:border-red-300 transition-colors"
-              >
-                Clear
-              </button>
-            )}
+            <button
+              type="button"
+              disabled={!result || blendedMonthlyPerType.length === 0}
+              onClick={() => {
+                if (!result || !onApplyPreStab) return;
+                onApplyPreStab(blendedMonthlyPerType);
+                setOpen(false);
+              }}
+              className="flex-1 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white text-sm font-medium transition-colors"
+            >
+              Apply to Pre-Stab
+            </button>
+            <button
+              type="button"
+              onClick={() => { onClear(); setOpen(false); }}
+              className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors"
+            >
+              Clear
+            </button>
           </div>
 
           <p className="text-[10px] text-slate-400 dark:text-slate-500 leading-relaxed">
@@ -327,7 +354,6 @@ export function RehabRentCalculator({
             {(transitionYears[transitionYears.length - 1] ?? 1) + 1} onwards.
           </p>
         </div>
-      )}
     </div>
   );
 }

@@ -36,7 +36,7 @@ export function StepRenovation({ data, onChange }: StepRenovationProps) {
         <CostItemList
           items={data.hardCostItems}
           placeholder="e.g. Framing, Roofing, HVAC…"
-          onAdd={() => onChange('hardCostItems', [...data.hardCostItems, newItem()])}
+          onAdd={(description) => onChange('hardCostItems', [...data.hardCostItems, { ...newItem(), description }])}
           onUpdate={(id, key, value) => onChange('hardCostItems', data.hardCostItems.map(item => item.id === id ? { ...item, [key]: value } : item))}
           onRemove={(id) => onChange('hardCostItems', data.hardCostItems.filter(item => item.id !== id))}
         />
@@ -54,7 +54,7 @@ export function StepRenovation({ data, onChange }: StepRenovationProps) {
         <CostItemList
           items={data.softCostItems}
           placeholder="e.g. Architect fee, Permits, Legal…"
-          onAdd={() => onChange('softCostItems', [...data.softCostItems, newItem()])}
+          onAdd={(description) => onChange('softCostItems', [...data.softCostItems, { ...newItem(), description }])}
           onUpdate={(id, key, value) => onChange('softCostItems', data.softCostItems.map(item => item.id === id ? { ...item, [key]: value } : item))}
           onRemove={(id) => onChange('softCostItems', data.softCostItems.filter(item => item.id !== id))}
         />

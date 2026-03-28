@@ -1,21 +1,16 @@
 'use client';
 
 import { useState } from 'react';
-import { Plus, FileText, Trash2, TrendingUp, Clock, ChevronRight, RotateCcw, PenLine } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Plus, FileText, Trash2, TrendingUp, ChevronRight, PenLine } from 'lucide-react';
 import { Card } from '@/components/UI/Card';
 import { Button } from '@/components/UI/Button';
 import { PageHeader } from '@/components/UI/PageHeader';
-import { useDealAnalyzerStore, type DealAnalyzerDraft } from '@/lib/dealAnalyzerStore';
+import { useDealAnalyzerStore } from '@/lib/dealAnalyzerStore';
 import { formatCurrency, formatPct } from '@/utils/dealAnalyzerCalc';
 import type { SavedDeal, CoCScenarioType } from '@/types';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-
-const SCENARIO_LABELS: Record<CoCScenarioType, string> = {
-  base: 'Base',
-  bull: 'Bull',
-  bear: 'Bear',
-};
 
 const SCENARIO_COLORS: Record<CoCScenarioType, string> = {
   base: 'text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20',
@@ -34,76 +29,7 @@ function formatRelativeDate(iso: string): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function isDraftMeaningful(draft: DealAnalyzerDraft | null): boolean {
-  if (!draft) return false;
-  return draft.acquisition.purchasePrice > 0 || draft.acquisition.propertyAddress.trim() !== '';
-}
-
-// ── Sub-components ─────────────────────────────────────────────────────────────
-
-interface DraftCardProps {
-  onContinue: () => void;
-  onDiscard: () => void;
-}
-
-function DraftCard({ onContinue, onDiscard }: DraftCardProps) {
-  const { draft, clearDraft } = useDealAnalyzerStore();
-  const [confirmDiscard, setConfirmDiscard] = useState(false);
-
-  if (!isDraftMeaningful(draft)) return null;
-
-  const handleDiscard = () => {
-    if (confirmDiscard) {
-      clearDraft();
-      onDiscard();
-      setConfirmDiscard(false);
-    } else {
-      setConfirmDiscard(true);
-    }
-  };
-
-  const addr = draft!.acquisition.propertyAddress.trim();
-  const price = draft!.acquisition.purchasePrice;
-
-  return (
-    <div className="rounded-xl border border-amber-200 dark:border-amber-700/50 bg-amber-50 dark:bg-amber-900/10 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-800/40 flex items-center justify-center shrink-0">
-            <Clock size={16} className="text-amber-600 dark:text-amber-400" />
-          </div>
-          <div>
-            <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
-              Draft in progress
-            </p>
-            <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">
-              {addr || 'Untitled deal'}
-              {price > 0 ? ` · ${formatCurrency(price)}` : ''}
-              {` · Step ${(draft!.currentStep ?? 0) + 1} of 6`}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={handleDiscard}
-            className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition-colors ${
-              confirmDiscard
-                ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
-                : 'text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-800/30'
-            }`}
-          >
-            <RotateCcw size={12} />
-            {confirmDiscard ? 'Confirm?' : 'Discard'}
-          </button>
-          <Button variant="primary" size="sm" onClick={onContinue}>
-            Continue →
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
+// ── DealCard ──────────────────────────────────────────────────────────────────
 
 interface DealCardProps {
   deal: SavedDeal;
@@ -181,7 +107,7 @@ function DealCard({ deal, onLoad, onDelete }: DealCardProps) {
         </div>
       </div>
 
-      {/* Scenario KPIs */}
+      {/* KPIs */}
       {scenarioKeys.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-2">
           {scenarioKeys.map((type) => {
@@ -192,9 +118,7 @@ function DealCard({ deal, onLoad, onDelete }: DealCardProps) {
                 className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-lg ${SCENARIO_COLORS[type]}`}
               >
                 <TrendingUp size={10} />
-                {SCENARIO_LABELS[type]}: {formatPct(r.avgCoCReturn)} CoC · {
-                  r.irr !== null ? `${formatPct(r.irr)} IRR` : `${r.equityMultiple.toFixed(2)}x`
-                }
+                {formatPct(r.avgCoCReturn)} CoC · {r.irr !== null ? `${formatPct(r.irr)} IRR` : `${r.equityMultiple.toFixed(2)}x`}
               </span>
             );
           })}
@@ -214,19 +138,12 @@ function DealCard({ deal, onLoad, onDelete }: DealCardProps) {
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
-interface DealAnalyzerDashboardProps {
-  onNewAnalysis: () => void;
-  onContinueDraft: () => void;
-  onLoadDeal: (deal: SavedDeal) => void;
-}
+export function DealAnalyzerDashboard() {
+  const router = useRouter();
+  const { savedDeals, deleteSavedDeal } = useDealAnalyzerStore();
 
-export function DealAnalyzerDashboard({
-  onNewAnalysis,
-  onContinueDraft,
-  onLoadDeal,
-}: DealAnalyzerDashboardProps) {
-  const { draft, savedDeals, deleteSavedDeal } = useDealAnalyzerStore();
-  const hasDraft = isDraftMeaningful(draft);
+  const drafts   = savedDeals.filter(d => Object.keys(d.results).length === 0);
+  const analyses = savedDeals.filter(d => Object.keys(d.results).length > 0);
 
   return (
     <div className="min-h-screen pb-24 overflow-x-hidden">
@@ -235,54 +152,41 @@ export function DealAnalyzerDashboard({
           title="Deal Analyzer"
           subtitle="Model and save your real estate investment scenarios"
           action={
-            <Button variant="primary" onClick={onNewAnalysis}>
+            <Button variant="primary" onClick={() => router.push('/deal-analyzer/new')}>
               <Plus size={15} className="mr-1.5" />
               New Analysis
             </Button>
           }
         />
 
-        {/* Draft in progress */}
-        {hasDraft && (
-          <DraftCard
-            onContinue={onContinueDraft}
-            onDiscard={() => {}}
-          />
-        )}
-
-        {/* Saved deals */}
-        {savedDeals.length > 0 ? (() => {
-          const drafts = savedDeals.filter(d => Object.keys(d.results).length === 0);
-          const analyses = savedDeals.filter(d => Object.keys(d.results).length > 0);
-          return (
-            <div className="space-y-6">
-              {analyses.length > 0 && (
-                <div className="space-y-3">
-                  <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-                    Analyses · {analyses.length}
-                  </h2>
-                  <div className="flex flex-col gap-3">
-                    {analyses.map((deal) => (
-                      <DealCard key={deal.id} deal={deal} onLoad={() => onLoadDeal(deal)} onDelete={() => deleteSavedDeal(deal.id)} />
-                    ))}
-                  </div>
+        {savedDeals.length > 0 ? (
+          <div className="space-y-6">
+            {analyses.length > 0 && (
+              <div className="space-y-3">
+                <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                  Analyses · {analyses.length}
+                </h2>
+                <div className="flex flex-col gap-3">
+                  {analyses.map((deal) => (
+                    <DealCard key={deal.id} deal={deal} onLoad={() => router.push(`/deal-analyzer/${deal.id}`)} onDelete={() => deleteSavedDeal(deal.id)} />
+                  ))}
                 </div>
-              )}
-              {drafts.length > 0 && (
-                <div className="space-y-3">
-                  <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-                    Drafts · {drafts.length}
-                  </h2>
-                  <div className="flex flex-col gap-3">
-                    {drafts.map((deal) => (
-                      <DealCard key={deal.id} deal={deal} onLoad={() => onLoadDeal(deal)} onDelete={() => deleteSavedDeal(deal.id)} />
-                    ))}
-                  </div>
+              </div>
+            )}
+            {drafts.length > 0 && (
+              <div className="space-y-3">
+                <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                  Drafts · {drafts.length}
+                </h2>
+                <div className="flex flex-col gap-3">
+                  {drafts.map((deal) => (
+                    <DealCard key={deal.id} deal={deal} onLoad={() => router.push(`/deal-analyzer/${deal.id}`)} onDelete={() => deleteSavedDeal(deal.id)} />
+                  ))}
                 </div>
-              )}
-            </div>
-          );
-        })() : !hasDraft ? (
+              </div>
+            )}
+          </div>
+        ) : (
           <Card>
             <div className="flex flex-col items-center gap-4 py-10 text-center">
               <div className="w-14 h-14 rounded-2xl bg-primary-50 dark:bg-primary-900/20 flex items-center justify-center">
@@ -294,13 +198,13 @@ export function DealAnalyzerDashboard({
                   Start your first deal analysis to model returns and compare scenarios.
                 </p>
               </div>
-              <Button variant="primary" onClick={onNewAnalysis}>
+              <Button variant="primary" onClick={() => router.push('/deal-analyzer/new')}>
                 <Plus size={15} className="mr-1.5" />
                 Start Analysis
               </Button>
             </div>
           </Card>
-        ) : null}
+        )}
       </div>
     </div>
   );

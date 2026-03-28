@@ -175,12 +175,16 @@ export function projectScenario(scenario: CoCScenario): CoCResult {
   const yearlyProjections: CoCYearlyProjection[] = [];
   let cumulativeCashFlow = 0;
 
-  // Per-year growth rate chaining — track the computed (pre-override) values for each year
+  // Per-year chaining — track previous values and last-set growth rates
   let prevRentValue: number | undefined;
   let prevOtherValue: number | undefined;
   const prevExpenseValues: Record<string, number> = {};
+  let lastRentGrowthPct = pf ? pf.grossRent.growthPct : 0;
+  let lastOtherGrowthPct = pf ? pf.otherIncome.growthPct : 0;
+  const lastExpenseGrowthPcts: Record<string, number> = {};
+  const lastExpensePcts: Record<string, number> = {}; // for isPercentOfEGI cascading
 
-  for (let year = 1; year <= acquisition.projectionYears; year++) {
+  for (let year = 1; year <= (acquisition.projectionYears || 5); year++) {
     let grossRent: number;   // rent-only (matches ProFormaGrid "Gross Rent" row)
     let effectiveRent: number; // EGI = rent*(1-vac%) + otherIncome
     let opex: number;
@@ -192,14 +196,15 @@ export function projectScenario(scenario: CoCScenario): CoCResult {
       let yearRent: number;
       let yearOther: number;
 
+      if (override?.grossRentGrowthPct !== undefined) lastRentGrowthPct = override.grossRentGrowthPct;
+      if (override?.otherIncomeGrowthPct !== undefined) lastOtherGrowthPct = override.otherIncomeGrowthPct;
+
       if (override?.grossRent !== undefined) {
-        // Absolute override takes precedence for any year
         yearRent = override.grossRent;
       } else if (year === 1) {
         yearRent = pf.grossRent.stabilized;
       } else {
-        const rentRate = override?.grossRentGrowthPct ?? pf.grossRent.growthPct;
-        yearRent = (prevRentValue ?? pf.grossRent.stabilized) * (1 + rentRate / 100);
+        yearRent = (prevRentValue ?? pf.grossRent.stabilized) * (1 + lastRentGrowthPct / 100);
       }
 
       if (override?.otherIncome !== undefined) {
@@ -207,8 +212,7 @@ export function projectScenario(scenario: CoCScenario): CoCResult {
       } else if (year === 1) {
         yearOther = pf.otherIncome.stabilized;
       } else {
-        const otherRate = override?.otherIncomeGrowthPct ?? pf.otherIncome.growthPct;
-        yearOther = (prevOtherValue ?? pf.otherIncome.stabilized) * (1 + otherRate / 100);
+        yearOther = (prevOtherValue ?? pf.otherIncome.stabilized) * (1 + lastOtherGrowthPct / 100);
       }
 
       // grossRent stored as rent-only so Results "Gross Rent" matches ProFormaGrid row
@@ -223,16 +227,19 @@ export function projectScenario(scenario: CoCScenario): CoCResult {
 
       // ── Expenses: Year 1 = stabilized base; Year 2+ chains ──
       opex = pf.expenses.reduce((sum, e) => {
-        const expOverride    = override?.expenses?.[e.id];
-        const expGrowthRate  = override?.expenseGrowthPcts?.[e.id] ?? e.growthPct;
-        let annualVal: number;
+        const expOverride = override?.expenses?.[e.id];
+        // Cascade growth rate: update last known rate if overridden this year
+        if (override?.expenseGrowthPcts?.[e.id] !== undefined)
+          lastExpenseGrowthPcts[e.id] = override.expenseGrowthPcts[e.id];
+        const expGrowthRate = lastExpenseGrowthPcts[e.id] ?? e.growthPct;
 
+        let annualVal: number;
         if (expOverride !== undefined) {
-          // Explicit dollar (or %) override for this year
           annualVal = e.isPercentOfEGI ? effectiveRent * (expOverride / 100) : expOverride;
+          if (e.isPercentOfEGI) lastExpensePcts[e.id] = expOverride; // cascade % forward
         } else if (e.isPercentOfEGI) {
-          // % of EGI: always tracks current EGI — no compounding
-          annualVal = effectiveRent * (e.stabilizedValue / 100);
+          const pct = lastExpensePcts[e.id] ?? e.stabilizedValue;
+          annualVal = effectiveRent * (pct / 100);
         } else if (year === 1) {
           annualVal = e.stabilizedValue;
         } else {
@@ -243,8 +250,13 @@ export function projectScenario(scenario: CoCScenario): CoCResult {
         return sum + annualVal;
       }, 0);
     } else {
-      // Legacy: use operations fields
-      grossRent = baseMonthlyRent * 12 * Math.pow(1 + operations.annualRentGrowthPct / 100, year - 1);
+      // Legacy: Year 1 = target rent as-is; Year 2+ = previous year × current growth rate
+      if (year === 1) {
+        grossRent = baseMonthlyRent * 12;
+      } else {
+        grossRent = (prevRentValue ?? baseMonthlyRent * 12) * (1 + operations.annualRentGrowthPct / 100);
+      }
+      prevRentValue = grossRent;
       effectiveRent = grossRent * (1 - operations.vacancyRatePct / 100);
       opex = effectiveRent * ((operations.opexPct + operations.propertyMgmtPct) / 100);
     }
@@ -274,7 +286,8 @@ export function projectScenario(scenario: CoCScenario): CoCResult {
     let cashOutProceeds = 0;
     if (refinance.enabled && year === refinance.refiYear && !refiHappened) {
       const newLoanAmount = (refinance.refiMarketValue || acquisition.arv) * (refinance.newLTV / 100);
-      cashOutProceeds = Math.max(0, newLoanAmount - loanBalance);
+      const refiCosts = newLoanAmount * ((refinance.refiCostPct ?? 0) / 100);
+      cashOutProceeds = Math.max(0, newLoanAmount - loanBalance - refiCosts);
 
       currentLoanAmount = newLoanAmount;
       currentInterestRate = refinance.newInterestRate;

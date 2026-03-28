@@ -95,7 +95,8 @@ export function StepFinancing({ data, onChange }: StepFinancingProps) {
         <CostItemList
           items={data.additionalFeeItems ?? []}
           placeholder="e.g. Appraisal, Title Insurance…"
-          onAdd={() => onChange('additionalFeeItems', [...(data.additionalFeeItems ?? []), newItem()])}
+          addLabel="Add fee"
+          onAdd={(description) => onChange('additionalFeeItems', [...(data.additionalFeeItems ?? []), { ...newItem(), description }])}
           onUpdate={(id, field, value) =>
             onChange('additionalFeeItems', (data.additionalFeeItems ?? []).map(item =>
               item.id === id ? { ...item, [field]: value } : item

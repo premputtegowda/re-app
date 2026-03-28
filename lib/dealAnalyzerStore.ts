@@ -36,6 +36,7 @@ interface CoCStore {
   updateSavedDeal: (id: string, name: string, results: Partial<Record<CoCScenarioType, CoCResult>>, draft?: DealAnalyzerDraft, mcRanges?: SavedDeal['mcRanges'], mcResults?: SavedDeal['mcResults']) => void;
   deleteSavedDeal: (id: string) => void;
   updateMCData: (id: string, mcRanges?: SavedDeal['mcRanges'], mcResults?: SavedDeal['mcResults']) => void;
+  updateCurrentStep: (id: string, step: number) => void;
 }
 
 export const useDealAnalyzerStore = create<CoCStore>()(
@@ -137,6 +138,14 @@ export const useDealAnalyzerStore = create<CoCStore>()(
 
       deleteSavedDeal: (id) => {
         set((state) => ({ savedDeals: state.savedDeals.filter((d) => d.id !== id) }));
+      },
+
+      updateCurrentStep: (id, step) => {
+        set((state) => ({
+          savedDeals: state.savedDeals.map((d) =>
+            d.id === id ? { ...d, currentStep: step } : d
+          ),
+        }));
       },
 
       updateMCData: (id, mcRanges?, mcResults?) => {
