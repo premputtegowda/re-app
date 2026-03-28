@@ -22,7 +22,7 @@ async def test_create_entry(
             "minutes": 30,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "material",
+            "type": "material",
             "description": "Test work entry",
         },
         headers=auth_headers,
@@ -35,7 +35,7 @@ async def test_create_entry(
     assert data["total_minutes"] == 150  # 2*60 + 30
     assert data["category_id"] == str(test_category.id)
     assert data["property_id"] == str(test_property.id)
-    assert data["entry_type"] == "material"
+    assert data["type"] == "material"
 
 
 @pytest.mark.asyncio
@@ -55,7 +55,7 @@ async def test_create_entry_non_material(
             "minutes": 0,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "non-material",
+            "type": "non-material",
             "description": "Non-material work",
         },
         headers=auth_headers,
@@ -63,7 +63,7 @@ async def test_create_entry_non_material(
 
     assert response.status_code == 201
     data = response.json()
-    assert data["entry_type"] == "non-material"
+    assert data["type"] == "non-material"
 
 
 @pytest.mark.asyncio
@@ -85,7 +85,7 @@ async def test_create_entry_future_date(
             "minutes": 0,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "material",
+            "type": "material",
             "description": "Future entry",
         },
         headers=auth_headers,
@@ -112,7 +112,7 @@ async def test_list_entries(
             "minutes": 0,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "material",
+            "type": "material",
             "description": "List test entry",
         },
         headers=auth_headers,
@@ -144,7 +144,7 @@ async def test_list_entries_with_date_filter(
             "minutes": 0,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "material",
+            "type": "material",
             "description": "Today's entry",
         },
         headers=auth_headers,
@@ -176,7 +176,7 @@ async def test_get_entry(
             "minutes": 0,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "material",
+            "type": "material",
             "description": "Get test entry",
         },
         headers=auth_headers,
@@ -209,7 +209,7 @@ async def test_update_entry(
             "minutes": 0,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "material",
+            "type": "material",
             "description": "Original description",
         },
         headers=auth_headers,
@@ -224,7 +224,7 @@ async def test_update_entry(
             "minutes": 30,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "material",
+            "type": "material",
             "description": "Updated description",
         },
         headers=auth_headers,
@@ -253,7 +253,7 @@ async def test_delete_entry(
             "minutes": 0,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "material",
+            "type": "material",
             "description": "To delete",
         },
         headers=auth_headers,
@@ -290,7 +290,7 @@ async def test_bulk_create_entries(
             "minutes": 0,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "material",
+            "type": "material",
             "description": "Bulk entry 1",
         },
         {
@@ -299,7 +299,7 @@ async def test_bulk_create_entries(
             "minutes": 0,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "non-material",
+            "type": "non-material",
             "description": "Bulk entry 2",
         },
     ]

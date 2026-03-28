@@ -24,6 +24,14 @@ class ClassifyRequest(BaseModel):
     description: str
 
 
+class BulkCreateRequest(BaseModel):
+    entries: List[EntryCreate]
+
+
+class BulkCreateResponse(BaseModel):
+    created: int
+
+
 async def validate_category_and_property(
     db: AsyncSession,
     user_id: UUID,
@@ -159,13 +167,14 @@ async def create_entry(
     return result.scalar_one()
 
 
-@router.post("/bulk", response_model=List[EntryResponse], status_code=status.HTTP_201_CREATED)
+@router.post("/bulk", response_model=BulkCreateResponse, status_code=status.HTTP_201_CREATED)
 async def create_entries_bulk(
-    entries: List[EntryCreate],
+    body: BulkCreateRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Create multiple entries at once (for migration from localStorage)."""
+    entries = body.entries
     if len(entries) > 500:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -196,11 +205,7 @@ async def create_entries_bulk(
 
     await db.commit()
 
-    # Refresh all entries
-    for entry in created_entries:
-        await db.refresh(entry)
-
-    return created_entries
+    return BulkCreateResponse(created=len(created_entries))
 
 
 @router.get("/{entry_id}", response_model=EntryResponse)

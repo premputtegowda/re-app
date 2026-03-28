@@ -84,14 +84,35 @@ def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
     loop.close()
 
 
+def _sqlite_to_char(date_val: str | None, fmt: str) -> str | None:
+    """Emulate PostgreSQL to_char(date, 'YYYY-MM') for SQLite tests."""
+    if date_val is None:
+        return None
+    from datetime import datetime as _dt
+    try:
+        d = _dt.strptime(str(date_val)[:10], "%Y-%m-%d")
+    except ValueError:
+        return str(date_val)
+    pg_to_py = {"YYYY-MM": "%Y-%m", "YYYY": "%Y", "MM": "%m", "DD": "%d"}
+    return d.strftime(pg_to_py.get(fmt, "%Y-%m-%d"))
+
+
 @pytest_asyncio.fixture(scope="function")
 async def test_engine():
     """Create a test database engine."""
+    from sqlalchemy import event as _sa_event
+
     engine = create_async_engine(
         TEST_DATABASE_URL,
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+
+    # Register PostgreSQL functions not natively available in SQLite.
+    @_sa_event.listens_for(engine.sync_engine, "connect")
+    def _register_sqlite_functions(dbapi_conn, _record):
+        dbapi_conn.create_function("to_char", 2, _sqlite_to_char)
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield engine

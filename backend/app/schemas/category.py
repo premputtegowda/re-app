@@ -7,7 +7,7 @@ import re
 
 class CategoryBase(BaseModel):
     name: str = Field(..., min_length=2, max_length=50)
-    color: str = Field(..., min_length=7, max_length=7)
+    color: str = Field(default="#3B82F6", min_length=7, max_length=7)
 
     @field_validator("color")
     @classmethod

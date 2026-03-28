@@ -23,7 +23,7 @@ async def test_get_summary(
             "minutes": 30,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "material",
+            "type": "material",
             "description": "Summary test entry",
         },
         headers=auth_headers,
@@ -33,11 +33,11 @@ async def test_get_summary(
 
     assert response.status_code == 200
     data = response.json()
-    assert "total_entries" in data
+    assert "entries_count" in data
     assert "total_minutes" in data
     assert "material_minutes" in data
     assert "non_material_minutes" in data
-    assert data["total_entries"] >= 1
+    assert data["entries_count"] >= 1
     assert data["total_minutes"] >= 150  # 2h 30m = 150 min
 
 
@@ -61,7 +61,7 @@ async def test_get_summary_with_date_range(
             "minutes": 0,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "material",
+            "type": "material",
             "description": "Yesterday entry",
         },
         headers=auth_headers,
@@ -93,7 +93,7 @@ async def test_get_by_category(
             "minutes": 0,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "material",
+            "type": "material",
             "description": "Category test entry",
         },
         headers=auth_headers,
@@ -132,7 +132,7 @@ async def test_get_by_property(
             "minutes": 0,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "material",
+            "type": "material",
             "description": "Property test entry",
         },
         headers=auth_headers,
@@ -171,7 +171,7 @@ async def test_get_monthly(
             "minutes": 0,
             "category_id": str(test_category.id),
             "property_id": str(test_property.id),
-            "entry_type": "material",
+            "type": "material",
             "description": "Monthly test entry",
         },
         headers=auth_headers,
