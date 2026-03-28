@@ -197,9 +197,10 @@ describe('DealAnalyzerForm header', () => {
     // Step 3 (Operations): no required fields, click Next
     await user.click(getNextBtn()!);
 
-    // Now on step 4 — Next should be gone, Calculate should be present
-    expect(getNextBtn()).toBeNull();
-    expect(screen.getByRole('button', { name: /calculate/i })).toBeInTheDocument();
+    // Now on step 4 — "Done" button is shown (header-next-btn), no standalone Calculate yet
+    expect(getNextBtn()).toBeInTheDocument();
+    expect(getNextBtn()!.textContent).toBe('Done');
+    expect(screen.queryByTestId('calculate-btn')).not.toBeInTheDocument();
   });
 
   it('header shows property address as title once entered', async () => {
@@ -315,14 +316,14 @@ describe('DealAnalyzerForm step warnings', () => {
     expect(screen.getByTestId('step-warning-3')).toBeInTheDocument();
   });
 
-  it('step 4 summary bar shows warning after Calculate when ARV and exit cap rate are both 0', async () => {
+  it('step 4 summary bar shows warning after Done when ARV and exit cap rate are both 0', async () => {
     const user = userEvent.setup();
     renderForm();
 
     await advanceToStep4(user);
 
-    // Click Calculate — step 4 becomes completed and collapses to a summary bar
-    await user.click(screen.getByRole('button', { name: /calculate/i }));
+    // Click Done — step 4 becomes completed and collapses to a summary bar
+    await user.click(screen.getByTestId('header-next-btn'));
 
     // Warning icon appears on the step 4 summary bar
     expect(screen.getByTestId('step-warning-4')).toBeInTheDocument();

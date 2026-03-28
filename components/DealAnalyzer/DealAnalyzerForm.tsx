@@ -423,14 +423,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   // ── Calculate ──
 
   const handleCalculate = () => {
-    if (acquisition.purchasePrice <= 0) {
-      setErrors(['Purchase price must be greater than 0']);
-      setErrorStep(1);
-      return;
-    }
-    setErrors([]);
-    setErrorStep(null);
-
     const scenario: CoCScenario = {
       id: Date.now().toString(36),
       name: CHIP_LABELS[activeType],
@@ -445,14 +437,13 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
     const updatedResults = { ...scenarioResults, [activeType]: newResult };
     setScenarioResults(updatedResults);
-    setCompletedSteps(prev => new Set(Array.from(prev).concat([3, 4])));
 
     if (savedDealId) {
       const name = saveName || defaultSaveName(acquisition);
       updateSavedDeal(savedDealId, name, updatedResults, {
         acquisition, operations, proForma, refinance,
         currentStep: activeStep,
-        visitedSteps: Array.from(new Set(Array.from(completedSteps).concat(3))),
+        visitedSteps: Array.from(completedSteps),
         activeType,
       }, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined);
     }
@@ -830,6 +821,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const hasAnyResult = Object.keys(scenarioResults).length > 0;
   const hasAddress = acquisition.propertyAddress.trim().length > 0;
   const hasNewDealData = !savedDealId && (hasAddress || acquisition.purchasePrice > 0);
+  const allStepsCompleted = [0, 1, 2, 3, 4].every(id => completedSteps.has(id));
+  const hasAnyWarning = [0, 1, 2, 3, 4].some(id => getStepWarning(id) !== null);
 
   // ── Render ──
 
@@ -988,10 +981,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                                 Done
                               </Button>
                             </div>
-                          ) : step.id === 4 ? (
-                            <Button variant="primary" fullWidth onClick={handleCalculate}>
-                              Calculate →
-                            </Button>
                           ) : (
                             <Button
                               variant="primary"
@@ -999,7 +988,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                               onClick={() => handleContinue(step.id)}
                               data-testid="header-next-btn"
                             >
-                              Next
+                              {step.id === 4 ? 'Done' : 'Next'}
                             </Button>
                           )}
                         </div>
@@ -1012,20 +1001,49 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
           })}
         </div>
 
-        {/* Results */}
-        {currentResult && (
-          <div ref={resultsRef} className="animate-fade-in pt-2">
-            <ResultsPanel
-              result={currentResult}
-              acquisition={acquisition}
-              operations={operations}
-              proForma={proForma}
-              refinance={refinance}
-              mcRanges={mcRanges}
-              onMcRangesChange={setMcRanges}
-              mcResults={mcResults}
-              onMcResultsChange={setMcResults}
-            />
+        {/* Calculate / prompt / results */}
+        {allStepsCompleted && (
+          <div ref={resultsRef} className="pt-2 space-y-4">
+            {!hasAnyResult && (
+              hasAnyWarning ? (
+                <p className="text-center text-sm text-amber-600 dark:text-amber-400" data-testid="calc-missing-fields-msg">
+                  Fill in the highlighted fields to see your returns
+                </p>
+              ) : (
+                <Button
+                  variant="primary"
+                  fullWidth
+                  onClick={handleCalculate}
+                  data-testid="calculate-btn"
+                >
+                  <Calculator size={16} className="mr-2" />
+                  See Your Returns
+                </Button>
+              )
+            )}
+
+            {hasAnyResult && (
+              <>
+                {hasAnyWarning && (
+                  <p className="text-center text-sm text-amber-600 dark:text-amber-400" data-testid="calc-incomplete-warning">
+                    Some fields are missing — results may be incomplete
+                  </p>
+                )}
+                <div className="animate-fade-in">
+                  <ResultsPanel
+                    result={currentResult!}
+                    acquisition={acquisition}
+                    operations={operations}
+                    proForma={proForma}
+                    refinance={refinance}
+                    mcRanges={mcRanges}
+                    onMcRangesChange={setMcRanges}
+                    mcResults={mcResults}
+                    onMcResultsChange={setMcResults}
+                  />
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
