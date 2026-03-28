@@ -2,11 +2,15 @@
 
 import { useState, useRef, useCallback, cloneElement, useEffect } from 'react';
 import { flushSync } from 'react-dom';
-import { Plus, X, RotateCcw, ChevronLeft, ChevronRight, TrendingUp } from 'lucide-react';
+import { Plus, X, RotateCcw, ChevronLeft, ChevronRight, TrendingUp, AlertTriangle } from 'lucide-react';
 import type { ProFormaData, ProFormaItem } from '@/types';
 import { computeEGI } from '@/utils/dealAnalyzerCalc';
 import { makeChainedValue, makeChainedExpenseValue, buildCascadeDownstream, applyCascade } from '@/utils/proFormaChaining';
 import type { CascadeField } from '@/utils/proFormaChaining';
+
+// ── Expenses that must keep their type (no $ ↔ % toggle allowed) ─────────────
+
+const NON_TOGGLEABLE_EXPENSES = new Set(['Insurance', 'Property Taxes']);
 
 // ── Preset expense templates ──────────────────────────────────────────────────
 
@@ -172,11 +176,12 @@ interface ProFormaGridProps {
   data: ProFormaData;
   onChange: (data: ProFormaData) => void;
   projectionYears?: number;
+  showWarnings?: boolean;
 }
 
 const PAGE_SIZE = 3;
 
-export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGridProps) {
+export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings = false }: ProFormaGridProps) {
   const [newExpenseName, setNewExpenseName] = useState('');
   const [addingRow, setAddingRow] = useState(false);
   const [page, setPage] = useState(0);
@@ -285,6 +290,46 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGr
   }, [data, onChange]);
 
   const deleteExpense = useCallback((id: string) => { onChange({ ...data, expenses: data.expenses.filter(e => e.id !== id) }); }, [data, onChange]);
+
+  const toggleExpenseType = useCallback((id: string) => {
+    const t12Egi = getT12EGI();
+    const stabEgi = computeEGI(
+      data.grossRent.stabilized,
+      data.otherIncome.stabilized,
+      data.vacancyPct.stabilized,
+      data.creditLossPct?.stabilized ?? 0,
+    );
+    onChange({
+      ...data,
+      expenses: data.expenses.map(e => {
+        if (e.id !== id) return e;
+        const toPercent = !e.isPercentOfEGI;
+        if (toPercent) {
+          // $ → %: convert dollar values to % of EGI
+          return {
+            ...e,
+            isPercentOfEGI: true,
+            t12Value:        t12Egi  > 0 ? parseFloat(((e.t12Value        / t12Egi)  * 100).toFixed(2)) : 0,
+            stabilizedValue: stabEgi > 0 ? parseFloat(((e.stabilizedValue / stabEgi) * 100).toFixed(2)) : 0,
+            stabValue:       e.stabValue !== null && stabEgi > 0
+                               ? parseFloat(((e.stabValue / stabEgi) * 100).toFixed(2))
+                               : null,
+          };
+        } else {
+          // % → $: convert % values back to dollar amounts using EGI
+          return {
+            ...e,
+            isPercentOfEGI: false,
+            t12Value:        t12Egi  > 0 ? Math.round((e.t12Value        / 100) * t12Egi)  : 0,
+            stabilizedValue: stabEgi > 0 ? Math.round((e.stabilizedValue / 100) * stabEgi) : 0,
+            stabValue:       e.stabValue !== null && stabEgi > 0
+                               ? Math.round((e.stabValue / 100) * stabEgi)
+                               : null,
+          };
+        }
+      }),
+    });
+  }, [data, onChange]);
 
   const addExpense = useCallback((name: string) => {
     if (!name.trim()) return;
@@ -688,8 +733,26 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGr
                 return (
                   <tr key={expense.id} className="group hover:bg-slate-50/60 dark:hover:bg-slate-700/20 transition-colors">
                     <td className={`${STICKY} ${STICKY_HOVER} px-3 py-2.5 align-top`}>
-                      <LabelCell value={expense.name} onChange={name => updateExpense(expense.id, { name })} />
-                      {expense.isPercentOfEGI && <span className="text-[10px] text-slate-400">% EGI</span>}
+                      <div className="flex items-center gap-1">
+                        <LabelCell value={expense.name} onChange={name => updateExpense(expense.id, { name })} />
+                        {showWarnings && !expense.isPercentOfEGI && expense.stabilizedValue === 0 && (
+                          <AlertTriangle size={12} className="text-amber-500 shrink-0" data-testid={`expense-warning-${expense.name}`} />
+                        )}
+                        {!NON_TOGGLEABLE_EXPENSES.has(expense.name) && (
+                          <button
+                            type="button"
+                            onClick={() => toggleExpenseType(expense.id)}
+                            title={expense.isPercentOfEGI ? 'Convert to fixed $ amount' : 'Convert to % of Eff. Gross Income'}
+                            aria-label={expense.isPercentOfEGI ? 'Convert to fixed amount' : 'Convert to percent of EGI'}
+                            className="opacity-0 group-hover:opacity-100 shrink-0 text-[9px] font-semibold px-1 py-0.5 rounded transition-all text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/30"
+                          >
+                            {expense.isPercentOfEGI ? '→ $' : '→ %'}
+                          </button>
+                        )}
+                      </div>
+                      {expense.isPercentOfEGI && (
+                        <span className="text-[10px] text-slate-400">% of Eff. Gross Income</span>
+                      )}
                     </td>
                     {visibleCols.map((col, i) => {
                       const isExit = col.type === 'year' && col.year === exitYear;
@@ -755,7 +818,9 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5 }: ProFormaGr
                       );
                     })}
                     <td className="w-0 p-0 relative">
-                      <button onClick={() => deleteExpense(expense.id)} className="absolute top-2 right-1 opacity-0 group-hover:opacity-100 p-1 rounded text-red-400 bg-red-50 dark:bg-red-900/30 hover:bg-red-100 transition-all"><X size={12} /></button>
+                      {!expense.id.startsWith('preset-') && (
+                        <button aria-label="Delete expense" onClick={() => deleteExpense(expense.id)} className="absolute top-2 right-1 opacity-0 group-hover:opacity-100 p-1 rounded text-red-400 bg-red-50 dark:bg-red-900/30 hover:bg-red-100 transition-all"><X size={12} /></button>
+                      )}
                     </td>
                   </tr>
                 );

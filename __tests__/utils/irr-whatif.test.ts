@@ -37,6 +37,7 @@ function makeAcquisition(overrides: Partial<CoCAcquisition> = {}): CoCAcquisitio
     stabilizedMonth: 1,
     projectionYears: 5,
     exitCapRate: 6,
+    exitMethod: 'capRate' as const,
     exitClosingCostPct: 3,
     ...overrides,
   };

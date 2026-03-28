@@ -1,6 +1,6 @@
 'use client';
 
-import { Home, Building2, Plus, Trash2 } from 'lucide-react';
+import { Home, Building2, Plus, Trash2, AlertTriangle } from 'lucide-react';
 import { Input } from '@/components/UI/Input';
 import type { CoCAcquisition, CoCUnitMixEntry } from '@/types';
 
@@ -17,9 +17,10 @@ const newUnitEntry = (): CoCUnitMixEntry => ({
 interface StepPropertyProps {
   data: Pick<CoCAcquisition, 'propertyAddress' | 'propertyType' | 'units' | 'sfrBeds' | 'sfrBaths' | 'sfrInPlaceRent' | 'sfrPreStabRent' | 'sfrTargetRent' | 'unitMix'>;
   onChange: (field: keyof CoCAcquisition, value: unknown) => void;
+  showWarnings?: boolean;
 }
 
-export function StepProperty({ data, onChange }: StepPropertyProps) {
+export function StepProperty({ data, onChange, showWarnings = false }: StepPropertyProps) {
   const totalUnits = data.unitMix.reduce((sum, e) => sum + e.count, 0);
 
   const addUnitEntry = () =>
@@ -67,7 +68,6 @@ export function StepProperty({ data, onChange }: StepPropertyProps) {
                 type="button"
                 onClick={() => {
                   onChange('propertyType', type);
-                  if (type === 'sfr') onChange('unitMix', []);
                 }}
                 className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all ${
                   isActive
@@ -92,12 +92,15 @@ export function StepProperty({ data, onChange }: StepPropertyProps) {
           <p className="label mb-2">Unit Details</p>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 block">
+              <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 flex items-center gap-1">
                 Bedrooms
+                {showWarnings && !data.sfrBeds && (
+                  <AlertTriangle size={12} className="text-amber-500 shrink-0" />
+                )}
               </label>
               <input
                 type="number"
-                className="input text-sm"
+                className={`input text-sm ${showWarnings && !data.sfrBeds ? 'border-amber-300 focus:ring-amber-400' : ''}`}
                 min={0}
                 max={20}
                 placeholder="e.g. 3"
@@ -106,12 +109,15 @@ export function StepProperty({ data, onChange }: StepPropertyProps) {
               />
             </div>
             <div>
-              <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 block">
+              <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 flex items-center gap-1">
                 Bathrooms
+                {showWarnings && !data.sfrBaths && (
+                  <AlertTriangle size={12} className="text-amber-500 shrink-0" />
+                )}
               </label>
               <input
                 type="number"
-                className="input text-sm"
+                className={`input text-sm ${showWarnings && !data.sfrBaths ? 'border-amber-300 focus:ring-amber-400' : ''}`}
                 min={0}
                 max={20}
                 step={0.5}
@@ -128,7 +134,12 @@ export function StepProperty({ data, onChange }: StepPropertyProps) {
       {data.propertyType === 'mfr' && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Unit Mix</p>
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1">
+              Unit Mix
+              {showWarnings && data.unitMix.length === 0 && (
+                <AlertTriangle size={12} className="text-amber-500 shrink-0" />
+              )}
+            </p>
             {totalUnits > 0 && (
               <span className="text-xs text-slate-500 dark:text-slate-400">
                 {totalUnits} units

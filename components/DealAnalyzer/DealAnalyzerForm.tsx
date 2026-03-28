@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, Pencil, Calculator } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Pencil, Calculator, AlertTriangle, MapPin, CreditCard, Hammer, BarChart2, TrendingUp } from 'lucide-react';
 import { Card } from '@/components/UI/Card';
 import { Button } from '@/components/UI/Button';
 import { StepProperty } from './steps/StepProperty';
@@ -36,6 +37,14 @@ const FORM_STEPS = [
   { id: 4, label: 'Exit & Refi' },
 ] as const;
 
+const STEP_ICONS: Record<number, React.ReactNode> = {
+  0: <MapPin size={20} />,
+  1: <CreditCard size={20} />,
+  2: <Hammer size={20} />,
+  3: <BarChart2 size={20} />,
+  4: <TrendingUp size={20} />,
+};
+
 // ── Defaults ───────────────────────────────────────────────────────────────────
 
 const DEFAULT_ACQUISITION: CoCAcquisition = {
@@ -65,6 +74,7 @@ const DEFAULT_ACQUISITION: CoCAcquisition = {
   projectionYears: 5,
   exitCapRate: 0,
   exitClosingCostPct: 3,
+  exitMethod: 'value',
 };
 
 const DEFAULT_OPERATIONS: CoCOperations = {
@@ -77,7 +87,7 @@ const DEFAULT_OPERATIONS: CoCOperations = {
 
 const DEFAULT_REFINANCE: CoCRefinance = {
   enabled: false,
-  refiYear: 3,
+  refiYear: 0,
   refiMarketValue: 0,
   newLTV: 0,
   newInterestRate: 0,
@@ -96,14 +106,9 @@ const CHIP_LABELS: Record<CoCScenarioType, string> = {
 // ── Validation ─────────────────────────────────────────────────────────────────
 
 function validateStep(step: number, acquisition: CoCAcquisition): string[] {
-  if (step === 1) {
-    const errs: string[] = [];
-    if (acquisition.purchasePrice <= 0) errs.push('Purchase price must be greater than 0');
-    if (acquisition.downPaymentPct < 0 || acquisition.downPaymentPct > 100)
-      errs.push('Down payment must be between 0% and 100%');
-    if (acquisition.projectionYears < 1 || acquisition.projectionYears > 30)
-      errs.push('Projection horizon must be 1–30 years');
-    return errs;
+  if (step === 0) {
+    if (!acquisition.propertyAddress.trim()) return ['Property address is required'];
+    return [];
   }
   return [];
 }
@@ -113,7 +118,7 @@ function validateStep(step: number, acquisition: CoCAcquisition): string[] {
 function summarizeProperty(a: CoCAcquisition): string {
   const type = a.propertyType === 'mfr' ? 'MFR' : 'SFR';
   const addr = a.propertyAddress.trim() || 'No address';
-  const unitCount = a.unitMix.length > 0
+  const unitCount = a.propertyType === 'mfr' && a.unitMix.length > 0
     ? a.unitMix.reduce((s, e) => s + e.count, 0)
     : a.propertyType === 'sfr' ? 1 : 0;
   const units = unitCount > 0 ? `${unitCount} unit${unitCount !== 1 ? 's' : ''}` : '';
@@ -146,10 +151,11 @@ function summarizeOperations(pf: ProFormaData, years: number): string {
 
 function summarizeExit(a: CoCAcquisition, r: CoCRefinance): string {
   const parts: string[] = [];
-  if (a.arv > 0) parts.push(`$${(a.arv / 1000).toFixed(0)}k exit`);
-  if (a.exitCapRate > 0) parts.push(`${a.exitCapRate}% cap`);
+  const method = a.exitMethod ?? 'value';
+  if (method === 'capRate' && a.exitCapRate > 0) parts.push(`${a.exitCapRate}% cap rate`);
+  else if (a.arv > 0) parts.push(`$${(a.arv / 1000).toFixed(0)}k exit`);
   if ((a.exitClosingCostPct ?? 3) > 0) parts.push(`${a.exitClosingCostPct ?? 3}% costs`);
-  if (r.enabled) parts.push(`Yr${r.refiYear} refi`);
+  if (r.enabled) parts.push(r.refiYear > 0 ? `Yr${r.refiYear} refi` : 'refi');
   return parts.length > 0 ? parts.join(' · ') : 'No exit assumptions';
 }
 
@@ -351,6 +357,22 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     }
   }, [acquisition.unitMix, acquisition.propertyType, acquisition.sfrTargetRent, acquisition.sfrInPlaceRent, acquisition.sfrPreStabRent]);
 
+  // Auto-set exit method based on property type + unit count:
+  //   MFR > 4 units  → 'capRate'
+  //   SFR or MFR ≤ 4 → 'value'
+  // Unit count comes from unitMix (sum of entry.count), not acquisition.units
+  const totalMFRUnits = acquisition.unitMix.reduce((sum, e) => sum + e.count, 0);
+  const prevWasLargeMFR = useRef(acquisition.propertyType === 'mfr' && totalMFRUnits > 4);
+  useEffect(() => {
+    const isLargeMFR = acquisition.propertyType === 'mfr' && totalMFRUnits > 4;
+    if (isLargeMFR && !prevWasLargeMFR.current) {
+      updateAcquisition('exitMethod', 'capRate');
+    } else if (!isLargeMFR && prevWasLargeMFR.current) {
+      updateAcquisition('exitMethod', 'value');
+    }
+    prevWasLargeMFR.current = isLargeMFR;
+  }, [acquisition.propertyType, totalMFRUnits]);
+
   // Reset proForma presets when property type changes
   const prevPropertyType = useRef(acquisition.propertyType);
   useEffect(() => {
@@ -423,7 +445,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
     const updatedResults = { ...scenarioResults, [activeType]: newResult };
     setScenarioResults(updatedResults);
-    setCompletedSteps(prev => new Set(Array.from(prev).concat(3)));
+    setCompletedSteps(prev => new Set(Array.from(prev).concat([3, 4])));
 
     if (savedDealId) {
       const name = saveName || defaultSaveName(acquisition);
@@ -499,16 +521,37 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     onBack();
   };
 
+  // ── Financing missing fields (for inline warning icons) ──
+
+  const getFinancingMissingFields = (): Set<string> => {
+    const isCash = acquisition.downPaymentPct >= 100;
+    const missing = new Set<string>();
+    if (acquisition.purchasePrice <= 0) missing.add('purchasePrice');
+    if (acquisition.downPaymentPct <= 0) missing.add('downPaymentPct');
+    if (!isCash) {
+      if (acquisition.closingCostsPct <= 0) missing.add('closingCostsPct');
+      if (acquisition.interestRate <= 0) missing.add('interestRate');
+      if (acquisition.loanTermYears <= 0) missing.add('loanTermYears');
+    }
+    return missing;
+  };
+
   // ── Step content ──
 
-  const renderStepContent = (stepId: number) => {
+  const renderStepContent = (stepId: number, isVisited: boolean) => {
     switch (stepId) {
       case 0:
-        return <StepProperty data={acquisition} onChange={updateAcquisition} />;
+        return <StepProperty data={acquisition} onChange={updateAcquisition} showWarnings={isVisited} />;
       case 1:
-        return <StepFinancing data={acquisition} onChange={updateAcquisition} />;
+        return (
+          <StepFinancing
+            data={acquisition}
+            onChange={updateAcquisition}
+            missingFields={isVisited ? getFinancingMissingFields() : undefined}
+          />
+        );
       case 2:
-        return <StepRenovation data={acquisition} onChange={updateAcquisition} />;
+        return <StepRenovation data={acquisition} onChange={updateAcquisition} showWarnings={isVisited} />;
       case 3: {
         const hasMfr = acquisition.propertyType === 'mfr' && acquisition.unitMix.length > 0;
 
@@ -535,7 +578,14 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                   <tr className="bg-slate-50 dark:bg-slate-700/50">
                     <th className="px-3 py-2 text-left text-xs font-medium text-slate-500 dark:text-slate-400">Unit Type</th>
                     <th className="px-3 py-2 text-right text-xs font-medium text-slate-500 dark:text-slate-400">In-Place</th>
-                    <th className="px-3 py-2 text-right text-xs font-medium text-slate-500 dark:text-slate-400">Target</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-slate-500 dark:text-slate-400">
+                      <span className="flex items-center justify-end gap-1">
+                        Target
+                        {isVisited && acquisition.unitMix.some(e => !(e.rentMonthly || 0)) && (
+                          <AlertTriangle size={12} className="text-amber-500 shrink-0" data-testid="mfr-target-rent-warning" />
+                        )}
+                      </span>
+                    </th>
                     <th className="px-3 py-2 text-right text-xs font-medium text-slate-500 dark:text-slate-400"><PreStabHeader onOpen={() => setCalcOpen(true)} /></th>
                   </tr>
                 </thead>
@@ -545,20 +595,23 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                       <td className="px-3 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap">
                         {entry.beds}BR/{entry.baths}BA × {entry.count}
                       </td>
-                      {(['inPlaceRent', 'rentMonthly', 'preStabRent'] as const).map((field) => (
-                        <td key={field} className="px-2 py-1.5">
-                          <input
-                            type="number"
-                            className="input text-sm text-right w-full"
-                            min={0}
-                            placeholder="0"
-                            value={(entry[field] || 0) === 0 ? '' : entry[field]}
-                            onChange={(e) => updateAcquisition('unitMix', acquisition.unitMix.map((u) =>
-                              u.id === entry.id ? { ...u, [field]: Number(e.target.value) } : u
-                            ))}
-                          />
-                        </td>
-                      ))}
+                      {(['inPlaceRent', 'rentMonthly', 'preStabRent'] as const).map((field) => {
+                        const warnCell = field === 'rentMonthly' && isVisited && !(entry[field] || 0);
+                        return (
+                          <td key={field} className="px-2 py-1.5">
+                            <input
+                              type="number"
+                              className={`input text-sm text-right w-full ${warnCell ? 'border-amber-300 focus:ring-amber-400' : ''}`}
+                              min={0}
+                              placeholder="0"
+                              value={(entry[field] || 0) === 0 ? '' : entry[field]}
+                              onChange={(e) => updateAcquisition('unitMix', acquisition.unitMix.map((u) =>
+                                u.id === entry.id ? { ...u, [field]: Number(e.target.value) } : u
+                              ))}
+                            />
+                          </td>
+                        );
+                      })}
                     </tr>
                   ))}
                 </tbody>
@@ -591,7 +644,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 { field: 'sfrInPlaceRent', label: 'In-Place', isPreStab: false },
                 { field: 'sfrTargetRent',  label: 'Target',   isPreStab: false },
                 { field: 'sfrPreStabRent', label: 'Pre-Stab', isPreStab: true  },
-              ] as const).map(({ field, label, isPreStab }) => (
+              ] as const).map(({ field, label, isPreStab }) => {
+                const warnTarget = field === 'sfrTargetRent' && isVisited && !acquisition.sfrTargetRent;
+                return (
                 <div key={field}>
                   <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 flex items-center gap-1">
                     {label}
@@ -602,17 +657,19 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                         <Calculator size={11} />
                       </button>
                     )}
+                    {warnTarget && <AlertTriangle size={12} className="text-amber-500 shrink-0" data-testid="sfr-target-rent-warning" />}
                   </label>
                   <input
                     type="number"
-                    className="input text-sm"
+                    className={`input text-sm ${warnTarget ? 'border-amber-300 focus:ring-amber-400' : ''}`}
                     min={0}
                     placeholder="0"
                     value={(acquisition[field] || 0) === 0 ? '' : acquisition[field]}
                     onChange={(e) => updateAcquisition(field, Number(e.target.value))}
                   />
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         );
@@ -685,6 +742,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
               data={proForma}
               onChange={setProForma}
               projectionYears={acquisition.projectionYears}
+              showWarnings={isVisited}
             />
           </>
         );
@@ -696,6 +754,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
             refinance={refinance}
             onAcquisitionChange={updateAcquisition}
             onRefinanceChange={updateRefinance}
+            showWarnings={isVisited}
           />
         );
     }
@@ -711,6 +770,57 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       case 3: return summarizeOperations(proForma, acquisition.projectionYears);
       case 4: return summarizeExit(acquisition, refinance);
       default: return '';
+    }
+  };
+
+  // ── Step warnings (soft — non-blocking) ──
+
+  const getStepWarning = (stepId: number): string | null => {
+    switch (stepId) {
+      case 0:
+        if (acquisition.propertyType === 'sfr' && (!acquisition.sfrBeds || !acquisition.sfrBaths))
+          return 'incomplete';
+        if (acquisition.propertyType === 'mfr' && acquisition.unitMix.length === 0)
+          return 'incomplete';
+        return null;
+      case 1: {
+        const isCash = acquisition.downPaymentPct >= 100;
+        const hasMissing =
+          acquisition.purchasePrice <= 0 ||
+          acquisition.downPaymentPct <= 0 ||
+          (!isCash && (
+            acquisition.closingCostsPct <= 0 ||
+            acquisition.interestRate <= 0 ||
+            acquisition.loanTermYears <= 0
+          ));
+        return hasMissing ? 'incomplete' : null;
+      }
+      case 2: {
+        const hasIncomplete = (items: typeof acquisition.hardCostItems) =>
+          items.some(item => item.description.trim() !== '' && item.amount === 0);
+        if (hasIncomplete(acquisition.hardCostItems) || hasIncomplete(acquisition.softCostItems))
+          return 'incomplete';
+        return null;
+      }
+      case 3:
+        if (proForma.grossRent.stabilized === 0)
+          return 'incomplete';
+        return null;
+      case 4: {
+        const method = acquisition.exitMethod ?? 'value';
+        if (method === 'capRate' && acquisition.exitCapRate === 0) return 'incomplete';
+        if (method === 'value' && acquisition.arv === 0) return 'incomplete';
+        if (refinance.enabled && (
+          !refinance.refiMarketValue ||
+          !refinance.refiYear ||
+          !refinance.newLTV ||
+          !refinance.newInterestRate ||
+          !refinance.newLoanTermYears
+        )) return 'incomplete';
+        return null;
+      }
+      default:
+        return null;
     }
   };
 
@@ -746,16 +856,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
             >
               Cancel
             </Button>
-            {activeStep < 4 && editingStep === null && (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => handleContinue(activeStep)}
-                data-testid="header-next-btn"
-              >
-                Next
-              </Button>
-            )}
             <Button
               variant="primary"
               size="sm"
@@ -787,105 +887,127 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
           </div>
         )}
 
-        {/* ── Vertical stepper ── */}
-        <div>
-          {FORM_STEPS.map((step, index) => {
+        {/* ── Horizontal progress bar ── */}
+        <div className="flex items-center gap-2">
+          {FORM_STEPS.map((step) => (
+            <motion.div
+              key={step.id}
+              initial={{ scaleX: 0 }}
+              animate={{ scaleX: 1 }}
+              transition={{ delay: step.id * 0.08 }}
+              className={`h-1.5 flex-1 rounded-full transition-colors duration-300 ${
+                step.id <= activeStep ? 'bg-primary-600' : 'bg-slate-200 dark:bg-slate-700'
+              }`}
+            />
+          ))}
+        </div>
+
+        {/* ── Step cards ── */}
+        <div className="space-y-3">
+          {FORM_STEPS.map((step) => {
             const isCompleted = completedSteps.has(step.id);
             const isActive = activeStep === step.id && editingStep === null;
             const isEditing = editingStep === step.id;
             const isExpanded = isActive || isEditing;
-            const isFuture = !isCompleted && !isExpanded;
-            const isLast = index === FORM_STEPS.length - 1;
+            const isVisible = isCompleted || isExpanded;
             const showErrors = errors.length > 0 && errorStep === step.id;
 
             return (
-              <div key={step.id} className="flex gap-4">
+              <AnimatePresence key={step.id}>
+                {isVisible && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 16 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.25, ease: 'easeOut' }}
+                  >
+                    {/* Completed summary bar */}
+                    {isCompleted && !isEditing && (() => {
+                      const warning = getStepWarning(step.id);
+                      return (
+                        <button
+                          type="button"
+                          data-testid={`step-summary-${step.id}`}
+                          onClick={() => { setPausedActiveStep(activeStep); setEditingStep(step.id); }}
+                          className={`w-full flex items-center gap-3 px-4 py-3 bg-white dark:bg-slate-800 rounded-xl transition-colors text-left group border ${
+                            warning
+                              ? 'border-amber-300 dark:border-amber-700 hover:border-amber-400 dark:hover:border-amber-600 hover:bg-amber-50/30 dark:hover:bg-amber-900/10'
+                              : 'border-slate-200 dark:border-slate-700 hover:border-primary-300 dark:hover:border-primary-700 hover:bg-primary-50/30 dark:hover:bg-primary-900/10'
+                          }`}
+                        >
+                          <span className={`shrink-0 ${warning ? 'text-amber-500 dark:text-amber-400' : 'text-primary-500 dark:text-primary-400'}`}>
+                            {STEP_ICONS[step.id]}
+                          </span>
+                          <span className="text-sm font-medium text-slate-500 dark:text-slate-400 shrink-0">{step.label}</span>
+                          <span className="flex-1 text-sm text-slate-700 dark:text-slate-300 truncate">· {getStepSummary(step.id)}</span>
+                          {warning ? (
+                            <span
+                              data-testid={`step-warning-${step.id}`}
+                              className="flex items-center gap-1 shrink-0 text-xs font-medium text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-full px-2 py-0.5"
+                            >
+                              <AlertTriangle size={11} />
+                            </span>
+                          ) : (
+                            <Pencil size={13} className="text-slate-300 dark:text-slate-600 group-hover:text-primary-500 transition-colors shrink-0" />
+                          )}
+                        </button>
+                      );
+                    })()}
 
-                {/* Step indicator + connecting line */}
-                <div className="flex flex-col items-center">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 border-2 transition-colors duration-200 ${
-                    isCompleted && !isEditing
-                      ? 'bg-primary-600 border-primary-600 text-white'
-                      : isExpanded
-                      ? 'bg-primary-600 border-primary-600 text-white'
-                      : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-600 text-slate-400 dark:text-slate-500'
-                  }`}>
-                    {isCompleted && !isEditing
-                      ? <Check size={14} strokeWidth={2.5} />
-                      : <span className="text-xs font-bold">{step.id + 1}</span>
-                    }
-                  </div>
-                  {!isLast && (
-                    <div className={`w-0.5 flex-1 min-h-[16px] mt-1 transition-colors duration-200 ${
-                      isCompleted ? 'bg-primary-200 dark:bg-primary-800/60' : 'bg-slate-200 dark:bg-slate-700'
-                    }`} />
-                  )}
-                </div>
-
-                {/* Step content */}
-                <div className={`flex-1 pb-6 min-w-0 transition-opacity duration-200 ${isFuture ? 'opacity-40' : 'opacity-100'}`}>
-
-                  {/* Label */}
-                  <p className={`text-sm font-semibold mt-0.5 mb-2 transition-colors duration-200 ${
-                    isExpanded ? 'text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-300'
-                  }`}>
-                    {step.label}
-                  </p>
-
-                  {/* Completed summary bar */}
-                  {isCompleted && !isEditing && (
-                    <button
-                      type="button"
-                      onClick={() => { setPausedActiveStep(activeStep); setEditingStep(step.id); }}
-                      className="w-full flex items-center gap-3 px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl hover:border-primary-300 dark:hover:border-primary-700 hover:bg-primary-50/30 dark:hover:bg-primary-900/10 transition-colors text-left group"
-                    >
-                      <p className="flex-1 text-sm text-slate-700 dark:text-slate-300 truncate">
-                        {getStepSummary(step.id)}
-                      </p>
-                      <Pencil size={13} className="text-slate-300 dark:text-slate-600 group-hover:text-primary-500 transition-colors shrink-0" />
-                    </button>
-                  )}
-
-                  {/* Expanded form */}
-                  {isExpanded && (
-                    <Card>
-                      <div className="space-y-4">
-                        {showErrors && (
-                          <div className="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-3">
-                            <ul className="list-disc list-inside space-y-0.5">
-                              {errors.map((e, i) => (
-                                <li key={i} className="text-sm text-red-700 dark:text-red-300">{e}</li>
-                              ))}
-                            </ul>
+                    {/* Expanded card (active or editing) */}
+                    {isExpanded && (
+                      <Card>
+                        <div className="space-y-4">
+                          {/* Card header: icon + step name */}
+                          <div className="flex items-center gap-3">
+                            <span className="text-primary-600 dark:text-primary-400">
+                              {STEP_ICONS[step.id]}
+                            </span>
+                            <h3 className="text-base font-semibold text-slate-900 dark:text-white">{step.label}</h3>
                           </div>
-                        )}
 
-                        {renderStepContent(step.id)}
+                          {showErrors && (
+                            <div className="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-3">
+                              <ul className="list-disc list-inside space-y-0.5">
+                                {errors.map((e, i) => (
+                                  <li key={i} className="text-sm text-red-700 dark:text-red-300">{e}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
 
-                        {/* Action buttons — editing: Cancel+Done; step 4: Calculate; steps 0-3: Next is in header */}
-                        {(isEditing || step.id === 4) && (
-                          <div className="flex justify-between items-center pt-4 border-t border-slate-100 dark:border-slate-700">
-                            {isEditing ? (
-                              <>
-                                <Button variant="secondary" size="sm" onClick={() => { setEditingStep(null); setPausedActiveStep(null); setErrors([]); setErrorStep(null); }}>
-                                  Cancel
-                                </Button>
-                                <Button variant="primary" size="sm" onClick={() => handleContinue(step.id)}>
-                                  Done
-                                </Button>
-                              </>
-                            ) : (
-                              <Button variant="primary" className="ml-auto" onClick={handleCalculate}>
-                                Calculate →
+                          {renderStepContent(step.id, completedSteps.has(step.id))}
+
+                          {/* Action buttons */}
+                          {isEditing ? (
+                            <div className="flex gap-3 pt-2">
+                              <Button variant="secondary" fullWidth onClick={() => { setEditingStep(null); setPausedActiveStep(null); setErrors([]); setErrorStep(null); }}>
+                                Cancel
                               </Button>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </Card>
-                  )}
-                </div>
-              </div>
+                              <Button variant="primary" fullWidth onClick={() => handleContinue(step.id)}>
+                                Done
+                              </Button>
+                            </div>
+                          ) : step.id === 4 ? (
+                            <Button variant="primary" fullWidth onClick={handleCalculate}>
+                              Calculate →
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="primary"
+                              fullWidth
+                              onClick={() => handleContinue(step.id)}
+                              data-testid="header-next-btn"
+                            >
+                              Next
+                            </Button>
+                          )}
+                        </div>
+                      </Card>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             );
           })}
         </div>

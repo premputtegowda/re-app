@@ -327,9 +327,10 @@ export function projectScenario(scenario: CoCScenario): CoCResult {
   const finalProjection = yearlyProjections[yearlyProjections.length - 1];
   const totalCashFlow = yearlyProjections.reduce((sum, p) => sum + p.cashFlow, 0);
 
-  // Terminal value: use exit cap rate if provided, otherwise fall back to ARV
+  // Terminal value: driven by exitMethod (capRate = NOI-based, arv/marketValue = direct value)
+  const exitMethod = acquisition.exitMethod ?? 'value';
   const terminalPropertyValue =
-    acquisition.exitCapRate > 0
+    exitMethod === 'capRate' && acquisition.exitCapRate > 0
       ? finalProjection.noi / (acquisition.exitCapRate / 100)
       : acquisition.arv;
   const exitClosingCostPct = acquisition.exitClosingCostPct ?? 3;

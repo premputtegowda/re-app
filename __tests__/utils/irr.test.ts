@@ -240,7 +240,7 @@ describe('projectScenario — IRR', () => {
   });
 
   it('uses exit cap rate to compute terminal value when set', () => {
-    const withCap    = projectScenario(makeScenario({ exitCapRate: 6, arv: 350_000 }));
+    const withCap    = projectScenario(makeScenario({ exitCapRate: 6, exitMethod: 'capRate', arv: 350_000 }));
     const withoutCap = projectScenario(makeScenario({ exitCapRate: 0, arv: 350_000 }));
     // Terminal value via cap rate = NOI / cap rate — different from ARV
     expect(withCap.terminalPropertyValue).not.toEqual(withoutCap.terminalPropertyValue);

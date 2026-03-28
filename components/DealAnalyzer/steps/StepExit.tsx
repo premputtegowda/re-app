@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { AlertTriangle } from 'lucide-react';
 import { Input } from '@/components/UI/Input';
 import type { CoCAcquisition, CoCRefinance } from '@/types';
 
@@ -9,40 +10,82 @@ interface StepExitProps {
   refinance: CoCRefinance;
   onAcquisitionChange: (field: keyof CoCAcquisition, value: unknown) => void;
   onRefinanceChange: (field: keyof CoCRefinance, value: number | boolean) => void;
+  showWarnings?: boolean;
 }
 
-export function StepExit({ acquisition, refinance, onAcquisitionChange, onRefinanceChange }: StepExitProps) {
+export function StepExit({ acquisition, refinance, onAcquisitionChange, onRefinanceChange, showWarnings = false }: StepExitProps) {
   const [refiOpen, setRefiOpen] = useState(refinance.enabled);
   const projectionYears = acquisition.projectionYears || 5;
+  const method = acquisition.exitMethod ?? 'value';
+
+  const refiEnabled = refinance.enabled;
+  const warn = showWarnings && refiEnabled;
+  const missingMarketValue  = warn && !refinance.refiMarketValue;
+  const missingYear         = warn && !refinance.refiYear;
+  const missingLTV          = warn && !refinance.newLTV;
+  const missingInterestRate = warn && !refinance.newInterestRate;
+  const missingLoanTerm     = warn && !refinance.newLoanTermYears;
+  const hasRefiWarning = missingMarketValue || missingYear || missingLTV || missingInterestRate || missingLoanTerm;
 
   return (
     <div className="space-y-5">
       {/* Exit fields */}
       <div>
         <p className="label mb-3">Exit Assumptions</p>
-        <div className="grid grid-cols-3 gap-3">
-          <Input
-            label="Exit Value / ARV ($)"
-            type="number"
-            fullWidth
-            min={0}
-            placeholder="e.g. 650,000"
-            value={acquisition.arv || ''}
-            onChange={(e) => onAcquisitionChange('arv', Number(e.target.value))}
-            helperText="Terminal value for IRR"
-          />
-          <Input
-            label="Exit Cap Rate (%)"
-            type="number"
-            fullWidth
-            min={0}
-            max={20}
-            step={0.25}
-            placeholder="e.g. 6.0"
-            value={acquisition.exitCapRate || ''}
-            onChange={(e) => onAcquisitionChange('exitCapRate', Number(e.target.value))}
-            helperText={acquisition.exitCapRate > 0 ? 'Overrides ARV' : 'Overrides ARV if set'}
-          />
+
+        {/* Method toggle */}
+        <div className="flex gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-700/50 mb-4 w-fit">
+          {([
+            { value: 'value',   label: 'ARV / Market Value' },
+            { value: 'capRate', label: 'Cap Rate'            },
+          ] as const).map(({ value, label }) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => onAcquisitionChange('exitMethod', value)}
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                method === value
+                  ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-sm'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          {/* ARV / Market Value — direct dollar entry */}
+          {method === 'value' && (
+            <Input
+              label="Exit Value / ARV ($)"
+              type="number"
+              fullWidth
+              min={0}
+              placeholder="e.g. 650,000"
+              value={acquisition.arv || ''}
+              onChange={(e) => onAcquisitionChange('arv', Number(e.target.value))}
+              helperText="ARV or projected market value at exit"
+            />
+          )}
+
+          {/* Cap Rate — NOI-based exit */}
+          {method === 'capRate' && (
+            <Input
+              label="Exit Cap Rate (%)"
+              type="number"
+              fullWidth
+              min={0}
+              max={20}
+              step={0.25}
+              placeholder="e.g. 6.0"
+              value={acquisition.exitCapRate || ''}
+              onChange={(e) => onAcquisitionChange('exitCapRate', Number(e.target.value))}
+              helperText="Exit value = final-year NOI ÷ cap rate"
+            />
+          )}
+
+          {/* Selling costs — always visible */}
           <Input
             label="Selling Costs (%)"
             type="number"
@@ -53,7 +96,7 @@ export function StepExit({ acquisition, refinance, onAcquisitionChange, onRefina
             placeholder="e.g. 3"
             value={acquisition.exitClosingCostPct ?? 3}
             onChange={(e) => onAcquisitionChange('exitClosingCostPct', Number(e.target.value))}
-            helperText={acquisition.arv > 0
+            helperText={method === 'value' && acquisition.arv > 0
               ? `= $${Math.round(acquisition.arv * ((acquisition.exitClosingCostPct ?? 3) / 100)).toLocaleString()}`
               : 'Agent fees, transfer tax'}
           />
@@ -69,8 +112,11 @@ export function StepExit({ acquisition, refinance, onAcquisitionChange, onRefina
         >
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Cash-Out Refinance</span>
-            {refinance.enabled && (
+            {refiEnabled && !hasRefiWarning && (
               <span className="text-[10px] font-medium bg-primary-100 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 px-1.5 py-0.5 rounded-full">active</span>
+            )}
+            {hasRefiWarning && (
+              <AlertTriangle size={13} className="text-amber-500" data-testid="refi-section-warning" />
             )}
           </div>
           <span className="text-xs text-slate-400">{refiOpen ? '▲' : '▼'}</span>
@@ -82,13 +128,13 @@ export function StepExit({ acquisition, refinance, onAcquisitionChange, onRefina
               <input
                 type="checkbox"
                 className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
-                checked={refinance.enabled}
+                checked={refiEnabled}
                 onChange={(e) => onRefinanceChange('enabled', e.target.checked)}
               />
               <span className="text-sm text-slate-700 dark:text-slate-300">Model a cash-out refinance</span>
             </label>
 
-            {refinance.enabled && (
+            {refiEnabled && (
               <div className="space-y-4 pl-7">
                 <Input
                   label="Market Value at Refi ($)"
@@ -99,10 +145,14 @@ export function StepExit({ acquisition, refinance, onAcquisitionChange, onRefina
                   value={refinance.refiMarketValue || ''}
                   onChange={(e) => onRefinanceChange('refiMarketValue', Number(e.target.value))}
                   helperText="Property value at time of refinancing"
+                  warning={missingMarketValue}
                 />
 
                 <div>
-                  <p className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-2">Refinance Year</p>
+                  <p className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-2 flex items-center gap-1">
+                    Refinance Year
+                    {missingYear && <AlertTriangle size={12} className="text-amber-500 shrink-0" data-testid="refi-year-warning" />}
+                  </p>
                   <div className="flex flex-wrap gap-2">
                     {Array.from({ length: projectionYears }, (_, i) => i + 1).map(yr => (
                       <button
@@ -112,7 +162,9 @@ export function StepExit({ acquisition, refinance, onAcquisitionChange, onRefina
                         className={`px-3 py-1 rounded-full text-sm font-medium border transition-all ${
                           refinance.refiYear === yr
                             ? 'bg-primary-600 border-primary-600 text-white'
-                            : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-primary-400'
+                            : missingYear
+                              ? 'bg-white dark:bg-slate-800 border-amber-300 dark:border-amber-600 text-slate-600 dark:text-slate-400 hover:border-primary-400'
+                              : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-primary-400'
                         }`}
                       >
                         Yr {yr}
@@ -134,6 +186,7 @@ export function StepExit({ acquisition, refinance, onAcquisitionChange, onRefina
                     helperText={refinance.refiMarketValue > 0
                       ? `= $${Math.round(refinance.refiMarketValue * (refinance.newLTV / 100)).toLocaleString()} loan`
                       : undefined}
+                    warning={missingLTV}
                   />
                   <Input
                     label="New Interest Rate (%)"
@@ -145,6 +198,7 @@ export function StepExit({ acquisition, refinance, onAcquisitionChange, onRefina
                     placeholder="e.g. 6.5"
                     value={refinance.newInterestRate || ''}
                     onChange={(e) => onRefinanceChange('newInterestRate', Number(e.target.value))}
+                    warning={missingInterestRate}
                   />
                 </div>
 
@@ -158,6 +212,7 @@ export function StepExit({ acquisition, refinance, onAcquisitionChange, onRefina
                     placeholder="e.g. 30"
                     value={refinance.newLoanTermYears || ''}
                     onChange={(e) => onRefinanceChange('newLoanTermYears', Number(e.target.value))}
+                    warning={missingLoanTerm}
                   />
                   <Input
                     label="Refi Closing Costs (%)"

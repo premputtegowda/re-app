@@ -11,6 +11,7 @@ type RenovationFields = Pick<
 interface StepRenovationProps {
   data: RenovationFields;
   onChange: (field: keyof CoCAcquisition, value: unknown) => void;
+  showWarnings?: boolean;
 }
 
 const newItem = (): CoCCostItem => ({
@@ -19,7 +20,7 @@ const newItem = (): CoCCostItem => ({
   amount: 0,
 });
 
-export function StepRenovation({ data, onChange }: StepRenovationProps) {
+export function StepRenovation({ data, onChange, showWarnings = false }: StepRenovationProps) {
   return (
     <div className="space-y-6">
       <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -36,6 +37,7 @@ export function StepRenovation({ data, onChange }: StepRenovationProps) {
         <CostItemList
           items={data.hardCostItems}
           placeholder="e.g. Framing, Roofing, HVAC…"
+          showWarnings={showWarnings}
           onAdd={(description) => onChange('hardCostItems', [...data.hardCostItems, { ...newItem(), description }])}
           onUpdate={(id, key, value) => onChange('hardCostItems', data.hardCostItems.map(item => item.id === id ? { ...item, [key]: value } : item))}
           onRemove={(id) => onChange('hardCostItems', data.hardCostItems.filter(item => item.id !== id))}
@@ -54,6 +56,7 @@ export function StepRenovation({ data, onChange }: StepRenovationProps) {
         <CostItemList
           items={data.softCostItems}
           placeholder="e.g. Architect fee, Permits, Legal…"
+          showWarnings={showWarnings}
           onAdd={(description) => onChange('softCostItems', [...data.softCostItems, { ...newItem(), description }])}
           onUpdate={(id, key, value) => onChange('softCostItems', data.softCostItems.map(item => item.id === id ? { ...item, [key]: value } : item))}
           onRemove={(id) => onChange('softCostItems', data.softCostItems.filter(item => item.id !== id))}

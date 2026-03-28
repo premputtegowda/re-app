@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2, AlertTriangle } from 'lucide-react';
 import { formatCurrency } from '@/utils/dealAnalyzerCalc';
 import type { CoCCostItem } from '@/types';
 
@@ -43,9 +43,10 @@ function EditableText({ value, placeholder, onChange }: {
   );
 }
 
-function EditableAmount({ value, onChange }: {
+function EditableAmount({ value, onChange, showWarning = false }: {
   value: number;
   onChange: (v: number) => void;
+  showWarning?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value === 0 ? '' : String(value));
@@ -72,9 +73,10 @@ function EditableAmount({ value, onChange }: {
     <button
       type="button"
       onClick={() => { setDraft(value === 0 ? '' : String(value)); setEditing(true); }}
-      className="text-sm text-slate-700 dark:text-slate-300 text-right w-full hover:text-primary-600 dark:hover:text-primary-400 cursor-text"
+      className="text-sm text-slate-700 dark:text-slate-300 text-right w-full hover:text-primary-600 dark:hover:text-primary-400 cursor-text flex items-center justify-end gap-1"
     >
-      {value > 0 ? formatCurrency(value) : <span className="text-slate-400">$0</span>}
+      {showWarning && <AlertTriangle size={12} className="text-amber-500 shrink-0" />}
+      {value > 0 ? formatCurrency(value) : <span className={showWarning ? 'text-amber-500' : 'text-slate-400'}>$0</span>}
     </button>
   );
 }
@@ -85,12 +87,13 @@ interface CostItemListProps {
   items: CoCCostItem[];
   placeholder: string;
   addLabel?: string;
+  showWarnings?: boolean;
   onAdd: (description: string) => void;
   onUpdate: (id: string, field: 'description' | 'amount', value: string | number) => void;
   onRemove: (id: string) => void;
 }
 
-export function CostItemList({ items, placeholder, addLabel = 'Add item', onAdd, onUpdate, onRemove }: CostItemListProps) {
+export function CostItemList({ items, placeholder, addLabel = 'Add item', showWarnings = false, onAdd, onUpdate, onRemove }: CostItemListProps) {
   const [addingRow, setAddingRow] = useState(false);
   const [newName, setNewName] = useState('');
 
@@ -130,6 +133,7 @@ export function CostItemList({ items, placeholder, addLabel = 'Add item', onAdd,
               <EditableAmount
                 value={item.amount}
                 onChange={(v) => onUpdate(item.id, 'amount', v)}
+                showWarning={showWarnings && item.description.trim() !== '' && item.amount === 0}
               />
               <button
                 type="button"

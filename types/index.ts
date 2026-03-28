@@ -256,8 +256,9 @@ export interface CoCAcquisition {
   ioPeriodMonths: number;
   stabilizedMonth: number;
   projectionYears: number;
-  exitCapRate: number;  // % — used for IRR terminal value; 0 = fall back to ARV
+  exitCapRate: number;  // % — used when exitMethod = 'capRate'
   exitClosingCostPct: number;  // % of sale price; default 3
+  exitMethod?: 'value' | 'capRate';  // 'value' = ARV or Market Value direct entry
 }
 
 export interface CoCOperations {
