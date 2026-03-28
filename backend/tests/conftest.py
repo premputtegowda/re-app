@@ -205,7 +205,7 @@ async def test_property(test_db: AsyncSession, test_user: User) -> Property:
 @pytest.fixture
 def mock_google_verify():
     """Mock Google OAuth token verification."""
-    with patch("app.services.oauth.verify_google_token") as mock:
+    with patch("app.routers.auth.verify_google_token") as mock:
         mock.return_value = {
             "email": "newuser@example.com",
             "name": "New User",

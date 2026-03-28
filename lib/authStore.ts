@@ -1,22 +1,17 @@
 'use client';
 
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-import { api, getTokens, clearTokens, refreshAccessToken } from './api';
+import { api, refreshAccessToken, clearAccessToken } from './api';
 
-// Background token refresh — runs every 4 minutes, refreshes if expiring within 60s
+// Background token refresh — runs every 4 minutes, silently refreshes via cookie
+// if the in-memory access token is expiring within 60 seconds.
 let _refreshTimer: ReturnType<typeof setInterval> | null = null;
 
 export function startTokenRefreshTimer() {
   if (_refreshTimer) return;
   _refreshTimer = setInterval(async () => {
-    const { refreshToken, accessTokenExpiresAt } = getTokens();
-    if (!refreshToken || !accessTokenExpiresAt) return;
-    const expiresInMs = accessTokenExpiresAt - Date.now();
-    if (expiresInMs < 60_000) {
-      await refreshAccessToken();
-    }
-  }, 4 * 60 * 1000); // check every 4 minutes
+    await refreshAccessToken();
+  }, 4 * 60 * 1000);
 }
 
 export function stopTokenRefreshTimer() {
@@ -51,90 +46,73 @@ interface AuthStore {
   setError: (error: string | null) => void;
 }
 
-export const useAuthStore = create<AuthStore>()(
-  persist(
-    (set, get) => ({
-      user: null,
-      isAuthenticated: false,
-      isLoading: true,
-      error: null,
+export const useAuthStore = create<AuthStore>()((set) => ({
+  user: null,
+  isAuthenticated: false,
+  isLoading: true,
+  error: null,
 
-      login: async (credential: string) => {
-        set({ isLoading: true, error: null });
-        try {
-          const response = await api.googleLogin(credential);
-          set({
-            user: response.user,
-            isAuthenticated: true,
-            isLoading: false,
-          });
-          startTokenRefreshTimer();
-        } catch (error) {
-          set({
-            error: error instanceof Error ? error.message : 'Login failed',
-            isLoading: false,
-          });
-          throw error;
-        }
-      },
-
-      logout: async () => {
-        stopTokenRefreshTimer();
-        set({ isLoading: true });
-        try {
-          await api.logout();
-        } finally {
-          set({
-            user: null,
-            isAuthenticated: false,
-            isLoading: false,
-            error: null,
-          });
-        }
-      },
-
-      checkAuth: async () => {
-        const { accessToken } = getTokens();
-        if (!accessToken) {
-          set({ isAuthenticated: false, isLoading: false, user: null });
-          return;
-        }
-
-        set({ isLoading: true });
-        try {
-          const user = await api.getCurrentUser();
-          if (user) {
-            set({ user, isAuthenticated: true, isLoading: false });
-            startTokenRefreshTimer();
-          } else {
-            // getCurrentUser returned null — explicit 401, tokens already cleared
-            set({ user: null, isAuthenticated: false, isLoading: false });
-          }
-        } catch (err) {
-          // Network error or server error — keep the user logged in, don't clear tokens
-          // They may just be offline or the backend is temporarily down
-          const isAuthError = err instanceof Error && err.message.includes('401');
-          if (isAuthError) {
-            clearTokens();
-            set({ user: null, isAuthenticated: false, isLoading: false });
-          } else {
-            // Preserve existing auth state — don't log the user out
-            set({ isLoading: false });
-            startTokenRefreshTimer();
-          }
-        }
-      },
-
-      setUser: (user) => set({ user, isAuthenticated: !!user }),
-      setLoading: (isLoading) => set({ isLoading }),
-      setError: (error) => set({ error }),
-    }),
-    {
-      name: 'reps-auth',
-      partialize: (state) => ({
-        user: state.user,
-        isAuthenticated: state.isAuthenticated,
-      }),
+  login: async (credential: string) => {
+    set({ isLoading: true, error: null });
+    try {
+      const response = await api.googleLogin(credential);
+      set({
+        user: response.user,
+        isAuthenticated: true,
+        isLoading: false,
+      });
+      startTokenRefreshTimer();
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : 'Login failed',
+        isLoading: false,
+      });
+      throw error;
     }
-  )
-);
+  },
+
+  logout: async () => {
+    stopTokenRefreshTimer();
+    set({ isLoading: true });
+    try {
+      await api.logout();
+    } finally {
+      set({
+        user: null,
+        isAuthenticated: false,
+        isLoading: false,
+        error: null,
+      });
+    }
+  },
+
+  checkAuth: async () => {
+    set({ isLoading: true });
+    try {
+      // Try to get the current user. authFetch will silently attempt a cookie-based
+      // token refresh if the in-memory access token is missing or expiring.
+      const user = await api.getCurrentUser();
+      if (user) {
+        set({ user, isAuthenticated: true, isLoading: false });
+        startTokenRefreshTimer();
+      } else {
+        // Refresh cookie invalid or expired — user must log in again
+        set({ user: null, isAuthenticated: false, isLoading: false });
+      }
+    } catch (err) {
+      const isAuthError = err instanceof Error && err.message.includes('401');
+      if (isAuthError) {
+        clearAccessToken();
+        set({ user: null, isAuthenticated: false, isLoading: false });
+      } else {
+        // Network error — preserve existing state (user may be offline)
+        set({ isLoading: false });
+        startTokenRefreshTimer();
+      }
+    }
+  },
+
+  setUser: (user) => set({ user, isAuthenticated: !!user }),
+  setLoading: (isLoading) => set({ isLoading }),
+  setError: (error) => set({ error }),
+}));

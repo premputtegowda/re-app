@@ -2,50 +2,24 @@
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
-// Token management
+// Access token lives in memory only — never written to localStorage.
+// The refresh token is an HttpOnly cookie managed entirely by the browser.
 let accessToken: string | null = null;
-let refreshToken: string | null = null;
-
-// Access token expiry stored as Unix ms timestamp
 let accessTokenExpiresAt: number | null = null;
 
-export const setTokens = (access: string, refresh: string, expiresInSeconds = 900) => {
-  accessToken = access;
-  refreshToken = refresh;
+export const setAccessToken = (token: string, expiresInSeconds = 900) => {
+  accessToken = token;
   accessTokenExpiresAt = Date.now() + expiresInSeconds * 1000;
-  if (typeof window !== 'undefined') {
-    localStorage.setItem('access_token', access);
-    localStorage.setItem('refresh_token', refresh);
-    localStorage.setItem('access_token_expires_at', String(accessTokenExpiresAt));
-  }
 };
 
-export const getTokens = () => {
-  if (typeof window !== 'undefined' && !accessToken) {
-    accessToken = localStorage.getItem('access_token');
-    refreshToken = localStorage.getItem('refresh_token');
-    const exp = localStorage.getItem('access_token_expires_at');
-    accessTokenExpiresAt = exp ? Number(exp) : null;
-  }
-  return { accessToken, refreshToken, accessTokenExpiresAt };
-};
-
-export const clearTokens = () => {
+export const clearAccessToken = () => {
   accessToken = null;
-  refreshToken = null;
   accessTokenExpiresAt = null;
-  if (typeof window !== 'undefined') {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
-    localStorage.removeItem('access_token_expires_at');
-  }
 };
 
 const isAccessTokenExpiringSoon = (): boolean => {
-  const { accessTokenExpiresAt: exp } = getTokens();
-  if (!exp) return false;
-  // Refresh if less than 60 seconds remaining
-  return Date.now() > exp - 60_000;
+  if (!accessTokenExpiresAt) return false;
+  return Date.now() > accessTokenExpiresAt - 60_000;
 };
 
 // API error class
@@ -56,68 +30,64 @@ export class ApiError extends Error {
   }
 }
 
-// Refresh access token
+// Refresh access token using the HttpOnly cookie (no body needed).
+// Returns true and updates the in-memory token on success.
 export const refreshAccessToken = async (): Promise<boolean> => {
-  const { refreshToken: currentRefresh } = getTokens();
-  if (!currentRefresh) return false;
-
   try {
     const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: currentRefresh }),
+      credentials: 'include', // sends the HttpOnly refresh_token cookie
     });
 
     if (!response.ok) {
-      // Only clear tokens on explicit auth rejection, not server errors
-      if (response.status === 401) clearTokens();
+      if (response.status === 401) clearAccessToken();
       return false;
     }
 
     const data = await response.json();
-    setTokens(data.access_token, data.refresh_token, data.expires_in ?? 900);
+    setAccessToken(data.access_token, data.expires_in ?? 900);
     return true;
   } catch {
-    // Network error — keep tokens, don't log the user out
+    // Network error — keep current state, don't log user out
     return false;
   }
 };
 
-// Base fetch with auth
+// Base fetch with auth — all requests include credentials so the browser
+// automatically sends the HttpOnly cookie on auth endpoints.
 const authFetch = async (
   endpoint: string,
   options: RequestInit = {}
 ): Promise<Response> => {
-  // Proactively refresh if the access token is about to expire or missing
-  if (!getTokens().accessToken || isAccessTokenExpiringSoon()) {
+  // Proactively refresh if the access token is missing or about to expire
+  if (!accessToken || isAccessTokenExpiringSoon()) {
     await refreshAccessToken();
   }
 
-  let { accessToken: token } = getTokens();
-
-  const headers: HeadersInit = {
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...(options.headers || {}),
+    ...(options.headers as Record<string, string> || {}),
   };
 
-  if (token) {
-    (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
+  if (accessToken) {
+    headers['Authorization'] = `Bearer ${accessToken}`;
   }
 
   let response = await fetch(`${API_BASE_URL}${endpoint}`, {
     ...options,
     headers,
+    credentials: 'include',
   });
 
-  // If unauthorized, try to refresh token and retry once
+  // On 401, attempt one silent refresh and retry
   if (response.status === 401) {
     const refreshed = await refreshAccessToken();
     if (refreshed) {
-      ({ accessToken: token } = getTokens());
-      (headers as Record<string, string>)['Authorization'] = `Bearer ${token}`;
+      headers['Authorization'] = `Bearer ${accessToken}`;
       response = await fetch(`${API_BASE_URL}${endpoint}`, {
         ...options,
         headers,
+        credentials: 'include',
       });
     }
   }
@@ -133,6 +103,7 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ credential }),
+      credentials: 'include', // receives the HttpOnly refresh_token cookie
     });
 
     if (!response.ok) {
@@ -141,30 +112,27 @@ export const api = {
     }
 
     const data = await response.json();
-    setTokens(data.access_token, data.refresh_token, data.expires_in ?? 900);
+    setAccessToken(data.access_token, data.expires_in ?? 900);
     return data;
   },
 
   async logout() {
-    const { refreshToken: token } = getTokens();
-    if (token) {
-      try {
-        await authFetch('/api/auth/logout', {
-          method: 'POST',
-          body: JSON.stringify({ refresh_token: token }),
-        });
-      } catch {
-        // Ignore logout errors
-      }
+    try {
+      await fetch(`${API_BASE_URL}/api/auth/logout`, {
+        method: 'POST',
+        credentials: 'include', // sends cookie so backend can invalidate it
+      });
+    } catch {
+      // Ignore logout errors — clear local state regardless
     }
-    clearTokens();
+    clearAccessToken();
   },
 
   async getCurrentUser() {
     const response = await authFetch('/api/auth/me');
     if (!response.ok) {
       if (response.status === 401) {
-        clearTokens();
+        clearAccessToken();
         return null;
       }
       throw new ApiError(response.status, 'Failed to get user');
@@ -415,7 +383,6 @@ export const api = {
     }
     return response.json();
   },
-
 
   async bulkCreateEntries(
     entries: Array<{

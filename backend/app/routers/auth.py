@@ -10,7 +10,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import User, RefreshToken, Category, Property, Invitation, AccessRequest
-from app.schemas import TokenResponse, GoogleAuthRequest, RefreshRequest, UserResponse
+from app.schemas import TokenResponse, GoogleAuthRequest, UserResponse
 from app.services.oauth import verify_google_token, get_google_auth_url, exchange_code_for_tokens, GoogleOAuthError
 from app.utils.security import (
     create_access_token,
@@ -22,6 +22,8 @@ from app.utils.security import (
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 settings = get_settings()
 
+REFRESH_COOKIE_NAME = "refresh_token"
+
 # Default categories for new users
 DEFAULT_CATEGORIES = [
     {"name": "Property Management", "color": "#3B82F6"},
@@ -30,6 +32,25 @@ DEFAULT_CATEGORIES = [
     {"name": "Financial Records", "color": "#8B5CF6"},
     {"name": "Property Inspections", "color": "#EC4899"},
 ]
+
+
+def _set_refresh_cookie(response: Response, token: str, expires_at: datetime) -> None:
+    """Set the refresh token as an HttpOnly cookie."""
+    secure = settings.frontend_url.startswith("https")
+    response.set_cookie(
+        key=REFRESH_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        expires=int(expires_at.timestamp()),
+        path="/api/auth",  # Only sent to auth endpoints — limits exposure
+    )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    """Remove the refresh token cookie."""
+    response.delete_cookie(key=REFRESH_COOKIE_NAME, path="/api/auth")
 
 
 async def create_default_data(db: AsyncSession, user: User) -> None:
@@ -131,23 +152,25 @@ async def get_or_create_user(db: AsyncSession, user_info: dict) -> tuple[User, b
     return user, True
 
 
-async def create_tokens(db: AsyncSession, user: User) -> TokenResponse:
-    """Create access and refresh tokens for a user."""
+async def create_tokens(db: AsyncSession, user: User, response: Response) -> TokenResponse:
+    """Create access token + set refresh token as HttpOnly cookie."""
     access_token = create_access_token(user.id)
     refresh_token = create_refresh_token()
+    expires_at = get_refresh_token_expires_at()
 
     # Store refresh token hash in database
     refresh_token_record = RefreshToken(
         user_id=user.id,
         token_hash=hash_token(refresh_token),
-        expires_at=get_refresh_token_expires_at(),
+        expires_at=expires_at,
     )
     db.add(refresh_token_record)
     await db.commit()
 
+    _set_refresh_cookie(response, refresh_token, expires_at)
+
     return TokenResponse(
         access_token=access_token,
-        refresh_token=refresh_token,
         expires_in=settings.access_token_expire_minutes * 60,
         user=UserResponse.model_validate(user),
     )
@@ -158,7 +181,6 @@ async def google_authorize():
     """Redirect to Google OAuth authorization page."""
     state = secrets.token_urlsafe(32)
     auth_url = await get_google_auth_url(state)
-    # In production, store state in session/cookie for CSRF validation
     return RedirectResponse(url=auth_url)
 
 
@@ -166,37 +188,30 @@ async def google_authorize():
 async def google_callback(
     code: str,
     state: str,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ):
     """Handle Google OAuth callback (redirect flow)."""
     try:
-        # Exchange code for tokens
         tokens = await exchange_code_for_tokens(code)
         id_token = tokens.get("id_token")
 
         if not id_token:
             raise GoogleOAuthError("No ID token in response")
 
-        # Verify and extract user info
         user_info = await verify_google_token(id_token)
-
-        # Get or create user
         user, is_new = await get_or_create_user(db, user_info)
 
-        # Create default data for new users
         if is_new:
             await create_default_data(db, user)
 
         await apply_pending_invite(db, user)
 
-        # Create tokens
-        token_response = await create_tokens(db, user)
+        token_response = await create_tokens(db, user, response)
 
-        # Redirect to frontend with tokens
         redirect_url = (
             f"{settings.frontend_url}/auth/callback"
             f"?access_token={token_response.access_token}"
-            f"&refresh_token={token_response.refresh_token}"
         )
         return RedirectResponse(url=redirect_url)
 
@@ -208,11 +223,12 @@ async def google_callback(
 @router.post("/google/token", response_model=TokenResponse)
 async def google_token(
     request: GoogleAuthRequest,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Exchange Google credential (ID token) for access/refresh tokens.
-    Used for popup flow where frontend gets the credential directly.
+    Exchange Google credential (ID token) for access token.
+    Refresh token is set as an HttpOnly cookie — never exposed to JavaScript.
     """
     try:
         user_info = await verify_google_token(request.credential)
@@ -223,7 +239,7 @@ async def google_token(
 
         await apply_pending_invite(db, user)
 
-        return await create_tokens(db, user)
+        return await create_tokens(db, user, response)
 
     except GoogleOAuthError as e:
         raise HTTPException(
@@ -234,13 +250,23 @@ async def google_token(
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_tokens(
-    request: RefreshRequest,
+    request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ):
-    """Exchange a valid refresh token for new access/refresh tokens."""
-    token_hash = hash_token(request.refresh_token)
+    """
+    Exchange a valid refresh token (from HttpOnly cookie) for a new access token.
+    Issues a new refresh token cookie (single-use rotation).
+    """
+    token = request.cookies.get(REFRESH_COOKIE_NAME)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No refresh token",
+        )
 
-    # Find the refresh token
+    token_hash = hash_token(token)
+
     result = await db.execute(
         select(RefreshToken).where(RefreshToken.token_hash == token_hash)
     )
@@ -252,7 +278,6 @@ async def refresh_tokens(
             detail="Invalid refresh token",
         )
 
-    # Check if expired
     if refresh_token_record.expires_at < datetime.utcnow():
         await db.delete(refresh_token_record)
         await db.commit()
@@ -261,7 +286,6 @@ async def refresh_tokens(
             detail="Refresh token expired",
         )
 
-    # Get the user
     result = await db.execute(
         select(User).where(User.id == refresh_token_record.user_id)
     )
@@ -273,27 +297,29 @@ async def refresh_tokens(
             detail="User not found",
         )
 
-    # Delete the old refresh token (single use)
+    # Delete old token (single-use rotation)
     await db.delete(refresh_token_record)
     await db.commit()
 
-    # Create new tokens
-    return await create_tokens(db, user)
+    return await create_tokens(db, user, response)
 
 
 @router.post("/logout")
 async def logout(
-    request: RefreshRequest,
+    request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ):
-    """Invalidate the refresh token."""
-    token_hash = hash_token(request.refresh_token)
+    """Invalidate the refresh token and clear the cookie."""
+    token = request.cookies.get(REFRESH_COOKIE_NAME)
+    if token:
+        token_hash = hash_token(token)
+        await db.execute(
+            delete(RefreshToken).where(RefreshToken.token_hash == token_hash)
+        )
+        await db.commit()
 
-    await db.execute(
-        delete(RefreshToken).where(RefreshToken.token_hash == token_hash)
-    )
-    await db.commit()
-
+    _clear_refresh_cookie(response)
     return {"message": "Logged out successfully"}
 
 

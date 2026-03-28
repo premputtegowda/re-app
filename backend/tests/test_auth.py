@@ -1,4 +1,5 @@
 import pytest
+from unittest.mock import patch, MagicMock
 from httpx import AsyncClient
 
 from app.models import User
@@ -8,26 +9,34 @@ from app.models import User
 async def test_google_login_new_user(
     async_client: AsyncClient, mock_google_verify
 ):
-    """Test Google login creates a new user."""
-    response = await async_client.post(
-        "/api/auth/google/token",
-        json={"credential": "fake_google_token"},
+    """Test Google login creates a new user and sets HttpOnly refresh cookie."""
+    mock_settings = MagicMock(
+        invite_only=False,
+        access_token_expire_minutes=15,
+        frontend_url="http://localhost:3000",
     )
+    with patch("app.routers.auth.settings", mock_settings):
+        response = await async_client.post(
+            "/api/auth/google/token",
+            json={"credential": "fake_google_token"},
+        )
 
-    assert response.status_code == 200
-    data = response.json()
-    assert "access_token" in data
-    assert "refresh_token" in data
-    assert data["token_type"] == "bearer"
-    assert data["user"]["email"] == "newuser@example.com"
-    assert data["user"]["name"] == "New User"
+        assert response.status_code == 200
+        data = response.json()
+        assert "access_token" in data
+        assert "refresh_token" not in data  # never exposed to JS
+        assert data["token_type"] == "bearer"
+        assert data["user"]["email"] == "newuser@example.com"
+        assert data["user"]["name"] == "New User"
+        # Refresh token arrives as an HttpOnly cookie
+        assert "refresh_token" in response.cookies
 
 
 @pytest.mark.asyncio
 async def test_google_login_existing_user(
     async_client: AsyncClient, test_user: User, mock_google_verify
 ):
-    """Test Google login with existing user returns tokens."""
+    """Test Google login with existing user returns access token."""
     mock_google_verify.return_value = {
         "email": test_user.email,
         "name": test_user.name,
@@ -70,7 +79,7 @@ async def test_get_current_user_unauthorized(async_client: AsyncClient):
 async def test_refresh_token(
     async_client: AsyncClient, test_user: User, mock_google_verify
 ):
-    """Test refreshing access token."""
+    """Test refreshing access token via HttpOnly cookie."""
     mock_google_verify.return_value = {
         "email": test_user.email,
         "name": test_user.name,
@@ -78,30 +87,35 @@ async def test_refresh_token(
         "google_id": test_user.google_id,
     }
 
-    # First, login to get tokens
-    login_response = await async_client.post(
+    # Login — httpx AsyncClient automatically stores the Set-Cookie
+    await async_client.post(
         "/api/auth/google/token",
         json={"credential": "fake_google_token"},
     )
-    refresh_token = login_response.json()["refresh_token"]
 
-    # Then refresh
-    response = await async_client.post(
-        "/api/auth/refresh",
-        json={"refresh_token": refresh_token},
-    )
+    # Refresh using the cookie (no body needed)
+    response = await async_client.post("/api/auth/refresh")
 
     assert response.status_code == 200
     data = response.json()
     assert "access_token" in data
-    assert "refresh_token" in data
+    assert "refresh_token" not in data
+    # A new refresh cookie should be issued (token rotation)
+    assert "refresh_token" in response.cookies
+
+
+@pytest.mark.asyncio
+async def test_refresh_token_missing_cookie(async_client: AsyncClient):
+    """Test refresh without a cookie returns 401."""
+    response = await async_client.post("/api/auth/refresh")
+    assert response.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_logout(
     async_client: AsyncClient, test_user: User, auth_headers: dict, mock_google_verify
 ):
-    """Test logging out invalidates refresh token."""
+    """Test logging out invalidates the refresh cookie."""
     mock_google_verify.return_value = {
         "email": test_user.email,
         "name": test_user.name,
@@ -109,26 +123,16 @@ async def test_logout(
         "google_id": test_user.google_id,
     }
 
-    # Login to get refresh token
-    login_response = await async_client.post(
+    # Login — stores cookie in client
+    await async_client.post(
         "/api/auth/google/token",
         json={"credential": "fake_google_token"},
     )
-    refresh_token = login_response.json()["refresh_token"]
 
     # Logout
-    response = await async_client.post(
-        "/api/auth/logout",
-        json={"refresh_token": refresh_token},
-        headers=auth_headers,
-    )
-
+    response = await async_client.post("/api/auth/logout")
     assert response.status_code == 200
 
-    # Try to use the refresh token - should fail
-    refresh_response = await async_client.post(
-        "/api/auth/refresh",
-        json={"refresh_token": refresh_token},
-    )
-
+    # Try to refresh after logout — should fail (token deleted from DB)
+    refresh_response = await async_client.post("/api/auth/refresh")
     assert refresh_response.status_code == 401
