@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Check, Pencil, Calculator } from 'lucide-react';
+import { Check, Pencil, Calculator } from 'lucide-react';
 import { Card } from '@/components/UI/Card';
 import { Button } from '@/components/UI/Button';
 import { StepProperty } from './steps/StepProperty';
@@ -228,8 +228,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   );
 
   // Inline address editing
-  const [editingAddress, setEditingAddress] = useState(false);
-  const [addressDraft, setAddressDraft] = useState('');
 
   // MC ranges state — persisted with deal
   const [mcRanges, setMcRanges] = useState<MCRanges | null>(
@@ -729,84 +727,47 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     <div className="min-h-screen pb-24 overflow-x-hidden">
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-5">
 
-        {/* Back nav + save */}
+        {/* Header: title + always-visible Cancel / Next / Save */}
         <div className="flex items-center justify-between gap-4">
-          <button
-            type="button"
-            onClick={() => (isDirty || hasNewDealData) ? setShowExitWarning(true) : onBack()}
-            className="flex items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"
-          >
-            <ArrowLeft size={16} />
-            <span>Deals</span>
-          </button>
+          <h1 className="text-lg font-semibold text-slate-900 dark:text-white truncate">
+            {acquisition.propertyAddress.trim() || 'New Analysis'}
+          </h1>
 
-          {(hasAnyResult || hasAddress) && (
-            <div className="flex items-center gap-2 shrink-0">
-              {saveError && (
-                <span className="text-xs text-red-600 dark:text-red-400 max-w-[180px] text-right leading-tight">
-                  {saveError}
-                </span>
-              )}
-              <Button variant="ghost" size="sm" onClick={() => (isDirty || hasNewDealData) ? setShowExitWarning(true) : onBack()}>
-                Cancel
+          <div className="flex items-center gap-2 shrink-0">
+            {saveError && (
+              <span className="text-xs text-red-600 dark:text-red-400 max-w-[160px] text-right leading-tight">
+                {saveError}
+              </span>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => (isDirty || hasNewDealData) ? setShowExitWarning(true) : onBack()}
+            >
+              Cancel
+            </Button>
+            {activeStep < 4 && editingStep === null && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => handleContinue(activeStep)}
+                data-testid="header-next-btn"
+              >
+                Next
               </Button>
-              <Button variant="primary" size="sm" disabled={savedDealId ? !isDirty : false} onClick={() => { setSaveName(saveName || defaultSaveName(acquisition)); handleSave(); }}>
-                {savedDealId ? 'Update' : 'Save'}
-              </Button>
-            </div>
-          )}
+            )}
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={!hasAddress || (savedDealId ? !isDirty : false)}
+              onClick={() => { setSaveName(saveName || defaultSaveName(acquisition)); handleSave(); }}
+              data-testid="header-save-btn"
+            >
+              {savedDealId ? 'Update' : 'Save'}
+            </Button>
+          </div>
         </div>
 
-        {/* Property address header */}
-        <div className="flex items-center gap-2">
-          {editingAddress ? (
-            <>
-              <input
-                type="text"
-                autoFocus
-                value={addressDraft}
-                onChange={(e) => setAddressDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    updateAcquisition('propertyAddress', addressDraft.trim());
-                    setEditingAddress(false);
-                  }
-                  if (e.key === 'Escape') setEditingAddress(false);
-                }}
-                placeholder="Enter property address…"
-                className="text-lg font-semibold border-b border-primary-400 dark:border-primary-500 bg-transparent text-slate-900 dark:text-white focus:outline-none w-full max-w-sm pb-0.5"
-              />
-              <button
-                type="button"
-                onClick={() => { updateAcquisition('propertyAddress', addressDraft.trim()); setEditingAddress(false); }}
-                className="flex items-center justify-center w-6 h-6 rounded-full bg-primary-100 dark:bg-primary-900/40 text-primary-600 dark:text-primary-400 hover:bg-primary-200 dark:hover:bg-primary-800/60 transition-colors shrink-0"
-              >
-                <Check size={13} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setEditingAddress(false)}
-                className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 px-1"
-              >
-                ✕
-              </button>
-            </>
-          ) : (
-            <>
-              <h1 className="text-xl font-semibold text-slate-900 dark:text-white truncate">
-                {acquisition.propertyAddress.trim() || 'New Analysis'}
-              </h1>
-              <button
-                type="button"
-                onClick={() => { setAddressDraft(acquisition.propertyAddress); setEditingAddress(true); }}
-                className="flex items-center justify-center w-6 h-6 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors shrink-0"
-                title="Edit address"
-              >
-                <Pencil size={13} />
-              </button>
-            </>
-          )}
-        </div>
 
         {/* Unsaved changes warning */}
         {showExitWarning && (
@@ -901,27 +862,25 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
                         {renderStepContent(step.id)}
 
-                        {/* Action buttons */}
-                        <div className="flex justify-between items-center pt-4 border-t border-slate-100 dark:border-slate-700">
-                          {isEditing ? (
-                            <>
-                              <Button variant="secondary" size="sm" onClick={() => { setEditingStep(null); setPausedActiveStep(null); setErrors([]); setErrorStep(null); }}>
-                                Cancel
+                        {/* Action buttons — editing: Cancel+Done; step 4: Calculate; steps 0-3: Next is in header */}
+                        {(isEditing || step.id === 4) && (
+                          <div className="flex justify-between items-center pt-4 border-t border-slate-100 dark:border-slate-700">
+                            {isEditing ? (
+                              <>
+                                <Button variant="secondary" size="sm" onClick={() => { setEditingStep(null); setPausedActiveStep(null); setErrors([]); setErrorStep(null); }}>
+                                  Cancel
+                                </Button>
+                                <Button variant="primary" size="sm" onClick={() => handleContinue(step.id)}>
+                                  Done
+                                </Button>
+                              </>
+                            ) : (
+                              <Button variant="primary" className="ml-auto" onClick={handleCalculate}>
+                                Calculate →
                               </Button>
-                              <Button variant="primary" size="sm" onClick={() => handleContinue(step.id)}>
-                                Done
-                              </Button>
-                            </>
-                          ) : step.id === 4 ? (
-                            <Button variant="primary" className="ml-auto" onClick={handleCalculate}>
-                              Calculate →
-                            </Button>
-                          ) : (
-                            <Button variant="primary" size="sm" className="ml-auto" onClick={() => handleContinue(step.id)}>
-                              Continue →
-                            </Button>
-                          )}
-                        </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </Card>
                   )}
