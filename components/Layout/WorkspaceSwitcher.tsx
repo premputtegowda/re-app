@@ -169,8 +169,11 @@ export function WorkspaceSwitcher() {
   const router = useRouter();
   const pathname = usePathname();
 
-  const available = WORKSPACES;
+  const features = useAuthStore((s) => s.user?.features ?? []);
+  const available = WORKSPACES.filter((w) => features.includes(w.requiredFeature));
   const activeKey = getActiveKey(pathname);
+
+  if (available.length <= 1) return null;
 
   const handleSelect = (ws: Workspace) => router.push(ws.homeRoute);
 
