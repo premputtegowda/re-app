@@ -560,10 +560,71 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
           </span>
         );
 
+        const mfrRentFields = ['inPlaceRent', 'rentMonthly', 'preStabRent'] as const;
+        const mfrRentLabels = { inPlaceRent: 'In-Place', rentMonthly: 'Target', preStabRent: 'Pre-Stab' };
+
         const rentSchedule = hasMfr ? (
           <div className="space-y-2">
             <p className="label">Rent Schedule ($/mo per unit)</p>
-            <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+
+            {/* Mobile: card per unit type */}
+            <div className="sm:hidden rounded-xl border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-700/60 overflow-hidden">
+              {acquisition.unitMix.map((entry) => (
+                <div key={entry.id} className="px-3 py-2.5 space-y-2">
+                  <p className="text-xs font-semibold text-slate-600 dark:text-slate-400">
+                    {entry.beds}BR/{entry.baths}BA × {entry.count}
+                  </p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {mfrRentFields.map((field) => {
+                      const warnCell = field === 'rentMonthly' && isVisited && !(entry[field] || 0);
+                      return (
+                        <div key={field}>
+                          <label className="text-[10px] font-medium text-slate-400 dark:text-slate-500 mb-0.5 flex items-center gap-0.5">
+                            {mfrRentLabels[field]}
+                            {field === 'rentMonthly' && isVisited && !(entry[field] || 0) && (
+                              <AlertTriangle size={10} className="text-amber-500 shrink-0" />
+                            )}
+                          </label>
+                          <input
+                            type="number"
+                            className={`input text-sm text-right w-full ${warnCell ? 'border-amber-300 focus:ring-amber-400' : ''}`}
+                            min={0}
+                            placeholder="0"
+                            value={(entry[field] || 0) === 0 ? '' : entry[field]}
+                            onChange={(e) => updateAcquisition('unitMix', acquisition.unitMix.map((u) =>
+                              u.id === entry.id ? { ...u, [field]: Number(e.target.value) } : u
+                            ))}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+              {(() => {
+                const totalUnits = acquisition.unitMix.reduce((s, e) => s + e.count, 0);
+                if (totalUnits === 0) return null;
+                const avgInPlace = acquisition.unitMix.reduce((s, e) => s + e.count * (e.inPlaceRent || 0), 0) / totalUnits;
+                const avgTarget  = acquisition.unitMix.reduce((s, e) => s + e.count * (e.rentMonthly || 0), 0) / totalUnits;
+                const avgPreStab = acquisition.unitMix.reduce((s, e) => s + e.count * (e.preStabRent || 0), 0) / totalUnits;
+                const fmt = (n: number) => n === 0 ? '—' : `$${Math.round(n).toLocaleString()}`;
+                return (
+                  <div className="px-3 py-2 bg-slate-50 dark:bg-slate-700/30 border-t-2 border-slate-200 dark:border-slate-600">
+                    <div className="grid grid-cols-3 gap-2">
+                      {[avgInPlace, avgTarget, avgPreStab].map((val, i) => (
+                        <div key={i}>
+                          <p className="text-[10px] font-medium text-slate-400 mb-0.5">{['In-Place', 'Target', 'Pre-Stab'][i]}</p>
+                          <p className="text-xs font-semibold tabular-nums text-slate-700 dark:text-slate-300">{fmt(val)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Desktop: table */}
+            <div className="hidden sm:block rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-slate-50 dark:bg-slate-700/50">
@@ -586,7 +647,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                       <td className="px-3 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap">
                         {entry.beds}BR/{entry.baths}BA × {entry.count}
                       </td>
-                      {(['inPlaceRent', 'rentMonthly', 'preStabRent'] as const).map((field) => {
+                      {mfrRentFields.map((field) => {
                         const warnCell = field === 'rentMonthly' && isVisited && !(entry[field] || 0);
                         return (
                           <td key={field} className="px-2 py-1.5">
@@ -630,7 +691,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         ) : (
           <div className="space-y-2">
             <p className="label">Rent Schedule ($/mo)</p>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {([
                 { field: 'sfrInPlaceRent', label: 'In-Place', isPreStab: false },
                 { field: 'sfrTargetRent',  label: 'Target',   isPreStab: false },
