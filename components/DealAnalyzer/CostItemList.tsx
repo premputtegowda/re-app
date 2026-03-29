@@ -36,7 +36,7 @@ function EditableText({ value, placeholder, onChange }: {
     <button
       type="button"
       onClick={() => { setDraft(value); setEditing(true); }}
-      className="text-sm text-slate-700 dark:text-slate-300 text-left w-full hover:text-primary-600 dark:hover:text-primary-400 cursor-text truncate"
+      className="text-sm text-slate-700 dark:text-slate-300 text-left w-full hover:text-primary-600 dark:hover:text-primary-400 cursor-text truncate touch-manipulation"
     >
       {value || <span className="text-slate-400">{placeholder}</span>}
     </button>
@@ -73,7 +73,7 @@ function EditableAmount({ value, onChange, showWarning = false }: {
     <button
       type="button"
       onClick={() => { setDraft(value === 0 ? '' : String(value)); setEditing(true); }}
-      className="text-sm text-slate-700 dark:text-slate-300 text-right w-full hover:text-primary-600 dark:hover:text-primary-400 cursor-text flex items-center justify-end gap-1"
+      className="text-sm text-slate-700 dark:text-slate-300 text-right w-full hover:text-primary-600 dark:hover:text-primary-400 cursor-text flex items-center justify-end gap-1 touch-manipulation"
     >
       {showWarning && <AlertTriangle size={12} className="text-amber-500 shrink-0" />}
       {value > 0 ? formatCurrency(value) : <span className={showWarning ? 'text-amber-500' : 'text-slate-400'}>$0</span>}

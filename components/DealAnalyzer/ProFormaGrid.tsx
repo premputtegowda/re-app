@@ -185,6 +185,8 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
   const [newExpenseName, setNewExpenseName] = useState('');
   const [addingRow, setAddingRow] = useState(false);
   const [page, setPage] = useState(0);
+  const [yearPage, setYearPage] = useState(0); // mobile: 0 = yr1, 1 = yr2, ...
+  const [isMobile, setIsMobile] = useState(false);
   const [cascadeHint, setCascadeHint] = useState<{
     year: number;
     field: 'grossRent' | 'otherIncome' | 'vacancyPct' | 'creditLossPct';
@@ -197,6 +199,16 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
     const t = setTimeout(() => setCascadeHint(null), 4000);
     return () => clearTimeout(t);
   }, [cascadeHint]);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 640);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
+  // Reset year page when projection years change
+  useEffect(() => { setYearPage(0); }, [projectionYears]);
 
   // Years where grossRent override is below stabilized — these are calculator-driven transition years
   const stabilizingYears = new Set(
@@ -601,6 +613,296 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
 
   const t12EGI = getT12EGI();
   const t12OpEx = getT12OpEx(t12EGI);
+
+  // ── Mobile card layout ──────────────────────────────────────────────────────
+
+  const mobileYear = yearPage + 1; // 1-based year shown on mobile
+  const mobileVisibleCols: Col[] = [{ type: 't12' }, { type: 'year', year: mobileYear }];
+
+  function MobileCascadeHint({ field, year }: { field: CascadeField; year: number }) {
+    if (!cascadeHint || cascadeHint.field !== field || cascadeHint.year !== year) return null;
+    return (
+      <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between gap-2">
+        <span className="text-xs text-slate-500 dark:text-slate-400">
+          Cascade ↓ yr {cascadeHint.years[0]}{cascadeHint.years.length > 1 ? `–${cascadeHint.years[cascadeHint.years.length - 1]}` : ''}?
+        </span>
+        <div className="flex gap-1.5">
+          <button type="button" onClick={cascadeThrough}
+            className="text-xs font-semibold text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-1 rounded-lg touch-manipulation">✓ Apply</button>
+          <button type="button" onClick={() => setCascadeHint(null)}
+            className="text-xs font-semibold text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-lg touch-manipulation">✕</button>
+        </div>
+      </div>
+    );
+  }
+
+  function MobileIncomeRow({ label, overrideKey, stabilized, growthPct, isPercent, onT12, onStabilized, onGrowthPct, t12Val }: {
+    label: string; overrideKey: CascadeField; stabilized: number; growthPct: number; isPercent: boolean;
+    onT12: (v: number) => void; onStabilized: (v: number) => void; onGrowthPct: (v: number) => void; t12Val: number;
+  }) {
+    const fmt = isPercent ? 'percent' : 'currency';
+    const yr1Ov = data.yearOverrides?.[1];
+    const yr1Override = yr1Ov?.[overrideKey];
+    const isSystem = overrideKey === 'grossRent' && yr1Ov?.grossRentSystem === true;
+    return (
+      <div className="px-3 py-3 border-b border-slate-100 dark:border-slate-700">
+        <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">{label}</p>
+        <div className="grid grid-cols-2 gap-3">
+          {/* T12 */}
+          <div>
+            <p className="text-[10px] font-semibold uppercase text-slate-400 mb-1">T12</p>
+            <Cell value={t12Val} onChange={onT12} format={fmt} />
+          </div>
+          {/* Year cell */}
+          <div>
+            <p className="text-[10px] font-semibold uppercase text-slate-400 mb-1">
+              Yr {mobileYear}{mobileYear === projectionYears ? ' ★' : ''}
+            </p>
+            {mobileYear === 1 ? (
+              <div className="space-y-1">
+                {isSystem ? (
+                  <Cell value={yr1Override as number} onChange={v => setYearOverride(1, overrideKey, v)} format={fmt} />
+                ) : typeof yr1Override === 'number' ? (
+                  <YearCell computed={stabilized} override={yr1Override} format={fmt}
+                    onOverride={v => setYearOverride(1, overrideKey, v)}
+                    onClearOverride={() => clearYearOverride(1, overrideKey)} />
+                ) : (
+                  <Cell value={stabilized} onChange={v => {
+                    onStabilized(v);
+                    const ds = buildCascadeDownstream(overrideKey, 1, projectionYears, data.yearOverrides);
+                    setCascadeHint(ds.length > 0 ? { year: 1, field: overrideKey, years: ds, value: v } : null);
+                  }} format={fmt} />
+                )}
+                {!isPercent && (
+                  <div className="flex items-center gap-0.5">
+                    <Cell value={growthPct} onChange={onGrowthPct} format="growthPct" />
+                    <span className="text-[10px] text-slate-400">/yr</span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {(() => {
+                  const yrOv = data.yearOverrides?.[mobileYear];
+                  const yrOverride = yrOv?.[overrideKey];
+                  const growthRateKey = overrideKey === 'grossRent' ? 'grossRentGrowthPct' as const : overrideKey === 'otherIncome' ? 'otherIncomeGrowthPct' as const : null;
+                  const yrGrowthPct = growthRateKey ? (yrOv?.[growthRateKey] ?? growthPct) : growthPct;
+                  const growthPctFieldKey = overrideKey === 'grossRent' ? 'grossRentGrowthPct' as const : 'otherIncomeGrowthPct' as const;
+                  const computedVal = isPercent ? stabilized : chainedValue(overrideKey as 'grossRent' | 'otherIncome', growthPctFieldKey, stabilized, growthPct, mobileYear);
+                  return (
+                    <>
+                      <YearCell computed={computedVal} override={typeof yrOverride === 'number' ? yrOverride : undefined} format={fmt}
+                        onOverride={v => setYearOverride(mobileYear, overrideKey, v)}
+                        onClearOverride={() => clearYearOverride(mobileYear, overrideKey)} />
+                      {!isPercent && growthRateKey && (
+                        <div className="flex items-center gap-0.5">
+                          <Cell value={yrGrowthPct} onChange={v => setYearGrowthPct(mobileYear, growthRateKey, v)} format="growthPct" />
+                          <span className="text-[10px] text-slate-400">/yr</span>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
+        </div>
+        <MobileCascadeHint field={overrideKey} year={mobileYear === 1 ? 1 : mobileYear} />
+      </div>
+    );
+  }
+
+  function MobileExpenseRow({ expense }: { expense: ProFormaItem }) {
+    const fmt = expense.isPercentOfEGI ? 'percent' : 'currency';
+    const egi = mobileYear === 1
+      ? computeEGI(data.yearOverrides?.[1]?.grossRent ?? data.grossRent.stabilized, data.yearOverrides?.[1]?.otherIncome ?? data.otherIncome.stabilized, data.yearOverrides?.[1]?.vacancyPct ?? data.vacancyPct.stabilized, data.yearOverrides?.[1]?.creditLossPct ?? cl.stabilized)
+      : getEGIForYear(mobileYear);
+    return (
+      <div className="px-3 py-3 border-b border-slate-100 dark:border-slate-700">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <LabelCell value={expense.name} onChange={name => updateExpense(expense.id, { name })} />
+            {showWarnings && !expense.isPercentOfEGI && expense.stabilizedValue === 0 && (
+              <AlertTriangle size={12} className="text-amber-500 shrink-0" />
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {!NON_TOGGLEABLE_EXPENSES.has(expense.name) && (
+              <button type="button" onClick={() => toggleExpenseType(expense.id)}
+                className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-400 touch-manipulation">
+                {expense.isPercentOfEGI ? '→ $' : '→ %'}
+              </button>
+            )}
+            {!expense.id.startsWith('preset-') && (
+              <button type="button" onClick={() => deleteExpense(expense.id)}
+                className="p-1 rounded text-red-400 bg-red-50 dark:bg-red-900/30 touch-manipulation">
+                <X size={12} />
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <p className="text-[10px] font-semibold uppercase text-slate-400 mb-1">T12</p>
+            <Cell value={expense.t12Value} onChange={v => updateExpense(expense.id, { t12Value: v })} format={fmt} />
+          </div>
+          <div>
+            <p className="text-[10px] font-semibold uppercase text-slate-400 mb-1">
+              Yr {mobileYear}{mobileYear === projectionYears ? ' ★' : ''}
+            </p>
+            {mobileYear === 1 ? (
+              <div className="space-y-1">
+                <Cell value={expense.stabilizedValue} onChange={v => updateExpense(expense.id, { stabilizedValue: v })} format={fmt} />
+                {!expense.isPercentOfEGI && (
+                  <div className="flex items-center gap-0.5">
+                    <Cell value={expense.growthPct} onChange={v => updateExpense(expense.id, { growthPct: v })} format="growthPct" />
+                    <span className="text-[10px] text-slate-400">/yr</span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {(() => {
+                  const yrExpOv = data.yearOverrides?.[mobileYear]?.expenses?.[expense.id];
+                  const computed = expense.isPercentOfEGI
+                    ? getEffectivePctForYear(expense.id, expense.stabilizedValue, mobileYear)
+                    : chainedExpenseValue(expense, mobileYear);
+                  const yrGrowth = data.yearOverrides?.[mobileYear]?.expenseGrowthPcts?.[expense.id] ?? expense.growthPct;
+                  return (
+                    <>
+                      <YearCell computed={computed} override={typeof yrExpOv === 'number' ? yrExpOv : undefined} format={fmt}
+                        onOverride={v => setExpenseYearOverride(mobileYear, expense.id, v)}
+                        onClearOverride={() => clearExpenseYearOverride(mobileYear, expense.id)} />
+                      {!expense.isPercentOfEGI && (
+                        <div className="flex items-center gap-0.5">
+                          <Cell value={yrGrowth} onChange={v => setExpenseYearGrowthPct(mobileYear, expense.id, v)} format="growthPct" />
+                          <span className="text-[10px] text-slate-400">/yr</span>
+                        </div>
+                      )}
+                      {expense.isPercentOfEGI && egi > 0 && (
+                        <span className="text-[10px] text-slate-400 tabular-nums">{fmt$(egi * (yrExpOv ?? computed) / 100)}</span>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isMobile) {
+    const mobileEGI = mobileYear === 1
+      ? computeEGI(data.yearOverrides?.[1]?.grossRent ?? data.grossRent.stabilized, data.yearOverrides?.[1]?.otherIncome ?? data.otherIncome.stabilized, data.yearOverrides?.[1]?.vacancyPct ?? data.vacancyPct.stabilized, data.yearOverrides?.[1]?.creditLossPct ?? cl.stabilized)
+      : getEGIForYear(mobileYear);
+    const mobileOpEx = mobileYear === 1 ? getOpExForYear(1, mobileEGI) : getOpExForYear(mobileYear, mobileEGI);
+
+    return (
+      <div>
+        {/* Mobile year navigation */}
+        <div className="flex items-center justify-between mb-3 px-0.5">
+          <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+            T12 · Yr {mobileYear}{mobileYear === projectionYears ? ' ★ exit' : ''}
+          </span>
+          <div className="flex items-center gap-1.5">
+            <button type="button" onClick={() => setYearPage(p => Math.max(0, p - 1))} disabled={yearPage === 0}
+              className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30 touch-manipulation">
+              <ChevronLeft size={14} />
+            </button>
+            {Array.from({ length: projectionYears }, (_, i) => (
+              <button key={i} type="button" onClick={() => setYearPage(i)}
+                className={`relative w-6 h-6 rounded-full text-xs font-semibold transition-all touch-manipulation ${
+                  i === yearPage ? 'bg-primary-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+                }`}>
+                {i + 1}
+              </button>
+            ))}
+            <button type="button" onClick={() => setYearPage(p => Math.min(projectionYears - 1, p + 1))} disabled={yearPage === projectionYears - 1}
+              className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30 touch-manipulation">
+              <ChevronRight size={14} />
+            </button>
+          </div>
+        </div>
+
+        <div className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+          {/* Section: Income */}
+          <div className="px-3 pt-3 pb-1 bg-white dark:bg-slate-800">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">Income</p>
+          </div>
+          <MobileIncomeRow label="Gross Rent" overrideKey="grossRent" stabilized={data.grossRent.stabilized} growthPct={data.grossRent.growthPct} isPercent={false} onT12={v => setGrossRent('t12', v)} onStabilized={v => setGrossRent('stabilized', v)} onGrowthPct={v => setGrossRent('growthPct', v)} t12Val={data.grossRent.t12} />
+          <MobileIncomeRow label="Other Income" overrideKey="otherIncome" stabilized={data.otherIncome.stabilized} growthPct={data.otherIncome.growthPct} isPercent={false} onT12={v => setOtherIncome('t12', v)} onStabilized={v => setOtherIncome('stabilized', v)} onGrowthPct={v => setOtherIncome('growthPct', v)} t12Val={data.otherIncome.t12} />
+          <MobileIncomeRow label="Vacancy" overrideKey="vacancyPct" stabilized={data.vacancyPct.stabilized} growthPct={0} isPercent={true} onT12={v => setVacancy('t12', v)} onStabilized={v => setVacancy('stabilized', v)} onGrowthPct={() => {}} t12Val={data.vacancyPct.t12} />
+          <MobileIncomeRow label="Credit Loss" overrideKey="creditLossPct" stabilized={cl.stabilized} growthPct={0} isPercent={true} onT12={v => setCreditLoss('t12', v)} onStabilized={v => setCreditLoss('stabilized', v)} onGrowthPct={() => {}} t12Val={cl.t12} />
+
+          {/* EGI summary */}
+          <div className="px-3 py-2.5 bg-slate-50 dark:bg-slate-700/30 border-b border-slate-100 dark:border-slate-700">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-0.5">EGI · T12</p>
+                <span className="text-sm font-bold tabular-nums text-slate-700 dark:text-slate-300">{fmt$(t12EGI)}</span>
+              </div>
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-0.5">EGI · Yr {mobileYear}</p>
+                <span className="text-sm font-bold tabular-nums text-slate-700 dark:text-slate-300">{fmt$(mobileEGI)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Section: Expenses */}
+          <div className="px-3 pt-3 pb-1 bg-white dark:bg-slate-800">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">Operating Expenses</p>
+          </div>
+          {data.expenses.map(expense => <MobileExpenseRow key={expense.id} expense={expense} />)}
+
+          {/* Add expense */}
+          {addingRow ? (
+            <div className="px-3 py-2.5 bg-primary-50/40 dark:bg-primary-900/10 border-t border-dashed border-primary-200 dark:border-primary-800/40">
+              <input autoFocus className="text-sm font-medium text-slate-800 dark:text-slate-200 bg-transparent border-none outline-none ring-0 p-0 w-full placeholder:text-slate-400"
+                placeholder="Expense name…" value={newExpenseName} onChange={e => setNewExpenseName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addExpense(newExpenseName); } if (e.key === 'Escape') { setAddingRow(false); setNewExpenseName(''); } }}
+                onBlur={() => { if (newExpenseName.trim()) addExpense(newExpenseName); else { setAddingRow(false); setNewExpenseName(''); } }} />
+            </div>
+          ) : (
+            <div className="border-t border-dashed border-slate-200 dark:border-slate-700">
+              <button onClick={() => setAddingRow(true)} className="w-full flex items-center gap-2 px-3 py-2.5 text-xs font-medium text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50/40 transition-colors touch-manipulation">
+                <Plus size={13} /> Add expense
+              </button>
+            </div>
+          )}
+
+          {/* Total OpEx */}
+          <div className="px-3 py-2.5 bg-slate-50 dark:bg-slate-700/30 border-t border-slate-100 dark:border-slate-700">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-0.5">OpEx · T12</p>
+                <span className="text-sm font-bold tabular-nums text-slate-700 dark:text-slate-300">{fmt$(t12OpEx)}</span>
+              </div>
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-0.5">OpEx · Yr {mobileYear}</p>
+                <span className="text-sm font-bold tabular-nums text-slate-700 dark:text-slate-300">{fmt$(mobileOpEx)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* NOI */}
+          <div className="px-3 py-2.5 bg-primary-50 dark:bg-primary-900/20 border-t border-primary-100 dark:border-primary-800/40">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-primary-600 dark:text-primary-400 mb-0.5">NOI · T12</p>
+                <span className="text-sm font-bold tabular-nums text-primary-700 dark:text-primary-300">{fmt$(t12EGI - t12OpEx)}</span>
+              </div>
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-primary-600 dark:text-primary-400 mb-0.5">NOI · Yr {mobileYear}</p>
+                <span className="text-sm font-bold tabular-nums text-primary-700 dark:text-primary-300">{fmt$(mobileEGI - mobileOpEx)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>

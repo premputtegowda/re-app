@@ -357,13 +357,13 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
       </Card>
 
       {/* ── Tab chips ── */}
-      <div className="flex gap-2">
+      <div className="grid grid-cols-2 sm:flex gap-2">
         {(Object.keys(TAB_LABELS) as ResultTab[]).map((tab) => (
           <button
             key={tab}
             type="button"
             onClick={() => setActiveTab(tab)}
-            className={`px-4 py-1.5 rounded-full text-sm font-medium border transition-all ${
+            className={`px-3 py-1.5 rounded-full text-xs sm:text-sm font-medium border transition-all ${
               activeTab === tab
                 ? 'bg-primary-600 text-white border-primary-600'
                 : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-primary-400 dark:hover:border-primary-500'
