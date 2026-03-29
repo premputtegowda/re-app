@@ -794,3 +794,176 @@ async def test_approve_access_request_sends_email_when_smtp_enabled(
     mock_sender.send_plain.assert_awaited_once()
     call_kwargs = mock_sender.send_plain.call_args.kwargs
     assert call_kwargs["to_email"] == "approvemail@example.com"
+
+
+# ── Deal Analyzer announcement email (PATCH /api/admin/users/{id}) ────────────
+
+@pytest.mark.asyncio
+async def test_deal_analyzer_email_sent_when_feature_added(
+    async_client: AsyncClient,
+    admin_auth_headers: dict,
+    test_user: User,
+):
+    """Enabling deal_analyzer feature sends announcement email via SMTP."""
+    mock_sender = AsyncMock()
+
+    with patch("app.routers.admin.get_settings") as mock_settings, \
+         patch("app.routers.admin.get_smtp_sender", return_value=mock_sender):
+        cfg = MagicMock()
+        cfg.smtp_enabled = True
+        cfg.frontend_url = "https://app.example.com"
+        mock_settings.return_value = cfg
+
+        resp = await async_client.patch(
+            f"/api/admin/users/{test_user.id}",
+            json={"add_feature": "deal_analyzer"},
+            headers=admin_auth_headers,
+        )
+
+    assert resp.status_code == 200
+    mock_sender.send_plain.assert_awaited_once()
+    call_kwargs = mock_sender.send_plain.call_args.kwargs
+    assert call_kwargs["to_email"] == test_user.email
+    assert "deal analyzer" in call_kwargs["subject"].lower()
+    assert test_user.name in call_kwargs["body"]
+    assert "https://app.example.com/deal-analyzer" in call_kwargs["body"]
+
+
+@pytest.mark.asyncio
+async def test_deal_analyzer_email_body_contains_key_features(
+    async_client: AsyncClient,
+    admin_auth_headers: dict,
+    test_user: User,
+):
+    """Announcement email body mentions all key Deal Analyzer features including refinance."""
+    mock_sender = AsyncMock()
+
+    with patch("app.routers.admin.get_settings") as mock_settings, \
+         patch("app.routers.admin.get_smtp_sender", return_value=mock_sender):
+        cfg = MagicMock()
+        cfg.smtp_enabled = True
+        cfg.frontend_url = "https://app.example.com"
+        mock_settings.return_value = cfg
+
+        await async_client.patch(
+            f"/api/admin/users/{test_user.id}",
+            json={"add_feature": "deal_analyzer"},
+            headers=admin_auth_headers,
+        )
+
+    body = mock_sender.send_plain.call_args.kwargs["body"]
+    assert "refinance" in body.lower()
+    assert "irr" in body.lower()
+    assert "what-if" in body.lower()
+    assert "break-even" in body.lower()
+    assert "monte carlo" in body.lower()
+    assert "The DealstackRE Team" in body
+
+
+@pytest.mark.asyncio
+async def test_deal_analyzer_email_not_sent_when_smtp_disabled(
+    async_client: AsyncClient,
+    admin_auth_headers: dict,
+    test_user: User,
+):
+    """No email is sent when SMTP is disabled, but feature is still granted."""
+    mock_sender = AsyncMock()
+
+    with patch("app.routers.admin.get_settings") as mock_settings, \
+         patch("app.routers.admin.get_smtp_sender", return_value=mock_sender):
+        cfg = MagicMock()
+        cfg.smtp_enabled = False
+        mock_settings.return_value = cfg
+
+        resp = await async_client.patch(
+            f"/api/admin/users/{test_user.id}",
+            json={"add_feature": "deal_analyzer"},
+            headers=admin_auth_headers,
+        )
+
+    assert resp.status_code == 200
+    mock_sender.send_plain.assert_not_awaited()
+    assert "deal_analyzer" in resp.json()["features"]
+
+
+@pytest.mark.asyncio
+async def test_deal_analyzer_email_not_sent_for_other_features(
+    async_client: AsyncClient,
+    admin_auth_headers: dict,
+    test_user: User,
+):
+    """Announcement email is NOT sent when a different feature (e.g. reps) is toggled."""
+    mock_sender = AsyncMock()
+
+    with patch("app.routers.admin.get_settings") as mock_settings, \
+         patch("app.routers.admin.get_smtp_sender", return_value=mock_sender):
+        cfg = MagicMock()
+        cfg.smtp_enabled = True
+        cfg.frontend_url = "https://app.example.com"
+        mock_settings.return_value = cfg
+
+        resp = await async_client.patch(
+            f"/api/admin/users/{test_user.id}",
+            json={"add_feature": "reps"},
+            headers=admin_auth_headers,
+        )
+
+    assert resp.status_code == 200
+    mock_sender.send_plain.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_deal_analyzer_email_not_sent_if_feature_already_present(
+    async_client: AsyncClient,
+    admin_auth_headers: dict,
+    test_user: User,
+    test_db: AsyncSession,
+):
+    """No duplicate email if deal_analyzer is already in the user's features list."""
+    test_user.features = ["deal_analyzer"]
+    await test_db.commit()
+
+    mock_sender = AsyncMock()
+
+    with patch("app.routers.admin.get_settings") as mock_settings, \
+         patch("app.routers.admin.get_smtp_sender", return_value=mock_sender):
+        cfg = MagicMock()
+        cfg.smtp_enabled = True
+        cfg.frontend_url = "https://app.example.com"
+        mock_settings.return_value = cfg
+
+        resp = await async_client.patch(
+            f"/api/admin/users/{test_user.id}",
+            json={"add_feature": "deal_analyzer"},
+            headers=admin_auth_headers,
+        )
+
+    assert resp.status_code == 200
+    mock_sender.send_plain.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_deal_analyzer_smtp_failure_does_not_break_feature_grant(
+    async_client: AsyncClient,
+    admin_auth_headers: dict,
+    test_user: User,
+):
+    """If SMTP throws, the feature is still saved and the endpoint returns 200."""
+    mock_sender = AsyncMock()
+    mock_sender.send_plain.side_effect = Exception("SMTP connection refused")
+
+    with patch("app.routers.admin.get_settings") as mock_settings, \
+         patch("app.routers.admin.get_smtp_sender", return_value=mock_sender):
+        cfg = MagicMock()
+        cfg.smtp_enabled = True
+        cfg.frontend_url = "https://app.example.com"
+        mock_settings.return_value = cfg
+
+        resp = await async_client.patch(
+            f"/api/admin/users/{test_user.id}",
+            json={"add_feature": "deal_analyzer"},
+            headers=admin_auth_headers,
+        )
+
+    assert resp.status_code == 200
+    assert "deal_analyzer" in resp.json()["features"]

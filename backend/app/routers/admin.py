@@ -1,3 +1,4 @@
+import json
 import logging
 import secrets
 from datetime import datetime, timedelta
@@ -62,6 +63,16 @@ class InvitationSummary(BaseModel):
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+def _parse_features(val) -> list[str]:
+    """Return features as a Python list regardless of storage format (list or JSON string)."""
+    if isinstance(val, str):
+        try:
+            return json.loads(val)
+        except (json.JSONDecodeError, ValueError):
+            return []
+    return list(val or [])
+
+
 async def _user_summary(user: User, db: AsyncSession) -> AdminUserSummary:
     counts_result = await db.execute(
         select(func.count(Entry.id)).where(Entry.user_id == user.id)
@@ -80,7 +91,7 @@ async def _user_summary(user: User, db: AsyncSession) -> AdminUserSummary:
         picture_url=user.picture_url,
         is_admin=user.is_admin,
         has_complimentary_access=user.has_complimentary_access,
-        features=user.features or [],
+        features=_parse_features(user.features),
         created_at=user.created_at.date().isoformat(),
         last_active=str(last_active) if last_active else None,
         entry_count=entry_count,
@@ -116,13 +127,42 @@ async def list_users(
             picture_url=u.picture_url,
             is_admin=u.is_admin,
             has_complimentary_access=u.has_complimentary_access,
-            features=u.features or [],
+            features=_parse_features(u.features),
             created_at=u.created_at.date().isoformat(),
             last_active=last_active.get(u.id),
             entry_count=counts.get(u.id, 0),
         )
         for u in users
     ]
+
+
+async def _send_deal_analyzer_announcement(user: User, settings) -> None:
+    """Send the Deal Analyzer feature announcement email to a single user."""
+    deal_analyzer_url = f"{settings.frontend_url}/deal-analyzer"
+    body_text = (
+        f"Hi {user.name},\n\n"
+        f"We've added a new feature to your DealstackRE account — Deal Analyzer.\n\n"
+        f"It helps you evaluate rental property deals before you buy:\n\n"
+        f"  • Step-by-step deal input — property, financing, renovation, operations, and exit\n"
+        f"  • CoC return, IRR, and equity multiple — calculated instantly\n"
+        f"  • Refinance modeling — layer in a cash-out refi and see the impact on your long-term returns\n"
+        f"  • What-If analysis — slide any variable (rent, price, rate) and see how returns change\n"
+        f"  • Break-even analysis — know exactly how much cushion you have before a deal goes negative\n"
+        f"  • Monte Carlo simulation — stress test against thousands of market scenarios\n\n"
+        f"Log in and try it here:\n{deal_analyzer_url}\n\n"
+        f"As always, reply to this email if you have feedback — we read every message.\n\n"
+        f"— The DealstackRE Team"
+    )
+    try:
+        sender = get_smtp_sender()
+        await sender.send_plain(
+            to_email=user.email,
+            subject="New Feature: Deal Analyzer is now available for you",
+            body=body_text,
+        )
+        logger.info("Deal Analyzer announcement sent to %s", user.email)
+    except Exception as exc:
+        logger.error("Failed to send Deal Analyzer announcement to %s: %s", user.email, exc, exc_info=True)
 
 
 @router.patch("/users/{user_id}", response_model=AdminUserSummary)
@@ -133,6 +173,7 @@ async def patch_user(
     db: AsyncSession = Depends(get_db),
 ):
     """Grant/revoke admin or complimentary access. Admins cannot demote themselves."""
+    settings = get_settings()
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
@@ -148,16 +189,24 @@ async def patch_user(
         user.is_admin = body.is_admin
     if body.has_complimentary_access is not None:
         user.has_complimentary_access = body.has_complimentary_access
+
+    newly_added_feature: str | None = None
     if body.add_feature is not None:
-        current = list(user.features or [])
+        current = _parse_features(user.features)
         if body.add_feature not in current:
             current.append(body.add_feature)
+            newly_added_feature = body.add_feature
         user.features = current
     if body.remove_feature is not None:
-        user.features = [f for f in (user.features or []) if f != body.remove_feature]
+        user.features = [f for f in _parse_features(user.features) if f != body.remove_feature]
 
     await db.commit()
     await db.refresh(user)
+
+    # Send feature announcement email when Deal Analyzer is newly enabled
+    if newly_added_feature == "deal_analyzer" and settings.smtp_enabled:
+        await _send_deal_analyzer_announcement(user, settings)
+
     return await _user_summary(user, db)
 
 

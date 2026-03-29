@@ -33,8 +33,10 @@ from sqlalchemy.pool import StaticPool
 # Models use postgresql.UUID and postgresql.ENUM which SQLite doesn't know.
 # This is test-only infrastructure — production uses PostgreSQL natively.
 # ---------------------------------------------------------------------------
+import json as _json
+
 from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler as _STC
-from sqlalchemy.dialects.postgresql import UUID as _PG_UUID, ENUM as _PG_ENUM
+from sqlalchemy.dialects.postgresql import UUID as _PG_UUID, ENUM as _PG_ENUM, ARRAY as _PG_ARRAY
 
 
 def _sqlite_visit_UUID(self, type_, **kw):  # noqa: N802
@@ -52,6 +54,28 @@ def _sqlite_visit_ARRAY(self, type_, **kw):  # noqa: N802
 _STC.visit_UUID = _sqlite_visit_UUID  # type: ignore[attr-defined]
 _STC.visit_ENUM = _sqlite_visit_ENUM  # type: ignore[attr-defined]
 _STC.visit_ARRAY = _sqlite_visit_ARRAY  # type: ignore[attr-defined]
+
+# Patch ARRAY result_processor so SQLite TEXT values (JSON strings) are properly
+# deserialized back to Python lists instead of being iterated character-by-character.
+_pg_array_result_processor_orig = _PG_ARRAY.result_processor
+
+
+def _pg_array_result_processor_safe(self, dialect, col_type):
+    if dialect.name != "postgresql":
+        def _process(value):
+            if value is None:
+                return None
+            if isinstance(value, str):
+                try:
+                    return _json.loads(value)
+                except (_json.JSONDecodeError, ValueError):
+                    return []
+            return list(value)
+        return _process
+    return _pg_array_result_processor_orig(self, dialect, col_type)
+
+
+_PG_ARRAY.result_processor = _pg_array_result_processor_safe  # type: ignore[method-assign]
 
 # Suppress CREATE TYPE / DROP TYPE DDL for PostgreSQL ENUM on non-PG dialects.
 _pg_enum_create_orig = _PG_ENUM.create
