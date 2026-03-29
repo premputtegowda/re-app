@@ -31,3 +31,4 @@ class User(Base):
     properties = relationship("Property", back_populates="user", cascade="all, delete-orphan")
     entries = relationship("Entry", back_populates="user", cascade="all, delete-orphan")
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
+    saved_deals = relationship("SavedDeal", back_populates="user", cascade="all, delete-orphan")

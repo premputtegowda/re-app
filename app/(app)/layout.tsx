@@ -6,11 +6,13 @@ import { Toaster } from 'sonner';
 import { Layout } from '@/components/Layout/Layout';
 import { useAuthStore } from '@/lib/authStore';
 import { useStore } from '@/lib/store';
+import { useDealAnalyzerStore } from '@/lib/dealAnalyzerStore';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
   const syncFromBackend = useStore((s) => s.syncFromBackend);
+  const syncDealsFromBackend = useDealAnalyzerStore((s) => s.syncDealsFromBackend);
 
   useEffect(() => {
     checkAuth();
@@ -25,6 +27,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (isAuthenticated) {
       syncFromBackend().catch(console.error);
+      syncDealsFromBackend();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);

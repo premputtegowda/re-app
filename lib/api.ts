@@ -518,4 +518,68 @@ export const api = {
       throw new ApiError(response.status, error.detail || 'Failed to decline request');
     }
   },
+
+  // ── Deal Analyzer ──────────────────────────────────────────────────────
+
+  async listDeals() {
+    const response = await authFetch('/api/deals');
+    if (!response.ok) throw new ApiError(response.status, 'Failed to fetch deals');
+    return response.json();
+  },
+
+  async saveDeal(deal: {
+    id: string;
+    name: string;
+    acquisition: unknown;
+    operations: unknown;
+    proForma: unknown;
+    refinance: unknown;
+    results: unknown;
+    mcRanges?: unknown;
+    mcResults?: unknown;
+    currentStep?: number;
+    savedAt: string;
+    updatedAt: string;
+  }) {
+    const response = await authFetch('/api/deals', {
+      method: 'POST',
+      body: JSON.stringify(deal),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new ApiError(response.status, error.detail || 'Failed to save deal');
+    }
+    return response.json();
+  },
+
+  async updateDeal(dealId: string, payload: {
+    name: string;
+    acquisition: unknown;
+    operations: unknown;
+    proForma: unknown;
+    refinance: unknown;
+    results: unknown;
+    mcRanges?: unknown;
+    mcResults?: unknown;
+    currentStep?: number;
+    updatedAt: string;
+  }) {
+    const response = await authFetch(`/api/deals/${dealId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new ApiError(response.status, error.detail || 'Failed to update deal');
+    }
+    return response.json();
+  },
+
+  async deleteDeal(dealId: string) {
+    const response = await authFetch(`/api/deals/${dealId}`, { method: 'DELETE' });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new ApiError(response.status, error.detail || 'Failed to delete deal');
+    }
+  },
 };

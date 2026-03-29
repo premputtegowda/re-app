@@ -2,10 +2,11 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { api } from '@/lib/api';
 import type { CoCScenario, CoCResult, CoCAcquisition, CoCOperations, CoCRefinance, CoCScenarioType, ProFormaData, SavedDeal } from '@/types';
 
-const generateId = () =>
-  `coc-${Date.now().toString(36)}-${Math.random().toString(36).substr(2, 9)}`;
+// Use crypto.randomUUID() for stable UUIDs that work as backend keys
+const generateId = () => crypto.randomUUID();
 
 const now = () => new Date().toISOString();
 
@@ -37,6 +38,8 @@ interface CoCStore {
   deleteSavedDeal: (id: string) => void;
   updateMCData: (id: string, mcRanges?: SavedDeal['mcRanges'], mcResults?: SavedDeal['mcResults']) => void;
   updateCurrentStep: (id: string, step: number) => void;
+  /** Fetch all deals from backend and replace local store. Called on login. */
+  syncDealsFromBackend: () => Promise<void>;
 }
 
 export const useDealAnalyzerStore = create<CoCStore>()(
@@ -98,6 +101,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
 
       saveDeal: (name, draft, results, mcRanges?, mcResults?) => {
         const id = generateId();
+        const savedAt = now();
         const deal: SavedDeal = {
           id,
           name,
@@ -108,14 +112,30 @@ export const useDealAnalyzerStore = create<CoCStore>()(
           results,
           ...(mcRanges ? { mcRanges } : {}),
           ...(mcResults !== undefined ? { mcResults } : {}),
-          savedAt: now(),
-          updatedAt: now(),
+          savedAt,
+          updatedAt: savedAt,
         };
+        // Optimistic local update
         set((state) => ({ savedDeals: [deal, ...state.savedDeals] }));
+        // Async backend sync — fire and forget
+        api.saveDeal({
+          id,
+          name,
+          acquisition: draft.acquisition,
+          operations: draft.operations,
+          proForma: draft.proForma,
+          refinance: draft.refinance,
+          results,
+          mcRanges,
+          mcResults,
+          savedAt,
+          updatedAt: savedAt,
+        }).catch((err) => console.error('[DealStore] Failed to sync new deal to backend:', err));
         return id;
       },
 
       updateSavedDeal: (id, name, results, draft?, mcRanges?, mcResults?) => {
+        const updatedAt = now();
         set((state) => ({
           savedDeals: state.savedDeals.map((d) =>
             d.id === id ? {
@@ -130,35 +150,112 @@ export const useDealAnalyzerStore = create<CoCStore>()(
               } : {}),
               ...(mcRanges !== undefined ? { mcRanges } : {}),
               ...(mcResults !== undefined ? { mcResults } : {}),
-              updatedAt: now(),
+              updatedAt,
             } : d
           ),
         }));
+        // Async backend sync — fire and forget
+        const deal = get().savedDeals.find((d) => d.id === id);
+        if (deal) {
+          api.updateDeal(id, {
+            name,
+            acquisition: draft?.acquisition ?? deal.acquisition,
+            operations: draft?.operations ?? deal.operations,
+            proForma: draft?.proForma ?? deal.proForma,
+            refinance: draft?.refinance ?? deal.refinance,
+            results,
+            mcRanges: mcRanges !== undefined ? mcRanges : deal.mcRanges,
+            mcResults: mcResults !== undefined ? mcResults : deal.mcResults,
+            currentStep: deal.currentStep,
+            updatedAt,
+          }).catch((err) => console.error('[DealStore] Failed to sync deal update to backend:', err));
+        }
       },
 
       deleteSavedDeal: (id) => {
         set((state) => ({ savedDeals: state.savedDeals.filter((d) => d.id !== id) }));
+        api.deleteDeal(id).catch((err) =>
+          console.error('[DealStore] Failed to delete deal from backend:', err)
+        );
       },
 
       updateCurrentStep: (id, step) => {
+        const updatedAt = now();
         set((state) => ({
           savedDeals: state.savedDeals.map((d) =>
-            d.id === id ? { ...d, currentStep: step } : d
+            d.id === id ? { ...d, currentStep: step, updatedAt } : d
           ),
         }));
+        const deal = get().savedDeals.find((d) => d.id === id);
+        if (deal) {
+          api.updateDeal(id, {
+            name: deal.name,
+            acquisition: deal.acquisition,
+            operations: deal.operations,
+            proForma: deal.proForma,
+            refinance: deal.refinance,
+            results: deal.results,
+            mcRanges: deal.mcRanges,
+            mcResults: deal.mcResults,
+            currentStep: step,
+            updatedAt,
+          }).catch((err) => console.error('[DealStore] Failed to sync step update to backend:', err));
+        }
       },
 
       updateMCData: (id, mcRanges?, mcResults?) => {
+        const updatedAt = now();
         set((state) => ({
           savedDeals: state.savedDeals.map((d) =>
             d.id === id ? {
               ...d,
               ...(mcRanges !== undefined ? { mcRanges } : {}),
               ...(mcResults !== undefined ? { mcResults } : {}),
-              updatedAt: now(),
+              updatedAt,
             } : d
           ),
         }));
+        const deal = get().savedDeals.find((d) => d.id === id);
+        if (deal) {
+          api.updateDeal(id, {
+            name: deal.name,
+            acquisition: deal.acquisition,
+            operations: deal.operations,
+            proForma: deal.proForma,
+            refinance: deal.refinance,
+            results: deal.results,
+            mcRanges: mcRanges !== undefined ? mcRanges : deal.mcRanges,
+            mcResults: mcResults !== undefined ? mcResults : deal.mcResults,
+            currentStep: deal.currentStep,
+            updatedAt,
+          }).catch((err) => console.error('[DealStore] Failed to sync MC data to backend:', err));
+        }
+      },
+
+      syncDealsFromBackend: async () => {
+        try {
+          const deals = await api.listDeals();
+          // Replace local store with authoritative backend data
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const mapped: SavedDeal[] = deals.map((d: any) => ({
+            id: d.id,
+            name: d.name,
+            acquisition: d.acquisition,
+            operations: d.operations,
+            proForma: d.proForma,
+            refinance: d.refinance,
+            results: d.results,
+            mcRanges: d.mcRanges ?? undefined,
+            mcResults: d.mcResults ?? undefined,
+            currentStep: d.currentStep ?? undefined,
+            savedAt: d.savedAt,
+            updatedAt: d.updatedAt,
+          }));
+          set({ savedDeals: mapped });
+        } catch (err) {
+          // Non-fatal: local cache remains usable if backend is unreachable
+          console.error('[DealStore] Failed to sync deals from backend:', err);
+        }
       },
     }),
     {
