@@ -77,7 +77,7 @@ export function StepOperations({ data, onChange, propertyType, unitMix, onUnitMi
         />
       )}
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Input
           label="Vacancy Rate (%)"
           type="number"
@@ -103,7 +103,7 @@ export function StepOperations({ data, onChange, propertyType, unitMix, onUnitMi
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Input
           label="Property Mgmt (%)"
           type="number"

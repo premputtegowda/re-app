@@ -76,7 +76,7 @@ export function StepRefinance({ data, arv, exitCapRate, projectionYears, onChang
             onChange={(e) => onChange('refiYear', Number(e.target.value))}
             options={refiYearOptions}
           />
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
               label="New LTV (%)"
               type="number"

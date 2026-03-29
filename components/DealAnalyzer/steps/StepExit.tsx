@@ -54,7 +54,7 @@ export function StepExit({ acquisition, refinance, onAcquisitionChange, onRefina
           ))}
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {/* ARV / Market Value — direct dollar entry */}
           {method === 'value' && (
             <Input
@@ -173,7 +173,7 @@ export function StepExit({ acquisition, refinance, onAcquisitionChange, onRefina
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <Input
                     label="New LTV (%)"
                     type="number"
@@ -202,7 +202,7 @@ export function StepExit({ acquisition, refinance, onAcquisitionChange, onRefina
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <Input
                     label="New Loan Term (years)"
                     type="number"

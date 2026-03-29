@@ -90,7 +90,7 @@ export function StepProperty({ data, onChange, showWarnings = false }: StepPrope
       {data.propertyType === 'sfr' && (
         <div>
           <p className="label mb-2">Unit Details</p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 flex items-center gap-1">
                 Bedrooms

@@ -18,6 +18,9 @@ dist
 .DS_Store
 *.pem
 
+# local planning docs
+NEEDED_FEATURES.md
+
 # debug
 npm-debug.log*
 yarn-debug.log*

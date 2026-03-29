@@ -64,7 +64,7 @@ export function StepFinancing({ data, onChange, missingFields }: StepFinancingPr
 
       {!isCash && (
         <>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
               label="Closing Costs (%)"
               type="number"
@@ -119,7 +119,7 @@ export function StepFinancing({ data, onChange, missingFields }: StepFinancingPr
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
               label="Interest Rate (%)"
               type="number"
