@@ -81,11 +81,15 @@ export function buildWhatIfResult(ov: WhatIfOverrides, deps: BuildDeps): CoCResu
     scaledYearOverrides[2] = { ...(proForma.yearOverrides?.[2] ?? {}), grossRent: newTargetAnnual, grossRentSystem: true };
   }
 
+  const priceRatio = acquisition.purchasePrice > 0 ? ov.purchasePrice / acquisition.purchasePrice : 1;
+
   const modifiedExpenses = proForma.expenses.map(e => {
     if (e.isPercentOfEGI && e.name.toLowerCase().includes('management'))
       return { ...e, stabilizedValue: ov.propertyMgmtPct };
     if (e.isPercentOfEGI && (e.name.toLowerCase().includes('maintenance') || e.name.toLowerCase().includes('repair')))
       return { ...e, stabilizedValue: ov.maintenancePct };
+    if (!e.isPercentOfEGI && e.name.toLowerCase().includes('tax'))
+      return { ...e, stabilizedValue: e.stabilizedValue * priceRatio, growthPct: ov.fixedExpenseGrowthPct };
     if (!e.isPercentOfEGI)
       return { ...e, growthPct: ov.fixedExpenseGrowthPct };
     return e;

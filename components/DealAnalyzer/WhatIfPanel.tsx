@@ -84,10 +84,13 @@ function KPIDelta({ label, value, delta, deltaFormatted, inverse }: {
 interface BreakEvenRow {
   label: string;
   assumption: string;
-  breakEven: number | null;
-  breakEvenFormatted: string | null;
-  cushion: string | null;
-  cushionPct: number | null; // relative cushion for color coding
+  cocBreakEvenFormatted: string | null;
+  cocCushion: string | null;
+  cocCushionPct: number | null;
+  cocNA?: boolean; // true when metric is not applicable for CoC
+  irrBreakEvenFormatted: string | null;
+  irrCushion: string | null;
+  irrCushionPct: number | null;
   worseDir: 'up' | 'down';
 }
 
@@ -105,7 +108,7 @@ function cushionBadge(pct: number | null): string {
   return 'bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400';
 }
 
-function BreakEvenTable({ rows }: { rows: BreakEvenRow[] }) {
+function BreakEvenTable({ rows, mode }: { rows: BreakEvenRow[]; mode: 'coc' | 'irr' }) {
   return (
     <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
       <table className="w-full text-sm">
@@ -118,24 +121,41 @@ function BreakEvenTable({ rows }: { rows: BreakEvenRow[] }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
-          {rows.map(row => (
-            <tr key={row.label} className="hover:bg-slate-50/60 dark:hover:bg-slate-700/20 transition-colors">
-              <td className="px-3 py-2.5 text-xs font-medium text-slate-700 dark:text-slate-300">{row.label}</td>
-              <td className="px-3 py-2.5 text-xs text-right tabular-nums text-slate-600 dark:text-slate-400">{row.assumption}</td>
-              <td className="px-3 py-2.5 text-xs text-right tabular-nums font-medium text-slate-800 dark:text-slate-200">
-                {row.breakEvenFormatted ?? <span className="text-slate-300 dark:text-slate-600">—</span>}
-              </td>
-              <td className="px-3 py-2.5 text-right">
-                {row.cushion ? (
-                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full tabular-nums ${cushionBadge(row.cushionPct)}`}>
-                    {row.worseDir === 'up' ? '+' : ''}{row.cushion}
-                  </span>
+          {rows.map(row => {
+            const na = mode === 'coc' && !!row.cocNA;
+            const beFormatted = mode === 'coc' ? row.cocBreakEvenFormatted : row.irrBreakEvenFormatted;
+            const cushion = mode === 'coc' ? row.cocCushion : row.irrCushion;
+            const cushionPct = mode === 'coc' ? row.cocCushionPct : row.irrCushionPct;
+            return (
+              <tr key={row.label} className="hover:bg-slate-50/60 dark:hover:bg-slate-700/20 transition-colors">
+                <td className="px-3 py-2.5 text-xs font-medium text-slate-700 dark:text-slate-300">{row.label}</td>
+                <td className="px-3 py-2.5 text-xs text-right tabular-nums text-slate-600 dark:text-slate-400">{row.assumption}</td>
+                {na ? (
+                  <>
+                    <td className="px-3 py-2.5 text-xs text-right">
+                      <span className="text-[10px] text-slate-300 dark:text-slate-600 italic">n/a for CoC</span>
+                    </td>
+                    <td />
+                  </>
                 ) : (
-                  <span className="text-[10px] text-slate-300 dark:text-slate-600">no room</span>
+                  <>
+                    <td className="px-3 py-2.5 text-xs text-right tabular-nums font-medium text-slate-800 dark:text-slate-200">
+                      {beFormatted ?? <span className="text-slate-300 dark:text-slate-600">—</span>}
+                    </td>
+                    <td className="px-3 py-2.5 text-right">
+                      {cushion ? (
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full tabular-nums ${cushionBadge(cushionPct)}`}>
+                          {row.worseDir === 'up' ? '+' : ''}{cushion}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-slate-300 dark:text-slate-600">no room</span>
+                      )}
+                    </td>
+                  </>
                 )}
-              </td>
-            </tr>
-          ))}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -157,7 +177,9 @@ function SectionLabel({ label }: { label: string }) {
 
 export function WhatIfPanel({ acquisition, operations, proForma, refinance, baseResult, embedded }: WhatIfPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [breakEvenMode, setBreakEvenMode] = useState<'coc' | 'irr'>('coc');
   const [targetCoCReturn, setTargetCoCReturn] = useState(0);
+  const [targetIRR, setTargetIRR] = useState(0);
 
   // ── Anchor values from unit mix ──
   const { units, avgTargetRent, avgPreStabRent } = useMemo(() => computeAvgRents(acquisition), [acquisition]);
@@ -221,67 +243,79 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
     const irrMetric = (r: CoCResult) => r.irr ?? -999;
     const target = targetCoCReturn;
 
-    const vacBreakEven = findBreakEven(v => build({ vacancyPct: v }), overrides.vacancyPct, 95, cocMetric, target, 'up');
-    const rentBreakEven = findBreakEven(v => build({ targetRentPerUnit: v }), 1, overrides.targetRentPerUnit, cocMetric, target, 'down');
-    const rateBreakEven = findBreakEven(v => build({ interestRate: v }), overrides.interestRate, 30, cocMetric, target, 'up');
-    const priceBreakEven = findBreakEven(v => build({ purchasePrice: v }), overrides.purchasePrice, overrides.purchasePrice * 3, cocMetric, target, 'up');
-    const capBreakEven = findBreakEven(v => build({ exitCapRate: v }), overrides.exitCapRate, 30, irrMetric, 0, 'up');
+    const fmt = (be: number | null, format: (v: number) => string) => be !== null ? format(be) : null;
+    const fmtRent = (be: number | null) => be !== null ? `$${Math.round(be).toLocaleString()}/mo` : null;
 
-    const vacCushion = vacBreakEven !== null ? vacBreakEven - overrides.vacancyPct : null;
-    const rentCushion = rentBreakEven !== null ? overrides.targetRentPerUnit - rentBreakEven : null;
-    const rateCushion = rateBreakEven !== null ? rateBreakEven - overrides.interestRate : null;
-    const priceCushion = priceBreakEven !== null ? priceBreakEven - overrides.purchasePrice : null;
-    const capCushion = capBreakEven !== null ? capBreakEven - overrides.exitCapRate : null;
+    // CoC break-evens
+    const vacBE    = findBreakEven(v => build({ vacancyPct: v }),       overrides.vacancyPct,    95,                       cocMetric, target,    'up');
+    const rentBE   = findBreakEven(v => build({ targetRentPerUnit: v }), 1,                       overrides.targetRentPerUnit, cocMetric, target, 'down');
+    const rateBE   = findBreakEven(v => build({ interestRate: v }),      overrides.interestRate,  30,                       cocMetric, target,    'up');
+    const priceBE  = findBreakEven(v => build({ purchasePrice: v }),     overrides.purchasePrice, overrides.purchasePrice * 3, cocMetric, target, 'up');
+    const capBECoC = findBreakEven(v => build({ exitCapRate: v }),       overrides.exitCapRate,   30,                       cocMetric, target,    'up');
+
+    // IRR break-evens
+    const vacBEIRR   = findBreakEven(v => build({ vacancyPct: v }),       overrides.vacancyPct,    95,                       irrMetric, targetIRR, 'up');
+    const rentBEIRR  = findBreakEven(v => build({ targetRentPerUnit: v }), 1,                       overrides.targetRentPerUnit, irrMetric, targetIRR, 'down');
+    const rateBEIRR  = findBreakEven(v => build({ interestRate: v }),      overrides.interestRate,  30,                       irrMetric, targetIRR, 'up');
+    const priceBEIRR = findBreakEven(v => build({ purchasePrice: v }),     overrides.purchasePrice, overrides.purchasePrice * 3, irrMetric, targetIRR, 'up');
+    const capBEIRR   = findBreakEven(v => build({ exitCapRate: v }),       overrides.exitCapRate,   30,                       irrMetric, targetIRR, 'up');
+
+    const cocCushionOf  = (be: number | null, base: number, dir: 'up' | 'down') =>
+      be !== null ? (dir === 'up' ? be - base : base - be) : null;
+    const irrCushionOf  = cocCushionOf;
+
+    const vacCC  = cocCushionOf(vacBE,   overrides.vacancyPct,       'up');
+    const rentCC = cocCushionOf(rentBE,  overrides.targetRentPerUnit, 'down');
+    const rateCC = cocCushionOf(rateBE,  overrides.interestRate,      'up');
+    const priceCC= cocCushionOf(priceBE, overrides.purchasePrice,     'up');
+    const capCC  = cocCushionOf(capBECoC,overrides.exitCapRate,       'up');
+
+    const vacCI  = irrCushionOf(vacBEIRR,   overrides.vacancyPct,       'up');
+    const rentCI = irrCushionOf(rentBEIRR,  overrides.targetRentPerUnit, 'down');
+    const rateCI = irrCushionOf(rateBEIRR,  overrides.interestRate,      'up');
+    const priceCI= irrCushionOf(priceBEIRR, overrides.purchasePrice,     'up');
+    const capCI  = irrCushionOf(capBEIRR,   overrides.exitCapRate,       'up');
 
     return [
       {
-        label: 'Vacancy Rate',
-        assumption: formatPct(overrides.vacancyPct),
-        breakEven: vacBreakEven,
-        breakEvenFormatted: vacBreakEven !== null ? formatPct(vacBreakEven) : null,
-        cushion: vacCushion !== null ? formatPct(vacCushion) : null,
-        cushionPct: vacCushion !== null ? (vacCushion / overrides.vacancyPct) * 100 : null,
-        worseDir: 'up',
+        label: 'Vacancy Rate', assumption: formatPct(overrides.vacancyPct), worseDir: 'up' as const,
+        cocBreakEvenFormatted: fmt(vacBE, formatPct),
+        cocCushion: vacCC !== null ? formatPct(vacCC) : null, cocCushionPct: vacCC !== null ? (vacCC / overrides.vacancyPct) * 100 : null,
+        irrBreakEvenFormatted: fmt(vacBEIRR, formatPct),
+        irrCushion: vacCI !== null ? formatPct(vacCI) : null, irrCushionPct: vacCI !== null ? (vacCI / overrides.vacancyPct) * 100 : null,
       },
       {
-        label: 'Target Rent / unit',
-        assumption: `$${Math.round(overrides.targetRentPerUnit).toLocaleString()}/mo`,
-        breakEven: rentBreakEven,
-        breakEvenFormatted: rentBreakEven !== null ? `$${Math.round(rentBreakEven).toLocaleString()}/mo` : null,
-        cushion: rentCushion !== null ? `$${Math.round(rentCushion).toLocaleString()}` : null,
-        cushionPct: rentCushion !== null ? (rentCushion / overrides.targetRentPerUnit) * 100 : null,
-        worseDir: 'down',
+        label: 'Target Rent / unit', assumption: `$${Math.round(overrides.targetRentPerUnit).toLocaleString()}/mo`, worseDir: 'down' as const,
+        cocBreakEvenFormatted: fmtRent(rentBE),
+        cocCushion: rentCC !== null ? `$${Math.round(rentCC).toLocaleString()}` : null, cocCushionPct: rentCC !== null ? (rentCC / overrides.targetRentPerUnit) * 100 : null,
+        irrBreakEvenFormatted: fmtRent(rentBEIRR),
+        irrCushion: rentCI !== null ? `$${Math.round(rentCI).toLocaleString()}` : null, irrCushionPct: rentCI !== null ? (rentCI / overrides.targetRentPerUnit) * 100 : null,
       },
       {
-        label: 'Interest Rate',
-        assumption: formatPct(overrides.interestRate),
-        breakEven: rateBreakEven,
-        breakEvenFormatted: rateBreakEven !== null ? formatPct(rateBreakEven) : null,
-        cushion: rateCushion !== null ? formatPct(rateCushion) : null,
-        cushionPct: rateCushion !== null ? (rateCushion / overrides.interestRate) * 100 : null,
-        worseDir: 'up',
+        label: 'Interest Rate', assumption: formatPct(overrides.interestRate), worseDir: 'up' as const,
+        cocBreakEvenFormatted: fmt(rateBE, formatPct),
+        cocCushion: rateCC !== null ? formatPct(rateCC) : null, cocCushionPct: rateCC !== null ? (rateCC / overrides.interestRate) * 100 : null,
+        irrBreakEvenFormatted: fmt(rateBEIRR, formatPct),
+        irrCushion: rateCI !== null ? formatPct(rateCI) : null, irrCushionPct: rateCI !== null ? (rateCI / overrides.interestRate) * 100 : null,
       },
       {
-        label: 'Purchase Price',
-        assumption: formatCurrency(overrides.purchasePrice),
-        breakEven: priceBreakEven,
-        breakEvenFormatted: priceBreakEven !== null ? formatCurrency(priceBreakEven) : null,
-        cushion: priceCushion !== null ? formatCurrency(priceCushion) : null,
-        cushionPct: priceCushion !== null ? (priceCushion / overrides.purchasePrice) * 100 : null,
-        worseDir: 'up',
+        label: 'Purchase Price', assumption: formatCurrency(overrides.purchasePrice), worseDir: 'up' as const,
+        cocBreakEvenFormatted: fmt(priceBE, formatCurrency),
+        cocCushion: priceCC !== null ? formatCurrency(priceCC) : null, cocCushionPct: priceCC !== null ? (priceCC / overrides.purchasePrice) * 100 : null,
+        irrBreakEvenFormatted: fmt(priceBEIRR, formatCurrency),
+        irrCushion: priceCI !== null ? formatCurrency(priceCI) : null, irrCushionPct: priceCI !== null ? (priceCI / overrides.purchasePrice) * 100 : null,
       },
       {
-        label: 'Exit Cap Rate (IRR)',
-        assumption: formatPct(overrides.exitCapRate),
-        breakEven: capBreakEven,
-        breakEvenFormatted: capBreakEven !== null ? formatPct(capBreakEven) : null,
-        cushion: capCushion !== null ? formatPct(capCushion) : null,
-        cushionPct: capCushion !== null ? (capCushion / overrides.exitCapRate) * 100 : null,
-        worseDir: 'up',
+        label: 'Exit Cap Rate', assumption: formatPct(overrides.exitCapRate), worseDir: 'up' as const,
+        cocNA: true,
+        cocBreakEvenFormatted: fmt(capBECoC, formatPct),
+        cocCushion: capCC !== null ? formatPct(capCC) : null, cocCushionPct: capCC !== null ? (capCC / overrides.exitCapRate) * 100 : null,
+        irrBreakEvenFormatted: fmt(capBEIRR, formatPct),
+        irrCushion: capCI !== null ? formatPct(capCI) : null, irrCushionPct: capCI !== null ? (capCI / overrides.exitCapRate) * 100 : null,
       },
     ];
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overrides, targetCoCReturn, acquisition, operations, proForma, refinance]);
+  }, [overrides, targetCoCReturn, targetIRR, acquisition, operations, proForma, refinance]);
 
   // ── Slider ranges ──
   const targetMin = Math.max(1, Math.round(basePreStabRent * 0.7));
@@ -370,26 +404,49 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
 
       {/* Break-even table */}
       <div className="space-y-3">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Break-even Analysis</p>
             <p className="text-xs text-slate-400 mt-0.5">How much can each variable move before the deal fails your target?</p>
           </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <span className="text-xs text-slate-500">Target CoC</span>
-            <input
-              type="number"
-              value={targetCoCReturn}
-              onChange={e => setTargetCoCReturn(Number(e.target.value))}
-              className="w-14 text-xs text-right tabular-nums font-medium text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-700 border-none rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-primary-400"
-              step={0.5}
-              min={-20}
-              max={50}
-            />
-            <span className="text-xs text-slate-500">%</span>
+          <div className="flex flex-col items-end gap-2 shrink-0">
+            {/* Metric toggle */}
+            <div className="flex items-center bg-slate-100 dark:bg-slate-700/60 rounded-lg p-0.5">
+              {(['coc', 'irr'] as const).map(m => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setBreakEvenMode(m)}
+                  className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
+                    breakEvenMode === m
+                      ? 'bg-white dark:bg-slate-600 text-slate-800 dark:text-slate-100 shadow-sm'
+                      : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'
+                  }`}
+                >
+                  {m === 'coc' ? 'CoC' : 'IRR'}
+                </button>
+              ))}
+            </div>
+            {/* Target input — updates the active metric */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-slate-500">Target</span>
+              <input
+                type="number"
+                value={breakEvenMode === 'coc' ? targetCoCReturn : targetIRR}
+                onChange={e => breakEvenMode === 'coc'
+                  ? setTargetCoCReturn(Number(e.target.value))
+                  : setTargetIRR(Number(e.target.value))
+                }
+                className="input w-16 text-xs text-right tabular-nums py-1 px-2"
+                step={0.5}
+                min={-20}
+                max={50}
+              />
+              <span className="text-xs text-slate-500">%</span>
+            </div>
           </div>
         </div>
-        <BreakEvenTable rows={breakEvenRows} />
+        <BreakEvenTable rows={breakEvenRows} mode={breakEvenMode} />
       </div>
     </div>
   );
