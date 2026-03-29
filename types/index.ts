@@ -400,3 +400,18 @@ export interface CoCResult {
   terminalEquity: number;
   irrCashFlows: number[];
 }
+
+// ── Property Tax Estimation types ─────────────────────────────────────────────
+
+export interface PropertyTaxResult {
+  jurisdiction_key: string;
+  net_estimated_annual_tax: number;
+  effective_tax_rate_percentage: number;
+  regime_type: string;
+  calculation_breakdown: string[];
+  investor_penalties_applied: string[];
+  next_refresh_date: string;
+  refresh_reason: string;
+  is_cached: boolean;
+  source: string;
+}

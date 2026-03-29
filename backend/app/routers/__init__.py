@@ -8,6 +8,7 @@ from app.routers.attachments import router as attachments_router
 from app.routers.attachments import attachments_router as attachments_download_router
 from app.routers.admin import router as admin_router
 from app.routers.export import router as export_router
+from app.routers.property_tax import router as property_tax_router
 
 __all__ = [
     "auth_router",
@@ -20,4 +21,5 @@ __all__ = [
     "attachments_download_router",
     "admin_router",
     "export_router",
+    "property_tax_router",
 ]

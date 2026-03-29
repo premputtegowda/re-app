@@ -518,4 +518,16 @@ export const api = {
       throw new ApiError(response.status, error.detail || 'Failed to decline request');
     }
   },
+
+  async estimatePropertyTax(address: string, purchasePrice: number) {
+    const response = await authFetch('/api/property-tax/estimate', {
+      method: 'POST',
+      body: JSON.stringify({ address, purchase_price: purchasePrice }),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new ApiError(response.status, error.detail || 'Unable to retrieve tax info — please enter your own estimate');
+    }
+    return response.json();
+  },
 };

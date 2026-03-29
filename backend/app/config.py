@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # Gemini AI
     gemini_api_key: str = ""
 
+    # Serper.dev (web search for property tax data)
+    serper_api_key: str = ""
+
     # Cloudflare R2
     r2_account_id: str = ""
     r2_access_key_id: str = ""

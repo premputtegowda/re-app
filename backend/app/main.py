@@ -17,6 +17,7 @@ from app.routers import (
     attachments_download_router,
     admin_router,
     export_router,
+    property_tax_router,
 )
 from app.services.scheduler import create_scheduler
 
@@ -70,6 +71,7 @@ app.include_router(attachments_router, prefix="/api")
 app.include_router(attachments_download_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
 app.include_router(export_router, prefix="/api")
+app.include_router(property_tax_router, prefix="/api")
 
 
 @app.get("/")

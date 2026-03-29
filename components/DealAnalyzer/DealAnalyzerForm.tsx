@@ -13,6 +13,7 @@ import { StepExit } from './steps/StepExit';
 import { ResultsPanel } from './ResultsPanel';
 import { ProFormaGrid, defaultProForma } from './ProFormaGrid';
 import { RehabRentCalculator } from './RehabRentCalculator';
+import { PropertyTaxEstimator } from './PropertyTaxEstimator';
 import { projectScenario } from '@/utils/dealAnalyzerCalc';
 import { useDealAnalyzerStore, type DealAnalyzerDraft } from '@/lib/dealAnalyzerStore';
 import type {
@@ -243,6 +244,10 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     initialDeal?.mcResults ? (initialDeal.mcResults as SavedMCResults) : null
   );
 
+
+  // Property tax state — value is $/mo for the Property Taxes ProForma expense
+  const [propertyTaxValue, setPropertyTaxValue] = useState(0);
+  const [propertyTaxIsManual, setPropertyTaxIsManual] = useState(false);
 
   // Save state
   const [savedDealId, setSavedDealId] = useState<string | null>(initialDeal?.id ?? null);
@@ -729,6 +734,25 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 }}
               />
             )}
+            <PropertyTaxEstimator
+              address={acquisition.propertyAddress}
+              purchasePrice={acquisition.purchasePrice}
+              value={propertyTaxValue}
+              onChange={(monthly) => {
+                setPropertyTaxValue(monthly);
+                // Sync into the ProForma "Property Taxes" expense
+                setProForma((prev) => ({
+                  ...prev,
+                  expenses: prev.expenses.map((exp) =>
+                    exp.name === 'Property Taxes'
+                      ? { ...exp, stabValue: monthly, t12Value: monthly }
+                      : exp
+                  ),
+                }));
+              }}
+              isManual={propertyTaxIsManual}
+              onManualChange={setPropertyTaxIsManual}
+            />
             <ProFormaGrid
               data={proForma}
               onChange={setProForma}
