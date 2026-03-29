@@ -35,14 +35,22 @@ DEFAULT_CATEGORIES = [
 
 
 def _set_refresh_cookie(response: Response, token: str, expires_at: datetime) -> None:
-    """Set the refresh token as an HttpOnly cookie."""
+    """Set the refresh token as an HttpOnly cookie.
+
+    In production (HTTPS) the frontend and backend are on different domains, so
+    we need SameSite=None to allow the cookie to be sent with cross-origin fetch
+    requests (credentials: 'include').  SameSite=None requires Secure=True.
+    In local development (HTTP) we fall back to SameSite=Lax because browsers
+    reject SameSite=None on non-secure connections.
+    """
     secure = settings.frontend_url.startswith("https")
+    samesite = "none" if secure else "lax"
     response.set_cookie(
         key=REFRESH_COOKIE_NAME,
         value=token,
         httponly=True,
         secure=secure,
-        samesite="lax",
+        samesite=samesite,
         expires=int(expires_at.timestamp()),
         path="/api/auth",  # Only sent to auth endpoints — limits exposure
     )
