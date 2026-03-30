@@ -1,9 +1,20 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Zap, X, Wand2 } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
+
+export interface CalcPersistedState {
+  mode: 'calculator' | 'manual';
+  totalDuration: number;
+  rehabType: 'stabilization' | 'renovation';
+  unitsToStabilize: number[];
+  perUnitMonths: number[];
+  scheduleByType: number[][];
+  manualDuration: number;
+  manualPreStabRents: number[];
+}
 
 export interface UnitTypeInput {
   label: string;
@@ -36,16 +47,37 @@ export function simulateFromSchedule(
 ): SimulationResult {
   const totalMonths = totalYears * 12;
 
-  // Pre-compute completion month → count per type
-  const completionsByType = unitTypes.map((_, t) => {
-    const completions = new Map<number, number>();
-    const sched = scheduleByType[t] ?? [];
+  // Pre-compute completion data per type.
+  // For fractional offline months (e.g. 0.5): units finish mid-month, so the partial month
+  // earns (1 - frac) * targetRent * count. Track separately from full completions.
+  const completionsByType: Map<number, number>[]       = unitTypes.map(() => new Map());
+  const partialRentByType: Map<number, number>[]       = unitTypes.map(() => new Map());
+
+  for (let t = 0; t < unitTypes.length; t++) {
+    const sched       = scheduleByType[t] ?? [];
+    const offline     = perUnitMonthsByType[t] ?? 0;
+    const offlineFull = Math.floor(offline);
+    const offlineFrac = offline - offlineFull;
+
     for (let i = 0; i < sched.length; i++) {
-      const doneMonth = (i + 1) + (perUnitMonthsByType[t] ?? 0);
-      completions.set(doneMonth, (completions.get(doneMonth) ?? 0) + sched[i]);
+      const count      = sched[i];
+      if (count === 0) continue;
+      const startMonth = i + 1;
+
+      if (offlineFrac === 0) {
+        // Whole months — original behaviour
+        const doneMonth = startMonth + offlineFull;
+        completionsByType[t].set(doneMonth, (completionsByType[t].get(doneMonth) ?? 0) + count);
+      } else {
+        // Fractional offline: partial month earns (1 - frac) * targetRent * count
+        const partialMonth = startMonth + offlineFull;
+        const doneMonth    = partialMonth + 1;
+        completionsByType[t].set(doneMonth, (completionsByType[t].get(doneMonth) ?? 0) + count);
+        const partialRent  = (1 - offlineFrac) * (unitTypes[t]?.targetRent ?? 0) * count;
+        partialRentByType[t].set(partialMonth, (partialRentByType[t].get(partialMonth) ?? 0) + partialRent);
+      }
     }
-    return completions;
-  });
+  }
 
   // Initial stable count per type = count not scheduled for renovation
   const stableByType = unitTypes.map((ut, t) => {
@@ -71,7 +103,9 @@ export function simulateFromSchedule(
       const inRenovation = Math.max(0, startedSoFar - doneSoFar);
       const inPlaceUnits = Math.max(0, ut.count - stableByType[t] - inRenovation);
 
-      const typeRent = inPlaceUnits * ut.inPlaceRent + stableByType[t] * ut.targetRent;
+      const typeRent = inPlaceUnits * ut.inPlaceRent
+        + stableByType[t] * ut.targetRent
+        + (partialRentByType[t].get(m) ?? 0);
       monthlyByType[t].push(typeRent);
       monthRent += typeRent;
     }
@@ -86,7 +120,7 @@ export function simulateFromSchedule(
   for (let t = 0; t < unitTypes.length; t++) {
     const sched = scheduleByType[t] ?? [];
     if (sched.some(n => n > 0)) {
-      maxStabMonth = Math.max(maxStabMonth, sched.length + (perUnitMonthsByType[t] ?? 0));
+      maxStabMonth = Math.max(maxStabMonth, Math.ceil(sched.length + (perUnitMonthsByType[t] ?? 0)));
     }
   }
 
@@ -128,6 +162,8 @@ interface RehabRentCalculatorProps {
   onApplyPreStab?: (values: number[]) => void;
   onOpenChange?: (v: boolean) => void;
   grossRentGrowthPct?: number;
+  initialState?: CalcPersistedState;
+  onStateChange?: (state: CalcPersistedState) => void;
 }
 
 export function RehabRentCalculator({
@@ -139,27 +175,47 @@ export function RehabRentCalculator({
   onApplyPreStab,
   onOpenChange,
   grossRentGrowthPct = 0,
+  initialState,
+  onStateChange,
 }: RehabRentCalculatorProps) {
   const setOpen = (v: boolean) => { onOpenChange?.(v); };
 
   const isApplied  = Object.keys(appliedYears).length > 0;
   const hasRentData = unitTypes.some(t => t.inPlaceRent > 0 && t.targetRent > 0);
 
-  // ── Shared state ──
-  const [totalDuration, setTotalDuration]   = useState(0);
-  const [rehabType, setRehabType]           = useState<'stabilization' | 'renovation'>('renovation');
+  // ── Mode ──
+  const [mode, setMode] = useState<'calculator' | 'manual'>(() => initialState?.mode ?? 'calculator');
 
-  // ── Per-type state ──
-  const [unitsToStabilize, setUnitsToStabilize]   = useState<number[]>(() => unitTypes.map(() => 0));
-  const [perUnitMonths, setPerUnitMonths]         = useState<number[]>(() => unitTypes.map(() => 0));
-  const [scheduleByType, setScheduleByType]       = useState<number[][]>(() => unitTypes.map(() => []));
+  // ── Calculator state ──
+  const [totalDuration, setTotalDuration]   = useState(() => initialState?.totalDuration ?? 0);
+  const [rehabType, setRehabType]           = useState<'stabilization' | 'renovation'>(() => initialState?.rehabType ?? 'renovation');
 
-  // Reset when number of unit types changes
+  // ── Per-type calculator state ──
+  const [unitsToStabilize, setUnitsToStabilize]   = useState<number[]>(() => initialState?.unitsToStabilize ?? unitTypes.map(() => 0));
+  const [perUnitMonths, setPerUnitMonths]         = useState<number[]>(() => initialState?.perUnitMonths ?? unitTypes.map(() => 0));
+  const [scheduleByType, setScheduleByType]       = useState<number[][]>(() => initialState?.scheduleByType ?? unitTypes.map(() => []));
+  const [openYear, setOpenYear]                   = useState<number | null>(null);
+
+  // ── Manual mode state ──
+  const [manualDuration, setManualDuration]         = useState(() => initialState?.manualDuration ?? 0);
+  const [manualPreStabRents, setManualPreStabRents] = useState<number[]>(() => initialState?.manualPreStabRents ?? unitTypes.map(() => 0));
+
+  // Notify parent of state changes so it can persist across open/close
   useEffect(() => {
+    onStateChange?.({ mode, totalDuration, rehabType, unitsToStabilize, perUnitMonths, scheduleByType, manualDuration, manualPreStabRents });
+  }, [mode, totalDuration, rehabType, unitsToStabilize, perUnitMonths, scheduleByType, manualDuration, manualPreStabRents]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reset only when number of unit types genuinely changes (skip on initial mount)
+  const prevUnitTypesLengthRef = useRef(unitTypes.length);
+  useEffect(() => {
+    if (prevUnitTypesLengthRef.current === unitTypes.length) return;
+    prevUnitTypesLengthRef.current = unitTypes.length;
     setUnitsToStabilize(unitTypes.map(() => 0));
     setPerUnitMonths(unitTypes.map(() => 0));
     setScheduleByType(unitTypes.map(() => []));
     setTotalDuration(0);
+    setManualPreStabRents(unitTypes.map(() => 0));
+    setManualDuration(0);
   }, [unitTypes.length]);
 
   // Resize per-type schedules when totalDuration changes
@@ -239,10 +295,14 @@ export function RehabRentCalculator({
 
   const blendedMonthlyByType = useMemo(() => {
     if (!result || transitionYears.length === 0) return unitTypes.map(() => 0);
-    const totalAvg = transitionYears.reduce((s, y) => s + (result.yearlyRents[y - 1] ?? 0), 0)
-      / transitionYears.length;
-    const totalCount = unitTypes.reduce((s, t) => s + t.count, 0);
-    return unitTypes.map(ut => totalCount > 0 ? totalAvg * ut.count / totalCount / 12 : 0);
+    return unitTypes.map((ut, t) => {
+      const transitionMonths = Math.min(result.stabilizationMonth, transitionYears.length * 12);
+      if (transitionMonths === 0 || ut.count === 0) return 0;
+      const totalRent = result.monthlyByType[t]
+        ?.slice(0, transitionMonths)
+        .reduce((s, r) => s + r, 0) ?? 0;
+      return totalRent / transitionMonths / ut.count;
+    });
   }, [result, transitionYears, unitTypes]);
 
   const yearGroups = useMemo(() => groupByYear(totalDuration), [totalDuration]);
@@ -284,6 +344,156 @@ export function RehabRentCalculator({
         </button>
       </div>
 
+      {/* ── Mode switcher ── */}
+      <div className="px-3.5 pb-3">
+        <div className="flex rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden text-xs font-medium">
+          <button
+            type="button"
+            onClick={() => setMode('calculator')}
+            className={`flex-1 py-2 transition-colors ${
+              mode === 'calculator'
+                ? 'bg-primary-600 text-white'
+                : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/40'
+            }`}
+          >
+            Calculator
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode('manual')}
+            className={`flex-1 py-2 border-l border-slate-200 dark:border-slate-700 transition-colors ${
+              mode === 'manual'
+                ? 'bg-primary-600 text-white'
+                : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/40'
+            }`}
+          >
+            Enter My Numbers
+          </button>
+        </div>
+      </div>
+
+      {/* ── Manual entry mode ── */}
+      {mode === 'manual' && (
+        <div className="px-3.5 pb-4 space-y-4 border-t border-slate-200 dark:border-slate-700 pt-4">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Enter the stabilization period length and your expected effective rent per unit type during renovation. These will be applied directly to the pro forma.
+          </p>
+
+          {/* Duration */}
+          <div>
+            <label className="text-xs font-medium text-slate-500 dark:text-slate-400 block mb-1">
+              Stabilization duration (months)
+            </label>
+            <input
+              type="number"
+              className="input text-sm"
+              min={1}
+              max={projectionYears * 12}
+              placeholder="e.g. 12"
+              value={manualDuration === 0 ? '' : manualDuration}
+              onChange={e => setManualDuration(Math.min(projectionYears * 12, Math.max(0, Number(e.target.value) || 0)))}
+              aria-label="Manual stabilization duration"
+            />
+          </div>
+
+          {/* Per-type pre-stab rents */}
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-slate-500 dark:text-slate-400 block">
+              Effective pre-stab rent ($/mo per unit)
+            </label>
+            {unitTypes.map((ut, t) => (
+              <div key={t} className="flex items-center gap-3">
+                <span className="text-xs font-medium text-slate-600 dark:text-slate-300 w-20 shrink-0">{ut.label}</span>
+                <div className="flex-1 relative">
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">$</span>
+                  <input
+                    type="number"
+                    className="input text-sm pl-6"
+                    min={0}
+                    placeholder={`target ${ut.targetRent}`}
+                    value={manualPreStabRents[t] === 0 ? '' : manualPreStabRents[t]}
+                    onChange={e => {
+                      const v = Number(e.target.value) || 0;
+                      setManualPreStabRents(prev => prev.map((r, i) => i === t ? v : r));
+                    }}
+                    aria-label={`Pre-stab rent ${ut.label}`}
+                  />
+                </div>
+                <span className="text-[11px] text-slate-400 dark:text-slate-500 shrink-0">
+                  target ${ut.targetRent}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* Summary */}
+          {manualDuration > 0 && manualPreStabRents.some(r => r > 0) && (
+            <div className="rounded-lg bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 px-3 py-2.5 space-y-1">
+              <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Summary</p>
+              {unitTypes.map((ut, t) => (
+                <div key={t} className="flex justify-between text-xs">
+                  <span className="text-slate-500 dark:text-slate-400">{ut.label}</span>
+                  <span className="text-slate-700 dark:text-slate-200 tabular-nums">
+                    ${(manualPreStabRents[t] ?? 0).toLocaleString()}/mo × {ut.count} units
+                    {' = '}${((manualPreStabRents[t] ?? 0) * ut.count).toLocaleString()}/mo
+                  </span>
+                </div>
+              ))}
+              <div className="border-t border-slate-200 dark:border-slate-700 pt-1 flex justify-between text-xs font-semibold">
+                <span className="text-slate-600 dark:text-slate-300">Total/mo during stab</span>
+                <span className="text-amber-600 dark:text-amber-400 tabular-nums">
+                  ${unitTypes.reduce((s, ut, t) => s + (manualPreStabRents[t] ?? 0) * ut.count, 0).toLocaleString()}/mo
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 dark:text-slate-500">
+                Applied for {manualDuration} month{manualDuration !== 1 ? 's' : ''} ({Math.ceil(manualDuration / 12)} year{Math.ceil(manualDuration / 12) !== 1 ? 's' : ''})
+              </p>
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={manualDuration === 0 || manualPreStabRents.every(r => r === 0)}
+              onClick={() => {
+                const transYears = Math.ceil(manualDuration / 12);
+                const preStabMonthly = unitTypes.reduce((s, ut, t) => s + (manualPreStabRents[t] ?? 0) * ut.count, 0);
+                const targetMonthly  = unitTypes.reduce((s, ut) => s + ut.targetRent * ut.count, 0);
+                const overrides: Record<number, number> = {};
+                for (let y = 1; y <= Math.min(transYears, projectionYears); y++) {
+                  const stabMonthsThisYear = Math.min(12, manualDuration - (y - 1) * 12);
+                  const targetMonthsThisYear = 12 - stabMonthsThisYear;
+                  overrides[y] = preStabMonthly * stabMonthsThisYear + targetMonthly * targetMonthsThisYear;
+                }
+                const firstFull = transYears + 1;
+                if (firstFull <= projectionYears) {
+                  overrides[firstFull] = totalTargetAnnual * Math.pow(1 + grossRentGrowthPct / 100, transYears);
+                }
+                onApply(overrides);
+                if (onApplyPreStab) onApplyPreStab(manualPreStabRents);
+                setOpen(false);
+              }}
+              className="flex-1 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-40 text-white text-sm font-medium transition-colors"
+            >
+              Apply to Pro Forma
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setManualDuration(0);
+                setManualPreStabRents(unitTypes.map(() => 0));
+              }}
+              className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Calculator mode ── */}
+      {mode === 'calculator' && (
       <div className="px-3.5 pb-4 space-y-4 border-t border-slate-200 dark:border-slate-700 pt-4">
 
         {/* ── Shared: duration + type ── */}
@@ -371,6 +581,7 @@ export function RehabRentCalculator({
                       className="input text-sm w-full"
                       min={0}
                       max={24}
+                      step={0.25}
                       placeholder="0"
                       value={perUnitMonths[t] === 0 ? '' : perUnitMonths[t]}
                       onChange={e => setTypeMonths(t, Number(e.target.value) || 0)}
@@ -469,7 +680,7 @@ export function RehabRentCalculator({
 
         {/* ── Projection: per-year monthly breakdown ── */}
         {result && transitionYears.length > 0 && (
-          <div className="space-y-3">
+          <div className="space-y-1.5">
             {transitionYears.map(y => {
               const monthStart = (y - 1) * 12; // 0-based index into monthlyByType
               const monthsInYear = Array.from({ length: 12 }, (_, i) => monthStart + i);
@@ -478,16 +689,29 @@ export function RehabRentCalculator({
               );
               const yearTotal = yearTypeAnnuals.reduce((a, b) => a + b, 0);
               const typeTargetAnnuals = unitTypes.map(ut => ut.count * ut.targetRent * 12);
+              const isOpen = openYear === y;
 
               return (
                 <div key={y} className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-                  {/* Year header */}
-                  <div className="px-3 py-2 bg-slate-100 dark:bg-slate-700/50 flex items-center justify-between">
+                  {/* Year header — clickable accordion toggle */}
+                  <button
+                    type="button"
+                    onClick={() => setOpenYear(isOpen ? null : y)}
+                    className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-700/50 flex items-center justify-between hover:bg-slate-200/60 dark:hover:bg-slate-700/80 transition-colors"
+                  >
                     <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Year {y} — Rent Schedule</span>
-                    <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 tabular-nums">{fmt$(yearTotal)}</span>
-                  </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 tabular-nums">{fmt$(yearTotal)}</span>
+                      <svg
+                        className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+                        fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </button>
 
-                  <div className="overflow-x-auto">
+                  {isOpen && <div className="overflow-x-auto">
                     <table className="w-full text-xs min-w-[280px]">
                       <thead>
                         <tr className="border-b border-slate-100 dark:border-slate-700/60 bg-slate-50/50 dark:bg-slate-800/20">
@@ -537,7 +761,7 @@ export function RehabRentCalculator({
                         </tr>
                       </tfoot>
                     </table>
-                  </div>
+                  </div>}
                 </div>
               );
             })}
@@ -577,7 +801,14 @@ export function RehabRentCalculator({
           </button>
           <button
             type="button"
-            onClick={() => { onClear(); setOpen(false); }}
+            onClick={() => {
+              setTotalDuration(0);
+              setRehabType('renovation');
+              setUnitsToStabilize(unitTypes.map(() => 0));
+              setPerUnitMonths(unitTypes.map(() => 0));
+              setScheduleByType(unitTypes.map(() => []));
+              setOpenYear(null);
+            }}
             className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors"
           >
             Clear
@@ -592,6 +823,7 @@ export function RehabRentCalculator({
         )}
 
       </div>
+      )}
     </div>
   );
 }

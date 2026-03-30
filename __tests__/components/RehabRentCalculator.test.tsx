@@ -390,18 +390,22 @@ describe('RehabRentCalculator — Apply to Pro Forma', () => {
 // ── Clear & Cancel ────────────────────────────────────────────────────────────
 
 describe('RehabRentCalculator — Clear', () => {
-  it('calls onClear when Clear is clicked', async () => {
+  it('does not call onClear or close when Clear is clicked (only resets local fields)', async () => {
     const user = userEvent.setup();
     const { props } = renderCalc();
     await user.click(screen.getByRole('button', { name: /Clear/i }));
-    expect(props.onClear).toHaveBeenCalledOnce();
+    expect(props.onClear).not.toHaveBeenCalled();
+    expect(props.onOpenChange).not.toHaveBeenCalledWith(false);
   });
 
-  it('calls onOpenChange(false) after clearing', async () => {
+  it('resets total duration to 0 after Clear', async () => {
     const user = userEvent.setup();
-    const { props } = renderCalc();
+    renderCalc();
+    const durationInput = screen.getByLabelText(/total duration/i);
+    await user.clear(durationInput);
+    await user.type(durationInput, '12');
     await user.click(screen.getByRole('button', { name: /Clear/i }));
-    expect(props.onOpenChange).toHaveBeenCalledWith(false);
+    expect((durationInput as HTMLInputElement).value).toBe('');
   });
 });
 

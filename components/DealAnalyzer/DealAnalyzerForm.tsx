@@ -12,7 +12,7 @@ import { StepRenovation } from './steps/StepRenovation';
 import { StepExit } from './steps/StepExit';
 import { ResultsPanel } from './ResultsPanel';
 import { ProFormaGrid, defaultProForma } from './ProFormaGrid';
-import { RehabRentCalculator } from './RehabRentCalculator';
+import { RehabRentCalculator, type CalcPersistedState } from './RehabRentCalculator';
 import { projectScenario } from '@/utils/dealAnalyzerCalc';
 import { useDealAnalyzerStore, type DealAnalyzerDraft } from '@/lib/dealAnalyzerStore';
 import type {
@@ -191,6 +191,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const [errors, setErrors] = useState<string[]>([]);
   const [errorStep, setErrorStep] = useState<number | null>(null);
   const [calcOpen, setCalcOpen] = useState(false);
+  const [calcState, setCalcState] = useState<CalcPersistedState | undefined>(undefined);
 
   // Form data
   const [acquisition, setAcquisition] = useState<CoCAcquisition>(
@@ -309,11 +310,16 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
           if (!ovs[1]) delete ovs[1];
         }
       }
-      // Only pin year 2 to target when there's a pre-stab period in year 1;
-      // otherwise let year 2 grow naturally from stabilized via growth rate.
-      if (targetAnnual > 0 && preStabAnnual > 0 && preStabAnnual < targetAnnual) {
+      // Only pin year 2 to target when there's a pre-stab period in year 1 AND
+      // the calculator hasn't already set year 2 to a stabilizing (below-target) value.
+      const yr2AlreadyStabilizing =
+        ovs[2]?.grossRentSystem === true &&
+        typeof ovs[2]?.grossRent === 'number' &&
+        targetAnnual > 0 &&
+        ovs[2].grossRent < targetAnnual;
+      if (targetAnnual > 0 && preStabAnnual > 0 && preStabAnnual < targetAnnual && !yr2AlreadyStabilizing) {
         ovs[2] = { ...ovs[2], grossRent: targetAnnual, grossRentSystem: true };
-      } else {
+      } else if (!yr2AlreadyStabilizing) {
         if (ovs[2]) {
           const { grossRent: _r, grossRentSystem: _s, ...rest } = ovs[2];
           ovs[2] = Object.keys(rest).length ? rest : undefined as never;
@@ -802,6 +808,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 appliedYears={calcAppliedYears}
                 grossRentGrowthPct={proForma.grossRent.growthPct}
                 onOpenChange={setCalcOpen}
+                initialState={calcState}
+                onStateChange={setCalcState}
                 onApplyPreStab={(values) => {
                   if (hasMfr) {
                     updateAcquisition('unitMix', acquisition.unitMix.map((u, i) => ({

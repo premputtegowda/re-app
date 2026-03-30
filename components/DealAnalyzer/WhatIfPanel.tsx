@@ -186,7 +186,7 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
   const effectiveUnits = Math.max(1, units);
   const fallbackPerUnit = (proForma.grossRent.stabilized || proForma.grossRent.t12 || 12000) / (effectiveUnits * 12);
   const baseTargetRent = avgTargetRent > 0 ? avgTargetRent : fallbackPerUnit;
-  const basePreStabRent = avgPreStabRent > 0 ? avgPreStabRent : baseTargetRent * 0.8;
+  const basePreStabRent = avgPreStabRent > 0 ? avgPreStabRent : baseTargetRent;
 
   const origStabilizedAnnual = proForma.grossRent.stabilized;
   const hasStabilizingYears = Object.values(proForma.yearOverrides ?? {}).some(
