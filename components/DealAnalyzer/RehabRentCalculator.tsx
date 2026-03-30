@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Zap, X } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 export interface UnitTypeInput {
-  label: string;       // e.g. "1BR/1BA × 4"
+  label: string;
   count: number;
   inPlaceRent: number;  // $/unit/month — income before renovation
   targetRent: number;   // $/unit/month — income after renovation (stabilized)
@@ -17,24 +17,25 @@ export interface UnitTypeInput {
 
 /**
  * Simulate a single unit type with fractional pace (token-bucket).
- * Returns array of monthly gross rent collections for `totalYears × 12` months.
+ * Returns array of monthly gross rent collections for totalYears × 12 months.
+ * duration=0 → unit flips to targetRent immediately (stabilization, no vacancy).
+ * duration>0 → unit earns $0 for N months (renovation), then targetRent.
  */
 function simulateUnitType(
   count: number,
   ipRent: number,
-  psRent: number,
-  pacePerMonth: number, // may be fractional
+  targetRent: number,
+  pacePerMonth: number,
   durationMonths: number,
   totalMonths: number
 ): number[] {
   let inPlace = count;
-  let preStab = 0;
-  let bucket = 0; // fractional pace accumulator
+  let stabilized = 0;
+  let bucket = 0;
   const schedule = new Map<number, number>();
   const monthly: number[] = [];
 
   for (let m = 1; m <= totalMonths; m++) {
-    // Token-bucket: accumulate fractional units, start whole ones
     bucket += pacePerMonth;
     const toStart = Math.min(Math.floor(bucket), inPlace);
     bucket -= toStart;
@@ -45,14 +46,13 @@ function simulateUnitType(
       schedule.set(done, (schedule.get(done) ?? 0) + toStart);
     }
 
-    // Complete renovations due this month
     const completing = schedule.get(m) ?? 0;
     if (completing > 0) {
-      preStab += completing;
+      stabilized += completing;
       schedule.delete(m);
     }
 
-    monthly.push(inPlace * ipRent + preStab * psRent);
+    monthly.push(inPlace * ipRent + stabilized * targetRent);
   }
 
   return monthly;
@@ -61,34 +61,56 @@ function simulateUnitType(
 export interface SimulationResult {
   yearlyRents: number[];           // total across all unit types, per year
   perTypeYearlyRents: number[][];  // [typeIndex][year]
-  stabilizationMonth: number;      // month when all units are renovated
+  stabilizationMonth: number;      // month when last stabilizing unit completes
 }
 
+/**
+ * unitsToStabilize: how many units need work (≤ totalUnits).
+ * Remaining units (totalUnits - unitsToStabilize) earn targetRent throughout.
+ * Stabilizing units are distributed proportionally across unit types.
+ */
 export function simulateRehabRent(
   unitTypes: UnitTypeInput[],
   totalPacePerMonth: number,
   durationMonths: number,
-  totalYears: number
+  totalYears: number,
+  unitsToStabilize?: number
 ): SimulationResult {
   const totalUnits = unitTypes.reduce((s, t) => s + t.count, 0);
+  const stabUnits = Math.min(Math.max(1, unitsToStabilize ?? totalUnits), totalUnits);
+
   if (totalUnits === 0 || totalPacePerMonth <= 0) {
     return { yearlyRents: Array(totalYears).fill(0), perTypeYearlyRents: [], stabilizationMonth: 0 };
   }
 
   const totalMonths = totalYears * 12;
 
-  // Run per-type simulation with proportional pace
-  const perTypeMonthly = unitTypes.map(t => {
-    const typePace = totalPacePerMonth * (t.count / totalUnits);
-    return simulateUnitType(t.count, t.inPlaceRent, t.targetRent, typePace, durationMonths, totalMonths);
+  // Distribute stabUnits proportionally across types (floor + remainder to last)
+  let remaining = stabUnits;
+  const stabilizeCounts = unitTypes.map((t, i) => {
+    if (i === unitTypes.length - 1) return remaining;
+    const c = Math.floor(t.count * stabUnits / totalUnits);
+    remaining -= c;
+    return c;
   });
 
-  // Sum monthly income across types
+  const perTypeMonthly = unitTypes.map((t, i) => {
+    const stabCount = stabilizeCounts[i];
+    const targetCount = t.count - stabCount; // already at target rent
+    const typePace = stabCount > 0 ? totalPacePerMonth * (stabCount / stabUnits) : 0;
+
+    const stabMonthly = stabCount > 0
+      ? simulateUnitType(stabCount, t.inPlaceRent, t.targetRent, typePace, durationMonths, totalMonths)
+      : Array(totalMonths).fill(0);
+
+    // Already-stabilized units earn target rent throughout
+    return stabMonthly.map(m => m + targetCount * t.targetRent);
+  });
+
   const totalMonthly = Array.from({ length: totalMonths }, (_, m) =>
     perTypeMonthly.reduce((s, tm) => s + tm[m], 0)
   );
 
-  // Annual totals
   const yearlyRents = Array.from({ length: totalYears }, (_, y) =>
     totalMonthly.slice(y * 12, (y + 1) * 12).reduce((a, b) => a + b, 0)
   );
@@ -99,8 +121,7 @@ export function simulateRehabRent(
     )
   );
 
-  // Stabilization = last unit finishes: ceil(totalUnits / pace) start months + duration
-  const stabilizationMonth = Math.ceil(totalUnits / totalPacePerMonth) + durationMonths;
+  const stabilizationMonth = Math.ceil(stabUnits / totalPacePerMonth) + durationMonths;
 
   return { yearlyRents, perTypeYearlyRents, stabilizationMonth };
 }
@@ -119,10 +140,8 @@ interface RehabRentCalculatorProps {
   appliedYears: Record<number, number>;
   onApply: (overrides: Record<number, number>) => void;
   onClear: () => void;
-  /** Called with blended monthly rent per unit, indexed by unit type */
   onApplyPreStab?: (values: number[]) => void;
   onOpenChange?: (v: boolean) => void;
-  /** Used to growth-adjust the stabilized anchor override */
   grossRentGrowthPct?: number;
 }
 
@@ -137,25 +156,42 @@ export function RehabRentCalculator({
   grossRentGrowthPct = 0,
 }: RehabRentCalculatorProps) {
   const setOpen = (v: boolean) => { onOpenChange?.(v); };
-  const [pace, setPace] = useState(1);
-  const [duration, setDuration] = useState(1);
 
   const totalUnits = unitTypes.reduce((s, t) => s + t.count, 0);
   const isApplied = Object.keys(appliedYears).length > 0;
   const hasRentData = unitTypes.some(t => t.inPlaceRent > 0 && t.targetRent > 0);
 
+  const [unitsToStabilize, setUnitsToStabilize] = useState(totalUnits);
+  const [pace, setPace] = useState(1);
+  const [rehabType, setRehabType] = useState<'stabilization' | 'renovation'>('renovation');
+  const [duration, setDuration] = useState(1);
+
+  // Reset unitsToStabilize when unit mix changes
+  useEffect(() => { setUnitsToStabilize(totalUnits); }, [totalUnits]);
+
+  const actualDuration = rehabType === 'stabilization' ? 0 : duration;
+
+  // Distribute stabUnits proportionally (mirrors simulateRehabRent)
+  const stabilizeCounts = useMemo(() => {
+    let remaining = unitsToStabilize;
+    return unitTypes.map((t, i) => {
+      if (i === unitTypes.length - 1) return remaining;
+      const c = Math.floor(t.count * unitsToStabilize / totalUnits);
+      remaining -= c;
+      return c;
+    });
+  }, [unitTypes, unitsToStabilize, totalUnits]);
+
   const result = useMemo<SimulationResult | null>(() => {
     if (!hasRentData || totalUnits === 0) return null;
-    return simulateRehabRent(unitTypes, pace, duration, Math.max(projectionYears, 2));
-  }, [unitTypes, pace, duration, projectionYears, hasRentData, totalUnits]);
+    return simulateRehabRent(unitTypes, pace, actualDuration, Math.max(projectionYears, 2), unitsToStabilize);
+  }, [unitTypes, pace, actualDuration, projectionYears, hasRentData, totalUnits, unitsToStabilize]);
 
   const transitionYears = useMemo(() => {
     if (!result) return [];
     const stabYear = Math.ceil(result.stabilizationMonth / 12);
     return Array.from({ length: Math.min(stabYear, projectionYears) }, (_, i) => i + 1);
   }, [result, projectionYears]);
-
-  const showTypesBreakdown = unitTypes.length > 1 && result !== null;
 
   // Blended monthly per unit per type — average across transition years
   const blendedMonthlyPerType = useMemo<number[]>(() => {
@@ -180,7 +216,7 @@ export function RehabRentCalculator({
         ? 'border-blue-200 dark:border-blue-800/60 bg-blue-50/40 dark:bg-blue-900/10'
         : 'border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30'
     }`}>
-      {/* Header with Cancel */}
+      {/* Header */}
       <div className="flex items-center justify-between px-3.5 py-3">
         <div className="flex items-center gap-2">
           <Zap size={14} className={isApplied ? 'text-blue-500' : 'text-slate-400'} />
@@ -204,42 +240,12 @@ export function RehabRentCalculator({
         </button>
       </div>
 
-      <div className="px-3.5 pb-4 space-y-4 border-t border-slate-200 dark:border-slate-700 pt-3">
+      <div className="px-3.5 pb-4 space-y-5 border-t border-slate-200 dark:border-slate-700 pt-4">
 
-          {/* Inputs */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-medium text-slate-500 dark:text-slate-400 block mb-1">
-                Rehab pace (units/month)
-              </label>
-              <input
-                type="number"
-                className="input text-sm"
-                min={1}
-                max={totalUnits}
-                value={pace}
-                onChange={e => setPace(Math.max(1, Math.min(totalUnits, Number(e.target.value))))}
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-slate-500 dark:text-slate-400 block mb-1">
-                Rehab duration (months/unit)
-              </label>
-              <input
-                type="number"
-                className="input text-sm"
-                min={1}
-                max={12}
-                value={duration}
-                onChange={e => setDuration(Math.max(1, Math.min(12, Number(e.target.value))))}
-              />
-            </div>
-          </div>
-
-          {/* Unit mix summary */}
-          {unitTypes.length > 1 && (
-            <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-              <div className="overflow-x-auto">
+        {/* Unit mix reference */}
+        {unitTypes.length > 1 && (
+          <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+            <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-slate-100 dark:bg-slate-700/50">
@@ -252,7 +258,8 @@ export function RehabRentCalculator({
                 </thead>
                 <tbody>
                   {unitTypes.map((t, i) => {
-                    const typePace = pace * (t.count / totalUnits);
+                    const stabCount = stabilizeCounts[i] ?? 0;
+                    const typePace = stabCount > 0 ? pace * (stabCount / unitsToStabilize) : 0;
                     return (
                       <tr key={i} className="border-t border-slate-100 dark:border-slate-700/50">
                         <td className="px-2 py-1.5 text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap">{t.label}</td>
@@ -262,114 +269,189 @@ export function RehabRentCalculator({
                           {t.preStabRent ? `${fmt$(t.preStabRent)}/mo` : '—'}
                         </td>
                         <td className="px-2 py-1.5 text-right tabular-nums text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                          {typePace < 1 ? `1 per ${Math.round(1 / typePace)} mo` : `${typePace.toFixed(1)}/mo`}
+                          {stabCount === 0 ? '—' : typePace < 1 ? `1 per ${Math.round(1 / typePace)} mo` : `${typePace.toFixed(1)}/mo`}
                         </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
-              </div>
             </div>
-          )}
+          </div>
+        )}
 
-          {/* Stabilization note */}
-          {result && (
-            <p className="text-xs text-slate-400 dark:text-slate-500">
-              All {totalUnits} units stabilized by month {result.stabilizationMonth}
-              {result.stabilizationMonth <= projectionYears * 12
-                ? ` (Yr ${Math.ceil(result.stabilizationMonth / 12)})`
-                : ' — beyond projection window'}
-            </p>
-          )}
-
-          {/* Results table — transition years only */}
-          {result && transitionYears.length > 0 && (() => {
-            const inPlacePerUnit = totalUnits > 0
-              ? unitTypes.reduce((s, t) => s + t.count * t.inPlaceRent, 0) / totalUnits : 0;
-            const targetPerUnit = totalUnits > 0
-              ? unitTypes.reduce((s, t) => s + t.count * t.targetRent, 0) / totalUnits : 0;
-            const blendedByYear = transitionYears.map(y =>
-              totalUnits > 0 ? result.yearlyRents[y - 1] / 12 / totalUnits : 0
-            );
-
-            return (
-              <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="bg-slate-100 dark:bg-slate-700/50">
-                      <th className="px-3 py-2 text-left font-medium text-slate-500 dark:text-slate-400">Year</th>
-                      <th className="px-3 py-2 text-right font-medium text-slate-500 dark:text-slate-400">In-Place/mo</th>
-                      <th className="px-3 py-2 text-right font-medium text-amber-600 dark:text-amber-400">Pre-Stab/mo</th>
-                      <th className="px-3 py-2 text-right font-medium text-emerald-600 dark:text-emerald-400">Target/mo</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {transitionYears.map((year, yi) => (
-                      <tr key={year} className="border-t border-slate-100 dark:border-slate-700/50">
-                        <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-300">Yr {year}</td>
-                        <td className="px-3 py-2 text-right tabular-nums text-slate-500 dark:text-slate-400">{fmt$(inPlacePerUnit)}/mo</td>
-                        <td className="px-3 py-2 text-right tabular-nums font-semibold text-amber-600 dark:text-amber-400">{fmt$(blendedByYear[yi])}/mo</td>
-                        <td className="px-3 py-2 text-right tabular-nums text-slate-500 dark:text-slate-400">{fmt$(targetPerUnit)}/mo</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            );
-          })()}
-
-          {/* Actions */}
+        {/* Step 1 */}
+        <div className="space-y-1.5">
+          <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+            ① How many units need to be stabilized?
+          </p>
           <div className="flex items-center gap-2">
+            <input
+              type="number"
+              className="input text-sm w-20"
+              min={1}
+              max={totalUnits}
+              value={unitsToStabilize}
+              onChange={e => setUnitsToStabilize(Math.max(1, Math.min(totalUnits, Number(e.target.value))))}
+            />
+            <span className="text-sm text-slate-400 dark:text-slate-500">of {totalUnits} total</span>
+            {unitsToStabilize < totalUnits && (
+              <span className="text-xs text-emerald-600 dark:text-emerald-400">
+                {totalUnits - unitsToStabilize} already at target
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Step 2 */}
+        <div className="space-y-1.5">
+          <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+            ② At what pace?
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              className="input text-sm w-20"
+              min={1}
+              max={unitsToStabilize}
+              value={pace}
+              onChange={e => setPace(Math.max(1, Math.min(unitsToStabilize, Number(e.target.value))))}
+            />
+            <span className="text-sm text-slate-400 dark:text-slate-500">units / month</span>
+          </div>
+        </div>
+
+        {/* Step 3 */}
+        <div className="space-y-2">
+          <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+            ③ Stabilization or renovation?
+          </p>
+          <div className="flex gap-2">
             <button
               type="button"
-              disabled={!result}
-              onClick={() => {
-                if (!result) return;
-                const overrides: Record<number, number> = {};
-                // Transition years: blended actual rent from simulation
-                transitionYears.forEach(y => { overrides[y] = result.yearlyRents[y - 1]; });
-                // First stabilized year: target rent grown from acquisition (Year 0 basis)
-                // targetRent × (1+g)^stabYear ensures Year N = what market would pay at that point
-                const stabYear = Math.ceil(result.stabilizationMonth / 12);
-                const firstStabilizedYear = stabYear + 1;
-                if (firstStabilizedYear <= projectionYears && transitionYears.length > 0) {
-                  const totalTargetAnnual = unitTypes.reduce((s, t) => s + t.count * t.targetRent, 0) * 12;
-                  overrides[firstStabilizedYear] = totalTargetAnnual * Math.pow(1 + grossRentGrowthPct / 100, stabYear);
-                }
-                onApply(overrides);
-                setOpen(false);
-              }}
-              className="flex-1 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-40 text-white text-sm font-medium transition-colors"
+              onClick={() => setRehabType('stabilization')}
+              className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                rehabType === 'stabilization'
+                  ? 'bg-primary-600 text-white border-primary-600'
+                  : 'border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-slate-300'
+              }`}
             >
-              Apply to Pro Forma
+              Stabilization
             </button>
             <button
               type="button"
-              disabled={!result || blendedMonthlyPerType.length === 0}
-              onClick={() => {
-                if (!result || !onApplyPreStab) return;
-                onApplyPreStab(blendedMonthlyPerType);
-                setOpen(false);
-              }}
-              className="flex-1 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-white text-sm font-medium transition-colors"
+              onClick={() => setRehabType('renovation')}
+              className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                rehabType === 'renovation'
+                  ? 'bg-primary-600 text-white border-primary-600'
+                  : 'border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-slate-300'
+              }`}
             >
-              Apply to Pre-Stab
-            </button>
-            <button
-              type="button"
-              onClick={() => { onClear(); setOpen(false); }}
-              className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors"
-            >
-              Clear
+              Renovation
             </button>
           </div>
-
-          <p className="text-[10px] text-slate-400 dark:text-slate-500 leading-relaxed">
-            Each unit type is renovated proportionally. Growth rate applies from Yr{' '}
-            {(transitionYears[transitionYears.length - 1] ?? 1) + 1} onwards.
-          </p>
+          {rehabType === 'stabilization' && (
+            <p className="text-[11px] text-slate-400 dark:text-slate-500">
+              Unit flips to target rent immediately — no vacancy period.
+            </p>
+          )}
+          {rehabType === 'renovation' && (
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                className="input text-sm w-20"
+                min={1}
+                max={24}
+                value={duration}
+                onChange={e => setDuration(Math.max(1, Math.min(24, Number(e.target.value))))}
+              />
+              <span className="text-sm text-slate-400 dark:text-slate-500">months per unit</span>
+            </div>
+          )}
         </div>
+
+        {/* Stabilization note */}
+        {result && (
+          <p className="text-xs text-slate-400 dark:text-slate-500">
+            {unitsToStabilize === totalUnits ? 'All' : `${unitsToStabilize} of ${totalUnits}`} units stabilized by month {result.stabilizationMonth}
+            {result.stabilizationMonth <= projectionYears * 12
+              ? ` (Yr ${Math.ceil(result.stabilizationMonth / 12)})`
+              : ' — beyond projection window'}
+            {unitsToStabilize < totalUnits && ` · ${totalUnits - unitsToStabilize} units at target rent throughout`}
+          </p>
+        )}
+
+        {/* Results table — transition years */}
+        {result && transitionYears.length > 0 && (() => {
+          const targetPerUnit = totalUnits > 0
+            ? unitTypes.reduce((s, t) => s + t.count * t.targetRent, 0) / totalUnits : 0;
+          const blendedByYear = transitionYears.map(y =>
+            totalUnits > 0 ? result.yearlyRents[y - 1] / 12 / totalUnits : 0
+          );
+
+          return (
+            <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="bg-slate-100 dark:bg-slate-700/50">
+                    <th className="px-3 py-2 text-left font-medium text-slate-500 dark:text-slate-400">Year</th>
+                    <th className="px-3 py-2 text-right font-medium text-amber-600 dark:text-amber-400">Blended/mo</th>
+                    <th className="px-3 py-2 text-right font-medium text-emerald-600 dark:text-emerald-400">Target/mo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {transitionYears.map((year, yi) => (
+                    <tr key={year} className="border-t border-slate-100 dark:border-slate-700/50">
+                      <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-300">Yr {year}</td>
+                      <td className="px-3 py-2 text-right tabular-nums font-semibold text-amber-600 dark:text-amber-400">{fmt$(blendedByYear[yi])}/mo</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-slate-500 dark:text-slate-400">{fmt$(targetPerUnit)}/mo</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        })()}
+
+        {/* Actions */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={!result}
+            onClick={() => {
+              if (!result) return;
+              const overrides: Record<number, number> = {};
+              transitionYears.forEach(y => { overrides[y] = result.yearlyRents[y - 1]; });
+              const stabYear = Math.ceil(result.stabilizationMonth / 12);
+              const firstStabilizedYear = stabYear + 1;
+              if (firstStabilizedYear <= projectionYears && transitionYears.length > 0) {
+                const totalTargetAnnual = unitTypes.reduce((s, t) => s + t.count * t.targetRent, 0) * 12;
+                overrides[firstStabilizedYear] = totalTargetAnnual * Math.pow(1 + grossRentGrowthPct / 100, stabYear);
+              }
+              onApply(overrides);
+              if (onApplyPreStab && blendedMonthlyPerType.length > 0) {
+                onApplyPreStab(blendedMonthlyPerType);
+              }
+              setOpen(false);
+            }}
+            className="flex-1 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-40 text-white text-sm font-medium transition-colors"
+          >
+            Apply to Pro Forma
+          </button>
+          <button
+            type="button"
+            onClick={() => { onClear(); setOpen(false); }}
+            className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors"
+          >
+            Clear
+          </button>
+        </div>
+
+        <p className="text-[10px] text-slate-400 dark:text-slate-500 leading-relaxed">
+          Stabilizing units distributed proportionally across unit types. Growth rate applies from Yr{' '}
+          {(transitionYears[transitionYears.length - 1] ?? 1) + 1} onwards.
+        </p>
+      </div>
     </div>
   );
 }
