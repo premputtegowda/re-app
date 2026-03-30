@@ -560,8 +560,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
           </span>
         );
 
-        const mfrRentFields = ['inPlaceRent', 'rentMonthly', 'preStabRent'] as const;
-        const mfrRentLabels = { inPlaceRent: 'In-Place', rentMonthly: 'Target', preStabRent: 'Pre-Stab' };
+        const mfrRentFields = ['inPlaceRent', 'rentMonthly'] as const;
+        const mfrRentLabels = { inPlaceRent: 'In-Place', rentMonthly: 'Target' };
 
         const rentSchedule = hasMfr ? (
           <div className="space-y-2">
@@ -584,7 +584,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                   <p className="text-xs font-semibold text-slate-600 dark:text-slate-400">
                     {entry.beds}BR/{entry.baths}BA × {entry.count}
                   </p>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 gap-2">
                     {mfrRentFields.map((field) => {
                       const warnCell = field === 'rentMonthly' && isVisited && !(entry[field] || 0);
                       return (
@@ -609,6 +609,17 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                       );
                     })}
                   </div>
+                  {(entry.preStabRent || 0) > 0 && (
+                    <div className="pt-1 flex items-center justify-between">
+                      <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500 flex items-center gap-1">
+                        Pre-Stab avg/unit
+                        <span className="text-[9px] text-blue-400 dark:text-blue-500">(calc)</span>
+                      </span>
+                      <span className="text-xs font-semibold tabular-nums text-blue-600 dark:text-blue-400">
+                        ${Math.round(entry.preStabRent || 0).toLocaleString()}/mo
+                      </span>
+                    </div>
+                  )}
                 </div>
               ))}
               {(() => {
@@ -619,15 +630,23 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 const avgPreStab = acquisition.unitMix.reduce((s, e) => s + e.count * (e.preStabRent || 0), 0) / totalUnits;
                 const fmt = (n: number) => n === 0 ? '—' : `$${Math.round(n).toLocaleString()}`;
                 return (
-                  <div className="px-3 py-2 bg-slate-50 dark:bg-slate-700/30 border-t-2 border-slate-200 dark:border-slate-600">
-                    <div className="grid grid-cols-3 gap-2">
-                      {[avgInPlace, avgTarget, avgPreStab].map((val, i) => (
+                  <div className="px-3 py-2 bg-slate-50 dark:bg-slate-700/30 border-t-2 border-slate-200 dark:border-slate-600 space-y-1.5">
+                    <div className="grid grid-cols-2 gap-2">
+                      {[avgInPlace, avgTarget].map((val, i) => (
                         <div key={i}>
-                          <p className="text-[10px] font-medium text-slate-400 mb-0.5">{['In-Place', 'Target', 'Pre-Stab'][i]}</p>
+                          <p className="text-[10px] font-medium text-slate-400 mb-0.5">{['In-Place avg', 'Target avg'][i]}</p>
                           <p className="text-xs font-semibold tabular-nums text-slate-700 dark:text-slate-300">{fmt(val)}</p>
                         </div>
                       ))}
                     </div>
+                    {avgPreStab > 0 && (
+                      <div className="flex items-center justify-between pt-0.5 border-t border-slate-200 dark:border-slate-600">
+                        <p className="text-[10px] font-medium text-slate-400 flex items-center gap-1">
+                          Pre-Stab avg/unit <span className="text-[9px] text-blue-400">(calc)</span>
+                        </p>
+                        <p className="text-xs font-semibold tabular-nums text-blue-600 dark:text-blue-400">{fmt(avgPreStab)}/mo</p>
+                      </div>
+                    )}
                   </div>
                 );
               })()}
@@ -648,7 +667,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                         )}
                       </span>
                     </th>
-                    <th className="px-3 py-2 text-right text-xs font-medium text-slate-500 dark:text-slate-400"><PreStabHeader onOpen={() => setCalcOpen(true)} /></th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-slate-500 dark:text-slate-400">
+                      <PreStabHeader onOpen={() => setCalcOpen(true)} />
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
@@ -674,6 +695,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                           </td>
                         );
                       })}
+                      <td className="px-3 py-2 text-right text-xs tabular-nums text-blue-600 dark:text-blue-400 font-medium">
+                        {(entry.preStabRent || 0) > 0 ? `$${Math.round(entry.preStabRent || 0).toLocaleString()}` : '—'}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -690,7 +714,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                         <td className="px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400">Avg/unit</td>
                         <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-slate-700 dark:text-slate-300">{fmt(avgInPlace)}</td>
                         <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-slate-700 dark:text-slate-300">{fmt(avgTarget)}</td>
-                        <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-slate-700 dark:text-slate-300">{fmt(avgPreStab)}</td>
+                        <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-blue-600 dark:text-blue-400">{fmt(avgPreStab)}</td>
                       </tr>
                     </tfoot>
                   );
@@ -701,38 +725,40 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         ) : (
           <div className="space-y-2">
             <p className="label">Rent Schedule ($/mo)</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {([
-                { field: 'sfrInPlaceRent', label: 'In-Place', isPreStab: false },
-                { field: 'sfrTargetRent',  label: 'Target',   isPreStab: false },
-                { field: 'sfrPreStabRent', label: 'Pre-Stab', isPreStab: true  },
-              ] as const).map(({ field, label, isPreStab }) => {
+                { field: 'sfrInPlaceRent', label: 'In-Place' },
+                { field: 'sfrTargetRent',  label: 'Target'   },
+              ] as const).map(({ field, label }) => {
                 const warnTarget = field === 'sfrTargetRent' && isVisited && !acquisition.sfrTargetRent;
                 return (
-                <div key={field}>
-                  <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 flex items-center gap-1">
-                    {label}
-                    {isPreStab && (
-                      <button type="button" onClick={() => setCalcOpen(true)}
-                        className="flex items-center text-amber-500 hover:text-amber-600 dark:text-amber-400 dark:hover:text-amber-300 transition-colors"
-                        title="Use calculator">
-                        <Calculator size={11} />
-                      </button>
-                    )}
-                    {warnTarget && <AlertTriangle size={12} className="text-amber-500 shrink-0" data-testid="sfr-target-rent-warning" />}
-                  </label>
-                  <input
-                    type="number"
-                    className={`input text-sm ${warnTarget ? 'border-amber-300 focus:ring-amber-400' : ''}`}
-                    min={0}
-                    placeholder="0"
-                    value={(acquisition[field] || 0) === 0 ? '' : acquisition[field]}
-                    onChange={(e) => updateAcquisition(field, Number(e.target.value))}
-                  />
-                </div>
+                  <div key={field}>
+                    <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 flex items-center gap-1">
+                      {label}
+                      {warnTarget && <AlertTriangle size={12} className="text-amber-500 shrink-0" data-testid="sfr-target-rent-warning" />}
+                    </label>
+                    <input
+                      type="number"
+                      className={`input text-sm ${warnTarget ? 'border-amber-300 focus:ring-amber-400' : ''}`}
+                      min={0}
+                      placeholder="0"
+                      value={(acquisition[field] || 0) === 0 ? '' : acquisition[field]}
+                      onChange={(e) => updateAcquisition(field, Number(e.target.value))}
+                    />
+                  </div>
                 );
               })}
             </div>
+            {(acquisition.sfrPreStabRent || 0) > 0 && (
+              <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-blue-50/60 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800/40">
+                <span className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                  Pre-Stab avg/unit <span className="text-[10px] text-blue-400">(from calculator)</span>
+                </span>
+                <span className="text-sm font-semibold tabular-nums text-blue-600 dark:text-blue-400">
+                  ${Math.round(acquisition.sfrPreStabRent || 0).toLocaleString()}/mo
+                </span>
+              </div>
+            )}
           </div>
         );
 

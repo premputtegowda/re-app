@@ -1,11 +1,13 @@
 /**
  * Tests that the Rent Schedule section in DealAnalyzerForm uses a mobile-friendly
- * layout so 4-digit+ rent values are never clipped.
+ * layout with computed (read-only) Pre-Stab values from the stabilization calculator.
  *
- * SFR:  grid-cols-1 sm:grid-cols-3  — stacks to one column on mobile
+ * SFR:  grid-cols-1 sm:grid-cols-2  — 2 editable fields (In-Place, Target)
+ *       Pre-Stab shown as read-only blue badge when set by calculator
  * MFR:  CSS dual layout:
- *   - Mobile  (sm:hidden)       — card per unit type, grid-cols-3 for 3 inputs
- *   - Desktop (hidden sm:block) — original table unchanged
+ *   - Mobile  (sm:hidden)       — card per unit type, grid-cols-2 for 2 inputs
+ *                                  Pre-Stab shown as read-only label when set
+ *   - Desktop (hidden sm:block) — table with In-Place, Target editable + Pre-Stab read-only
  */
 
 import { describe, it, expect } from 'vitest';
@@ -18,19 +20,36 @@ const SRC = readFileSync(
 );
 
 describe('Rent Schedule — SFR mobile layout', () => {
-  it('SFR grid uses grid-cols-1 sm:grid-cols-3 (stacks on mobile)', () => {
-    expect(SRC).toContain('grid-cols-1 sm:grid-cols-3');
+  it('SFR grid uses grid-cols-1 sm:grid-cols-2 (stacks on mobile, 2 editable fields)', () => {
+    expect(SRC).toContain('grid-cols-1 sm:grid-cols-2');
   });
 
-  it('SFR section has no bare grid-cols-3 without responsive prefix', () => {
-    // Every grid-cols-3 that is NOT preceded by sm: (or similar responsive prefix)
-    // Only the mobile card's inner grid-cols-3 (inside sm:hidden) is allowed.
-    // The SFR top-level rent grid must be responsive.
+  it('SFR section shows In-Place and Target inputs', () => {
     const sfrSection = SRC.slice(
       SRC.indexOf('Rent Schedule ($/mo)'),
-      SRC.indexOf('Rent Schedule ($/mo)') + 400
+      SRC.indexOf('Rent Schedule ($/mo)') + 600
     );
-    expect(sfrSection).toContain('grid-cols-1 sm:grid-cols-3');
+    expect(sfrSection).toContain('sfrInPlaceRent');
+    expect(sfrSection).toContain('sfrTargetRent');
+  });
+
+  it('SFR section does not contain an editable sfrPreStabRent input', () => {
+    const sfrSection = SRC.slice(
+      SRC.indexOf('Rent Schedule ($/mo)'),
+      SRC.indexOf('Rent Schedule ($/mo)') + 800
+    );
+    // sfrPreStabRent should only appear as a read-only display, not as an onChange input
+    const inputMatch = sfrSection.match(/onChange.*sfrPreStabRent/s);
+    expect(inputMatch).toBeNull();
+  });
+
+  it('SFR section shows pre-stab value as read-only when set', () => {
+    const sfrSection = SRC.slice(
+      SRC.indexOf('Rent Schedule ($/mo)'),
+      SRC.indexOf('Rent Schedule ($/mo)') + 2000
+    );
+    expect(sfrSection).toContain('sfrPreStabRent');
+    expect(sfrSection).toContain('from calculator');
   });
 });
 
@@ -49,36 +68,40 @@ describe('Rent Schedule — MFR mobile dual layout', () => {
     expect(mobileIdx).toBeLessThan(desktopIdx);
   });
 
-  it('mobile card section renders In-Place, Target, Pre-Stab labels', () => {
-    // These labels must appear inside the sm:hidden block
+  it('mobile card section renders In-Place and Target labels', () => {
     const hiddenStart = SRC.indexOf('sm:hidden');
     const hiddenEnd   = SRC.indexOf('hidden sm:block');
     const mobileBlock = SRC.slice(hiddenStart, hiddenEnd);
     expect(mobileBlock).toContain('In-Place');
     expect(mobileBlock).toContain('Target');
-    expect(mobileBlock).toContain('Pre-Stab');
   });
 
-  it('mobile card section uses grid-cols-3 for 3-input row', () => {
+  it('mobile card section uses grid-cols-2 for 2-input row', () => {
     const hiddenStart = SRC.indexOf('sm:hidden');
     const hiddenEnd   = SRC.indexOf('hidden sm:block');
     const mobileBlock = SRC.slice(hiddenStart, hiddenEnd);
-    expect(mobileBlock).toContain('grid-cols-3');
+    expect(mobileBlock).toContain('grid-cols-2');
+  });
+
+  it('mobile card shows pre-stab as read-only (calc) label', () => {
+    const hiddenStart = SRC.indexOf('sm:hidden');
+    const hiddenEnd   = SRC.indexOf('hidden sm:block');
+    const mobileBlock = SRC.slice(hiddenStart, hiddenEnd);
+    expect(mobileBlock).toContain('Pre-Stab');
+    expect(mobileBlock).toContain('calc');
   });
 
   it('desktop section contains a <table> element', () => {
-    const desktopIdx  = SRC.indexOf('hidden sm:block');
+    const desktopIdx   = SRC.indexOf('hidden sm:block');
     const desktopBlock = SRC.slice(desktopIdx, desktopIdx + 2000);
     expect(desktopBlock).toContain('<table');
   });
 
-  it('mobile avg summary row shows Avg/unit equivalent labels', () => {
+  it('mobile avg summary row shows In-Place and Target averages', () => {
     const hiddenStart = SRC.indexOf('sm:hidden');
     const hiddenEnd   = SRC.indexOf('hidden sm:block');
     const mobileBlock = SRC.slice(hiddenStart, hiddenEnd);
-    // Avg summary row contains In-Place / Target / Pre-Stab as string literals
-    expect(mobileBlock).toContain("'In-Place'");
-    expect(mobileBlock).toContain("'Target'");
-    expect(mobileBlock).toContain("'Pre-Stab'");
+    expect(mobileBlock).toContain('In-Place');
+    expect(mobileBlock).toContain('Target');
   });
 });
