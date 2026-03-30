@@ -760,6 +760,14 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
           <>
             {rentSchedule}
             {calcOpen && (
+              <div
+                className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+                onClick={(e) => { if (e.target === e.currentTarget) setCalcOpen(false); }}
+              >
+                {/* Backdrop */}
+                <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+                {/* Sheet */}
+                <div className="relative w-full sm:max-w-lg max-h-[85dvh] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-white dark:bg-slate-800 shadow-2xl">
               <RehabRentCalculator
                 unitTypes={unitTypes}
                 projectionYears={acquisition.projectionYears}
@@ -799,6 +807,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                   });
                 }}
               />
+                </div>
+              </div>
             )}
             <ProFormaGrid
               data={proForma}

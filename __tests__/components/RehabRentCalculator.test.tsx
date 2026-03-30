@@ -302,23 +302,6 @@ describe('RehabRentCalculator — Apply to Pre-Stab', () => {
   });
 });
 
-describe('RehabRentCalculator — rent reference card', () => {
-  it('shows In-Place and Target rent values in the reference card', () => {
-    renderCalc();
-    expect(screen.getByText('In-Place')).toBeInTheDocument();
-    expect(screen.getByText('Target')).toBeInTheDocument();
-    // sfrUnit: inPlaceRent=1200, targetRent=1800
-    expect(screen.getByText('$1,200')).toBeInTheDocument();
-    expect(screen.getByText('$1,800')).toBeInTheDocument();
-  });
-
-  it('shows unit labels in reference card for multi-type', () => {
-    renderCalc({ unitTypes: mfrUnits });
-    expect(screen.getAllByText('1BR/1BA × 3').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText('2BR/2BA × 2').length).toBeGreaterThanOrEqual(1);
-  });
-});
-
 describe('RehabRentCalculator — Cancel button', () => {
   it('renders a Cancel/close button in the header', () => {
     renderCalc();

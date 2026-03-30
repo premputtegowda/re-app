@@ -205,25 +205,6 @@ export function RehabRentCalculator({
 
       <div className="px-3.5 pb-4 space-y-4 border-t border-slate-200 dark:border-slate-700 pt-3">
 
-          {/* Rent reference card */}
-          <div className="rounded-lg bg-slate-100 dark:bg-slate-700/50 px-3 py-2.5 grid grid-cols-2 gap-x-4 gap-y-1">
-            {unitTypes.map((t, i) => (
-              <div key={i} className={unitTypes.length > 1 ? 'contents' : 'contents'}>
-                {unitTypes.length > 1 && (
-                  <p className="col-span-2 text-[10px] font-semibold text-slate-500 dark:text-slate-400 mt-1 first:mt-0">{t.label}</p>
-                )}
-                <div>
-                  <p className="text-[10px] text-slate-400 dark:text-slate-500">In-Place</p>
-                  <p className="text-sm font-semibold tabular-nums text-slate-700 dark:text-slate-300">{fmt$(t.inPlaceRent)}<span className="text-xs font-normal text-slate-400">/mo</span></p>
-                </div>
-                <div>
-                  <p className="text-[10px] text-slate-400 dark:text-slate-500">Target</p>
-                  <p className="text-sm font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">{fmt$(t.targetRent)}<span className="text-xs font-normal text-slate-400">/mo</span></p>
-                </div>
-              </div>
-            ))}
-          </div>
-
           {/* Inputs */}
           <div className="grid grid-cols-2 gap-3">
             <div>
