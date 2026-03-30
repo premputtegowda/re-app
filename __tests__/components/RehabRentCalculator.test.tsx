@@ -302,6 +302,37 @@ describe('RehabRentCalculator — Apply to Pre-Stab', () => {
   });
 });
 
+describe('RehabRentCalculator — rent reference card', () => {
+  it('shows In-Place and Target rent values in the reference card', () => {
+    renderCalc();
+    expect(screen.getByText('In-Place')).toBeInTheDocument();
+    expect(screen.getByText('Target')).toBeInTheDocument();
+    // sfrUnit: inPlaceRent=1200, targetRent=1800
+    expect(screen.getByText('$1,200')).toBeInTheDocument();
+    expect(screen.getByText('$1,800')).toBeInTheDocument();
+  });
+
+  it('shows unit labels in reference card for multi-type', () => {
+    renderCalc({ unitTypes: mfrUnits });
+    expect(screen.getAllByText('1BR/1BA × 3').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('2BR/2BA × 2').length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('RehabRentCalculator — Cancel button', () => {
+  it('renders a Cancel/close button in the header', () => {
+    renderCalc();
+    expect(screen.getByRole('button', { name: /cancel calculator/i })).toBeInTheDocument();
+  });
+
+  it('Cancel button calls onOpenChange(false)', async () => {
+    const user = userEvent.setup();
+    const { props } = renderCalc();
+    await user.click(screen.getByRole('button', { name: /cancel calculator/i }));
+    expect(props.onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
 describe('RehabRentCalculator — Clear', () => {
   it('calls onClear when Clear button is clicked', async () => {
     const user = userEvent.setup();
@@ -340,8 +371,8 @@ describe('RehabRentCalculator — pace input interaction', () => {
 describe('RehabRentCalculator — multi-type unit mix', () => {
   it('shows unit mix breakdown table when more than one unit type', () => {
     renderCalc({ unitTypes: mfrUnits });
-    expect(screen.getByText('1BR/1BA × 3')).toBeInTheDocument();
-    expect(screen.getByText('2BR/2BA × 2')).toBeInTheDocument();
+    expect(screen.getAllByText('1BR/1BA × 3').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('2BR/2BA × 2').length).toBeGreaterThanOrEqual(1);
   });
 
   it('shows Pace column in the unit mix table', () => {

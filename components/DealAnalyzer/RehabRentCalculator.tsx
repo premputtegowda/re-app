@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { Zap } from 'lucide-react';
+import { Zap, X } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -179,7 +179,7 @@ export function RehabRentCalculator({
         ? 'border-blue-200 dark:border-blue-800/60 bg-blue-50/40 dark:bg-blue-900/10'
         : 'border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30'
     }`}>
-      {/* Header */}
+      {/* Header with Cancel */}
       <div className="flex items-center justify-between px-3.5 py-3">
         <div className="flex items-center gap-2">
           <Zap size={14} className={isApplied ? 'text-blue-500' : 'text-slate-400'} />
@@ -192,9 +192,37 @@ export function RehabRentCalculator({
             </span>
           )}
         </div>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+          aria-label="Cancel calculator"
+        >
+          <X size={14} />
+          <span className="hidden sm:inline">Cancel</span>
+        </button>
       </div>
 
       <div className="px-3.5 pb-4 space-y-4 border-t border-slate-200 dark:border-slate-700 pt-3">
+
+          {/* Rent reference card */}
+          <div className="rounded-lg bg-slate-100 dark:bg-slate-700/50 px-3 py-2.5 grid grid-cols-2 gap-x-4 gap-y-1">
+            {unitTypes.map((t, i) => (
+              <div key={i} className={unitTypes.length > 1 ? 'contents' : 'contents'}>
+                {unitTypes.length > 1 && (
+                  <p className="col-span-2 text-[10px] font-semibold text-slate-500 dark:text-slate-400 mt-1 first:mt-0">{t.label}</p>
+                )}
+                <div>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500">In-Place</p>
+                  <p className="text-sm font-semibold tabular-nums text-slate-700 dark:text-slate-300">{fmt$(t.inPlaceRent)}<span className="text-xs font-normal text-slate-400">/mo</span></p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500">Target</p>
+                  <p className="text-sm font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">{fmt$(t.targetRent)}<span className="text-xs font-normal text-slate-400">/mo</span></p>
+                </div>
+              </div>
+            ))}
+          </div>
 
           {/* Inputs */}
           <div className="grid grid-cols-2 gap-3">
