@@ -16,6 +16,7 @@ export interface UnitTypeInput {
 export interface SimulationResult {
   yearlyRents: number[];
   stabilizationMonth: number;
+  monthlyByType: number[][];   // [typeIdx][monthIdx 0-based] = that type's rent contribution
 }
 
 // ── Simulation ─────────────────────────────────────────────────────────────────
@@ -53,6 +54,7 @@ export function simulateFromSchedule(
   });
 
   const monthly: number[] = [];
+  const monthlyByType: number[][] = unitTypes.map(() => []);
 
   for (let m = 1; m <= totalMonths; m++) {
     let monthRent = 0;
@@ -69,7 +71,9 @@ export function simulateFromSchedule(
       const inRenovation = Math.max(0, startedSoFar - doneSoFar);
       const inPlaceUnits = Math.max(0, ut.count - stableByType[t] - inRenovation);
 
-      monthRent += inPlaceUnits * ut.inPlaceRent + stableByType[t] * ut.targetRent;
+      const typeRent = inPlaceUnits * ut.inPlaceRent + stableByType[t] * ut.targetRent;
+      monthlyByType[t].push(typeRent);
+      monthRent += typeRent;
     }
     monthly.push(monthRent);
   }
@@ -86,7 +90,7 @@ export function simulateFromSchedule(
     }
   }
 
-  return { yearlyRents, stabilizationMonth: maxStabMonth };
+  return { yearlyRents, stabilizationMonth: maxStabMonth, monthlyByType };
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -251,8 +255,6 @@ export function RehabRentCalculator({
     </div>
   );
 
-  // month label | per-type inputs | fill button
-  const colTemplate = `2rem repeat(${unitTypes.length}, 1fr) 2.5rem`;
 
   return (
     <div className={`rounded-xl border transition-colors mb-4 ${
@@ -402,58 +404,62 @@ export function RehabRentCalculator({
                     </div>
                   </div>
 
-                  <div className="overflow-x-auto">
-                    {/* Column headers */}
-                    <div className="grid gap-1 px-3 py-1.5 border-b border-slate-100 dark:border-slate-700/60 bg-slate-50/50 dark:bg-slate-800/20"
-                      style={{ gridTemplateColumns: colTemplate }}>
-                      <span />
-                      {unitTypes.map((ut, t) => (
-                        <span key={t} className="text-[11px] font-medium text-slate-500 dark:text-slate-400 text-center">{ut.label}</span>
-                      ))}
-                      <span />
-                    </div>
+                  {/* Type column headers — shown once at top */}
+                  <div className="grid gap-2 px-3 py-2 border-b border-slate-100 dark:border-slate-700/60 bg-slate-50/50 dark:bg-slate-800/20"
+                    style={{ gridTemplateColumns: `repeat(${unitTypes.length}, 1fr)` }}>
+                    {unitTypes.map((ut, t) => (
+                      <span key={t} className="text-xs font-semibold text-slate-500 dark:text-slate-400 text-center tracking-wide uppercase">
+                        {ut.label}
+                      </span>
+                    ))}
+                  </div>
 
-                    {/* Month rows */}
-                    <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
-                      {months.map(m => {
-                        const idx = m - 1;
-                        const isFirst = m === 1;
-                        return (
-                          <div key={m} className="grid gap-1 items-center px-3 py-1.5"
-                            style={{ gridTemplateColumns: colTemplate }}>
-                            <span className="text-sm text-slate-400 dark:text-slate-500 tabular-nums">
-                              <span className="hidden sm:inline">Mo </span>{m}
+                  {/* Month rows: label+fill then inputs */}
+                  <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                    {months.map(m => {
+                      const idx = m - 1;
+                      const isFirst = m === 1;
+                      return (
+                        <div key={m} className="px-3 py-2 space-y-1.5">
+                          {/* Month label + fill button */}
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 tabular-nums uppercase tracking-wide">
+                              Mo {m}
                             </span>
-                            {unitTypes.map((_, t) => {
+                            {isFirst && (
+                              <button
+                                type="button"
+                                onClick={autoFillAll}
+                                className="flex items-center gap-1 text-xs text-primary-600 dark:text-primary-400 hover:text-primary-700 font-medium touch-manipulation"
+                                title="Auto-fill all columns evenly"
+                                aria-label="Auto-fill schedule"
+                              >
+                                <Wand2 size={12} />
+                                Fill
+                              </button>
+                            )}
+                          </div>
+                          {/* Inputs aligned under type headers */}
+                          <div className="grid gap-2"
+                            style={{ gridTemplateColumns: `repeat(${unitTypes.length}, 1fr)` }}>
+                            {unitTypes.map((ut, t) => {
                               const val = scheduleByType[t]?.[idx] ?? 0;
                               return (
                                 <input key={t}
                                   type="number"
-                                  className="input text-sm py-1.5 text-center"
+                                  className="input text-base px-1 py-1 text-center w-full"
                                   min={0}
                                   placeholder="0"
                                   value={val === 0 ? '' : val}
                                   onChange={e => updateCell(t, idx, Number(e.target.value) || 0)}
-                                  aria-label={`Mo ${m} ${unitTypes[t].label}`}
+                                  aria-label={`Mo ${m} ${ut.label}`}
                                 />
                               );
                             })}
-                            {isFirst ? (
-                              <button
-                                type="button"
-                                onClick={autoFillAll}
-                                className="flex items-center justify-center gap-0.5 text-[11px] text-primary-600 dark:text-primary-400 hover:text-primary-700 font-medium touch-manipulation"
-                                title="Auto-fill all columns evenly"
-                                aria-label="Auto-fill schedule"
-                              >
-                                <Wand2 size={11} />
-                                Fill
-                              </button>
-                            ) : <span />}
                           </div>
-                        );
-                      })}
-                    </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -461,31 +467,80 @@ export function RehabRentCalculator({
           </div>
         )}
 
-        {/* ── Projection summary ── */}
+        {/* ── Projection: per-year monthly breakdown ── */}
         {result && transitionYears.length > 0 && (
-          <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="bg-slate-100 dark:bg-slate-700/50">
-                  <th className="px-3 py-2 text-left font-medium text-slate-500 dark:text-slate-400">Year</th>
-                  <th className="px-3 py-2 text-right font-medium text-amber-600 dark:text-amber-400">Gross Rent</th>
-                  <th className="px-3 py-2 text-right font-medium text-emerald-600 dark:text-emerald-400">Target/yr</th>
-                </tr>
-              </thead>
-              <tbody>
-                {transitionYears.map(y => (
-                  <tr key={y} className="border-t border-slate-100 dark:border-slate-700/50">
-                    <td className="px-3 py-2 font-medium text-slate-700 dark:text-slate-300">Yr {y}</td>
-                    <td className="px-3 py-2 text-right tabular-nums font-semibold text-amber-600 dark:text-amber-400">
-                      {fmt$(result.yearlyRents[y - 1])}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-400 dark:text-slate-500">
-                      {fmt$(totalTargetAnnual)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-3">
+            {transitionYears.map(y => {
+              const monthStart = (y - 1) * 12; // 0-based index into monthlyByType
+              const monthsInYear = Array.from({ length: 12 }, (_, i) => monthStart + i);
+              const yearTypeAnnuals = unitTypes.map((_, t) =>
+                monthsInYear.reduce((s, mi) => s + (result.monthlyByType[t]?.[mi] ?? 0), 0)
+              );
+              const yearTotal = yearTypeAnnuals.reduce((a, b) => a + b, 0);
+              const typeTargetAnnuals = unitTypes.map(ut => ut.count * ut.targetRent * 12);
+
+              return (
+                <div key={y} className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                  {/* Year header */}
+                  <div className="px-3 py-2 bg-slate-100 dark:bg-slate-700/50 flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Year {y} — Rent Schedule</span>
+                    <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 tabular-nums">{fmt$(yearTotal)}</span>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs min-w-[280px]">
+                      <thead>
+                        <tr className="border-b border-slate-100 dark:border-slate-700/60 bg-slate-50/50 dark:bg-slate-800/20">
+                          <th className="px-3 py-1.5 text-left font-medium text-slate-400 dark:text-slate-500 w-10">Mo</th>
+                          {unitTypes.map((ut, t) => (
+                            <th key={t} className="px-2 py-1.5 text-right font-semibold text-slate-600 dark:text-slate-300">{ut.label}</th>
+                          ))}
+                          <th className="px-3 py-1.5 text-right font-medium text-amber-600 dark:text-amber-400">Total/mo</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {monthsInYear.map((mi, i) => {
+                          const moNum = monthStart + i + 1;
+                          const typeRents = unitTypes.map((_, t) => result.monthlyByType[t]?.[mi] ?? 0);
+                          const rowTotal = typeRents.reduce((a, b) => a + b, 0);
+                          return (
+                            <tr key={mi} className="border-t border-slate-50 dark:border-slate-700/40 hover:bg-slate-50/50 dark:hover:bg-slate-800/20">
+                              <td className="px-3 py-1 text-slate-400 dark:text-slate-500 tabular-nums">Mo {moNum}</td>
+                              {typeRents.map((rent, t) => (
+                                <td key={t} className={`px-2 py-1 text-right tabular-nums ${rent === 0 ? 'text-red-400 dark:text-red-500' : 'text-slate-600 dark:text-slate-300'}`}>
+                                  {rent === 0 ? '—' : fmt$(rent)}
+                                </td>
+                              ))}
+                              <td className="px-3 py-1 text-right tabular-nums font-medium text-amber-600 dark:text-amber-400">
+                                {rowTotal === 0 ? '—' : fmt$(rowTotal)}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot>
+                        {/* Annual total row */}
+                        <tr className="border-t-2 border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-800/40">
+                          <td className="px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400">Annual</td>
+                          {yearTypeAnnuals.map((ann, t) => (
+                            <td key={t} className="px-2 py-2 text-right tabular-nums font-semibold text-slate-700 dark:text-slate-200">{fmt$(ann)}</td>
+                          ))}
+                          <td className="px-3 py-2 text-right tabular-nums font-bold text-amber-600 dark:text-amber-400">{fmt$(yearTotal)}</td>
+                        </tr>
+                        {/* Target row */}
+                        <tr className="border-t border-slate-100 dark:border-slate-700/60">
+                          <td className="px-3 py-1.5 text-[11px] text-slate-400 dark:text-slate-500">Target</td>
+                          {typeTargetAnnuals.map((tgt, t) => (
+                            <td key={t} className="px-2 py-1.5 text-right tabular-nums text-emerald-600 dark:text-emerald-400">{fmt$(tgt)}</td>
+                          ))}
+                          <td className="px-3 py-1.5 text-right tabular-nums text-emerald-600 dark:text-emerald-400 font-medium">{fmt$(totalTargetAnnual)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 

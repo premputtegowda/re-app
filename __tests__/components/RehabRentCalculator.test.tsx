@@ -292,15 +292,15 @@ describe('RehabRentCalculator — monthly grid', () => {
   it('shows per-type cell inputs in each month row', () => {
     renderCalc({ unitTypes: mfrUnits });
     fireEvent.change(screen.getByLabelText(/Total duration/i), { target: { value: '2' } });
-    expect(screen.getByLabelText(/Mo 1 1BR/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Mo 1 2BR/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Mo 2 1BR/i)).toBeInTheDocument();
+    expect(screen.getAllByLabelText(/Mo 1 1BR/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByLabelText(/Mo 1 2BR/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByLabelText(/Mo 2 1BR/i).length).toBeGreaterThanOrEqual(1);
   });
 
   it('Auto-fill button appears in month 1 row', () => {
     renderCalc({ unitTypes: mfrUnits });
     fireEvent.change(screen.getByLabelText(/Total duration/i), { target: { value: '3' } });
-    expect(screen.getByRole('button', { name: /Auto-fill schedule/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /Auto-fill schedule/i }).length).toBeGreaterThanOrEqual(1);
   });
 
   it('Auto-fill distributes units evenly across months', async () => {
@@ -310,12 +310,12 @@ describe('RehabRentCalculator — monthly grid', () => {
     fireEvent.change(screen.getByLabelText(/Total duration/i), { target: { value: '4' } });
     fireEvent.change(screen.getByLabelText(/Units to stabilize 1BR/i), { target: { value: '4' } });
 
-    await user.click(screen.getByRole('button', { name: /Auto-fill schedule/i }));
+    await user.click(screen.getAllByRole('button', { name: /Auto-fill schedule/i })[0]);
 
     // 4 units / 4 months = 1 per month
-    const mo1Input = screen.getByLabelText(/Mo 1 1BR/i) as HTMLInputElement;
+    const mo1Input = screen.getAllByLabelText(/Mo 1 1BR/i)[0] as HTMLInputElement;
     expect(Number(mo1Input.value)).toBe(1);
-    const mo4Input = screen.getByLabelText(/Mo 4 1BR/i) as HTMLInputElement;
+    const mo4Input = screen.getAllByLabelText(/Mo 4 1BR/i)[0] as HTMLInputElement;
     expect(Number(mo4Input.value)).toBe(1);
   });
 });
@@ -334,7 +334,7 @@ describe('RehabRentCalculator — schedule validation', () => {
     renderCalc({ unitTypes: mfrUnits });
     fireEvent.change(screen.getByLabelText(/Total duration/i), { target: { value: '2' } });
     fireEvent.change(screen.getByLabelText(/Units to stabilize 1BR/i), { target: { value: '3' } });
-    fireEvent.change(screen.getByLabelText(/Mo 1 1BR/i), { target: { value: '1' } });
+    fireEvent.change(screen.getAllByLabelText(/Mo 1 1BR/i)[0], { target: { value: '1' } });
     expect(screen.getByText(/Schedule totals must match/i)).toBeInTheDocument();
   });
 });
@@ -354,7 +354,7 @@ describe('RehabRentCalculator — Apply to Pro Forma', () => {
       });
     }
 
-    await user.click(screen.getByRole('button', { name: /Auto-fill schedule/i }));
+    await user.click(screen.getAllByRole('button', { name: /Auto-fill schedule/i })[0]);
     await user.click(screen.getByRole('button', { name: /Apply to Pro Forma/i }));
 
     return props;
