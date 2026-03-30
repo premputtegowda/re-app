@@ -316,29 +316,6 @@ export function RehabRentCalculator({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              disabled={!result}
-              onClick={() => {
-                if (!result) return;
-                const overrides: Record<number, number> = {};
-                // Transition years: blended actual rent from simulation
-                transitionYears.forEach(y => { overrides[y] = result.yearlyRents[y - 1]; });
-                // First stabilized year: target rent grown from acquisition (Year 0 basis)
-                // targetRent × (1+g)^stabYear ensures Year N = what market would pay at that point
-                const stabYear = Math.ceil(result.stabilizationMonth / 12);
-                const firstStabilizedYear = stabYear + 1;
-                if (firstStabilizedYear <= projectionYears && transitionYears.length > 0) {
-                  const totalTargetAnnual = unitTypes.reduce((s, t) => s + t.count * t.targetRent, 0) * 12;
-                  overrides[firstStabilizedYear] = totalTargetAnnual * Math.pow(1 + grossRentGrowthPct / 100, stabYear);
-                }
-                onApply(overrides);
-                setOpen(false);
-              }}
-              className="flex-1 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-40 text-white text-sm font-medium transition-colors"
-            >
-              Apply to Pro Forma
-            </button>
-            <button
-              type="button"
               disabled={!result || blendedMonthlyPerType.length === 0}
               onClick={() => {
                 if (!result || !onApplyPreStab) return;
