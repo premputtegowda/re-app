@@ -802,11 +802,11 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
     return (
       <div>
         {/* Mobile year navigation */}
-        <div className="flex items-center justify-between mb-3 px-0.5">
-          <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+        <div className="flex items-center justify-between mb-3 px-0.5 gap-2">
+          <span className="text-xs text-slate-500 dark:text-slate-400 font-medium min-w-0 truncate">
             T12 · Yr {mobileYear}{mobileYear === projectionYears ? ' ★ exit' : ''}
           </span>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1 shrink-0 overflow-x-auto">
             <button type="button" onClick={() => setYearPage(p => Math.max(0, p - 1))} disabled={yearPage === 0}
               className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30 touch-manipulation">
               <ChevronLeft size={14} />
