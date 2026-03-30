@@ -235,9 +235,9 @@ describe('RehabRentCalculator — active state', () => {
     expect(screen.getByText('Target/mo')).toBeInTheDocument();
   });
 
-  it('shows "Apply to Pre-Stab" and "Clear" buttons but not "Apply to Pro Forma"', () => {
+  it('shows "Apply to Pro Forma" and "Apply to Pre-Stab" and "Clear" buttons', () => {
     renderCalc();
-    expect(screen.queryByRole('button', { name: /Apply to Pro Forma/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /Apply to Pro Forma/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Apply to Pre-Stab/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Clear/i })).toBeInTheDocument();
   });
@@ -250,6 +250,33 @@ describe('RehabRentCalculator — active state', () => {
   it('shows "Applied" badge when appliedYears is non-empty', () => {
     renderCalc({ appliedYears: { 1: 21600, 2: 21600 } });
     expect(screen.getByText('Applied')).toBeInTheDocument();
+  });
+});
+
+describe('RehabRentCalculator — Apply to Pro Forma', () => {
+  it('calls onApply with year overrides when button is clicked', async () => {
+    const user = userEvent.setup();
+    const { props } = renderCalc();
+    await user.click(screen.getByRole('button', { name: /Apply to Pro Forma/i }));
+    expect(props.onApply).toHaveBeenCalledOnce();
+    const overrides = props.onApply.mock.calls[0][0] as Record<number, number>;
+    // At least one year should have a rent value
+    expect(Object.keys(overrides).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('onApply overrides have positive rent values', async () => {
+    const user = userEvent.setup();
+    const { props } = renderCalc();
+    await user.click(screen.getByRole('button', { name: /Apply to Pro Forma/i }));
+    const overrides = props.onApply.mock.calls[0][0] as Record<number, number>;
+    Object.values(overrides).forEach(v => expect(v).toBeGreaterThan(0));
+  });
+
+  it('calls onOpenChange(false) after applying', async () => {
+    const user = userEvent.setup();
+    const { props } = renderCalc();
+    await user.click(screen.getByRole('button', { name: /Apply to Pro Forma/i }));
+    expect(props.onOpenChange).toHaveBeenCalledWith(false);
   });
 });
 
