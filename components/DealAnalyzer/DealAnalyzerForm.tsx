@@ -565,7 +565,17 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
         const rentSchedule = hasMfr ? (
           <div className="space-y-2">
-            <p className="label">Rent Schedule ($/mo per unit)</p>
+            <div className="flex items-center justify-between">
+              <p className="label">Rent Schedule ($/mo per unit)</p>
+              <button
+                type="button"
+                onClick={() => setCalcOpen(true)}
+                className="sm:hidden flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 font-medium transition-colors"
+              >
+                <Calculator size={12} />
+                Calculator
+              </button>
+            </div>
 
             {/* Mobile: card per unit type */}
             <div className="sm:hidden rounded-xl border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-700/60 overflow-hidden">
