@@ -11,9 +11,9 @@
  * 2. RehabRentCalculator component
  *    - Empty state when no rent data
  *    - Shows header + shared inputs (duration, type toggle)
- *    - Per-type columns in config table
+ *    - Per-type cards with inputs
  *    - Mo/unit input shown for Renovation, hidden for Stabilization
- *    - Monthly grid with per-type columns after filling duration + units
+ *    - Monthly grid with per-type columns after filling duration
  *    - Auto-fill button (month 1) distributes evenly per type
  *    - Apply disabled until all active types have valid schedules
  *    - Apply fires onApply with gross rent overrides + onApplyPreStab
@@ -23,7 +23,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   simulateFromSchedule,
@@ -54,13 +54,11 @@ describe('simulateFromSchedule — single type, renovation', () => {
     // schedule: 4 units start month 1, perUnitMonths=2 → done month 3
     // mo1: started=4, done=0, inReno=4, inPlace=0 → rent=0
     const result = simulateFromSchedule([unit], [[4]], [2], 2);
-    const mo1Rent = result.yearlyRents[0] / 12; // rough monthly avg — will be 0 for mo1
     expect(result.yearlyRents[0]).toBeLessThan(unit.count * unit.targetRent * 12);
   });
 
   it('units earn targetRent after renovation completes', () => {
     // schedule: all 4 start mo1, perUnitMonths=1 → done mo2
-    // Yr1: mo1=0, mo2-12=4×1500=6000 → total=6000×11=66000
     // Yr2: 4×1500×12=72000
     const result = simulateFromSchedule([unit], [[4]], [1], 2);
     const fullYearTarget = unit.count * unit.targetRent * 12;
@@ -118,8 +116,6 @@ describe('simulateFromSchedule — multi-type', () => {
   it('stabilizationMonth is the maximum across types', () => {
     // 1BR done at mo3 (sched length=2, +1 perUnit), 2BR done at mo5 (sched length=2, +3 perUnit)
     const result = simulateFromSchedule(types, [[1, 2], [1, 1]], [1, 3], 3);
-    // 1BR: last start mo2, perUnit=1 → done mo3
-    // 2BR: last start mo2, perUnit=3 → done mo5
     expect(result.stabilizationMonth).toBe(5);
   });
 
@@ -224,9 +220,9 @@ describe('RehabRentCalculator — active state', () => {
     expect(screen.getByText('Applied')).toBeInTheDocument();
   });
 
-  it('shows per-unit Mo/unit inputs when Renovation selected (default)', () => {
+  it('shows per-unit Mo/unit input when Renovation selected (default)', () => {
     renderCalc();
-    expect(screen.getAllByLabelText(/Months per unit SFR/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByLabelText(/Months per unit SFR/i)).toBeInTheDocument();
   });
 
   it('hides Mo/unit inputs when Stabilization selected', async () => {
@@ -244,10 +240,10 @@ describe('RehabRentCalculator — active state', () => {
   });
 });
 
-// ── Multi-type columns ────────────────────────────────────────────────────────
+// ── Per-type cards ────────────────────────────────────────────────────────────
 
-describe('RehabRentCalculator — multi-type unit columns', () => {
-  it('shows column headers for each unit type', () => {
+describe('RehabRentCalculator — per-type cards', () => {
+  it('shows a card for each unit type', () => {
     renderCalc({ unitTypes: mfrUnits });
     expect(screen.getAllByText('1BR').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('2BR').length).toBeGreaterThanOrEqual(1);
@@ -255,20 +251,20 @@ describe('RehabRentCalculator — multi-type unit columns', () => {
 
   it('shows Stabilize input for each unit type', () => {
     renderCalc({ unitTypes: mfrUnits });
-    expect(screen.getAllByLabelText(/Units to stabilize 1BR/i).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByLabelText(/Units to stabilize 2BR/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByLabelText(/Units to stabilize 1BR/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Units to stabilize 2BR/i)).toBeInTheDocument();
   });
 
   it('shows Mo/unit input for each unit type in renovation mode', () => {
     renderCalc({ unitTypes: mfrUnits });
-    expect(screen.getAllByLabelText(/Months per unit 1BR/i).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByLabelText(/Months per unit 2BR/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByLabelText(/Months per unit 1BR/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Months per unit 2BR/i)).toBeInTheDocument();
   });
 
-  it('shows unit counts in column sub-headers', () => {
+  it('shows unit counts in type headers', () => {
     renderCalc({ unitTypes: mfrUnits });
-    expect(screen.getByText('3 units')).toBeInTheDocument();
-    expect(screen.getByText('2 units')).toBeInTheDocument();
+    expect(screen.getByText(/3 units/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 units/i)).toBeInTheDocument();
   });
 });
 
@@ -278,7 +274,6 @@ describe('RehabRentCalculator — monthly grid', () => {
   it('shows month rows after entering duration', () => {
     renderCalc({ unitTypes: mfrUnits });
     fireEvent.change(screen.getByLabelText(/Total duration/i), { target: { value: '3' } });
-    expect(screen.getAllByText(/^1$/).length).toBeGreaterThanOrEqual(1); // month 1 label
     expect(screen.getByText('Year 1')).toBeInTheDocument();
   });
 
@@ -297,7 +292,6 @@ describe('RehabRentCalculator — monthly grid', () => {
   it('shows per-type cell inputs in each month row', () => {
     renderCalc({ unitTypes: mfrUnits });
     fireEvent.change(screen.getByLabelText(/Total duration/i), { target: { value: '2' } });
-
     expect(screen.getByLabelText(/Mo 1 1BR/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/Mo 1 2BR/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/Mo 2 1BR/i)).toBeInTheDocument();
@@ -314,7 +308,7 @@ describe('RehabRentCalculator — monthly grid', () => {
     renderCalc({ unitTypes: [{ label: '1BR', count: 4, inPlaceRent: 1000, targetRent: 1500 }] });
 
     fireEvent.change(screen.getByLabelText(/Total duration/i), { target: { value: '4' } });
-    fireEvent.change(screen.getAllByLabelText(/Units to stabilize 1BR/i)[0], { target: { value: '4' } });
+    fireEvent.change(screen.getByLabelText(/Units to stabilize 1BR/i), { target: { value: '4' } });
 
     await user.click(screen.getByRole('button', { name: /Auto-fill schedule/i }));
 
@@ -332,17 +326,14 @@ describe('RehabRentCalculator — schedule validation', () => {
   it('Apply button is disabled when schedule total does not match target', () => {
     renderCalc();
     fireEvent.change(screen.getByLabelText(/Total duration/i), { target: { value: '2' } });
-    fireEvent.change(screen.getAllByLabelText(/Units to stabilize SFR/i)[0], { target: { value: '1' } });
-    // leave schedule empty (total=0, target=1) → invalid
-    const applyBtn = screen.getByRole('button', { name: /Apply to Pro Forma/i });
-    expect(applyBtn).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/Units to stabilize SFR/i), { target: { value: '1' } });
+    expect(screen.getByRole('button', { name: /Apply to Pro Forma/i })).toBeDisabled();
   });
 
   it('shows warning when schedules are incomplete', () => {
     renderCalc({ unitTypes: mfrUnits });
     fireEvent.change(screen.getByLabelText(/Total duration/i), { target: { value: '2' } });
-    fireEvent.change(screen.getAllByLabelText(/Units to stabilize 1BR/i)[0], { target: { value: '3' } });
-    // Enter partial schedule
+    fireEvent.change(screen.getByLabelText(/Units to stabilize 1BR/i), { target: { value: '3' } });
     fireEvent.change(screen.getByLabelText(/Mo 1 1BR/i), { target: { value: '1' } });
     expect(screen.getByText(/Schedule totals must match/i)).toBeInTheDocument();
   });
@@ -355,21 +346,16 @@ describe('RehabRentCalculator — Apply to Pro Forma', () => {
     const user = userEvent.setup();
     const { props } = renderCalc({ unitTypes });
 
-    // Fill in valid schedule for each type
     fireEvent.change(screen.getByLabelText(/Total duration/i), { target: { value: '2' } });
 
     for (const ut of unitTypes) {
-      fireEvent.change(screen.getAllByLabelText(new RegExp(`Units to stabilize ${ut.label}`, 'i'))[0], {
+      fireEvent.change(screen.getByLabelText(new RegExp(`Units to stabilize ${ut.label}`, 'i')), {
         target: { value: String(ut.count) },
       });
     }
 
-    // Auto-fill
     await user.click(screen.getByRole('button', { name: /Auto-fill schedule/i }));
-
-    // Click apply
-    const applyBtn = screen.getByRole('button', { name: /Apply to Pro Forma/i });
-    await user.click(applyBtn);
+    await user.click(screen.getByRole('button', { name: /Apply to Pro Forma/i }));
 
     return props;
   }
