@@ -8,8 +8,9 @@ import { Zap, X } from 'lucide-react';
 export interface UnitTypeInput {
   label: string;       // e.g. "1BR/1BA × 4"
   count: number;
-  inPlaceRent: number; // $/unit/month — income before renovation
-  targetRent: number;  // $/unit/month — income after renovation (stabilized)
+  inPlaceRent: number;  // $/unit/month — income before renovation
+  targetRent: number;   // $/unit/month — income after renovation (stabilized)
+  preStabRent?: number; // $/unit/month — current pre-stab value (optional)
 }
 
 // ── Simulation ─────────────────────────────────────────────────────────────────
@@ -238,13 +239,15 @@ export function RehabRentCalculator({
           {/* Unit mix summary */}
           {unitTypes.length > 1 && (
             <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+              <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-slate-100 dark:bg-slate-700/50">
-                    <th className="px-3 py-1.5 text-left font-medium text-slate-500 dark:text-slate-400">Unit type</th>
-                    <th className="px-3 py-1.5 text-right font-medium text-slate-500 dark:text-slate-400">In-place</th>
-                    <th className="px-3 py-1.5 text-right font-medium text-slate-500 dark:text-slate-400">Target</th>
-                    <th className="px-3 py-1.5 text-right font-medium text-slate-500 dark:text-slate-400">Pace</th>
+                    <th className="px-2 py-1.5 text-left font-medium text-slate-500 dark:text-slate-400 whitespace-nowrap">Unit type</th>
+                    <th className="px-2 py-1.5 text-right font-medium text-slate-500 dark:text-slate-400 whitespace-nowrap">In-place</th>
+                    <th className="px-2 py-1.5 text-right font-medium text-emerald-600 dark:text-emerald-400 whitespace-nowrap">Target</th>
+                    <th className="px-2 py-1.5 text-right font-medium text-amber-600 dark:text-amber-400 whitespace-nowrap">Pre-Stab</th>
+                    <th className="px-2 py-1.5 text-right font-medium text-slate-500 dark:text-slate-400 whitespace-nowrap">Pace</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -252,10 +255,13 @@ export function RehabRentCalculator({
                     const typePace = pace * (t.count / totalUnits);
                     return (
                       <tr key={i} className="border-t border-slate-100 dark:border-slate-700/50">
-                        <td className="px-3 py-1.5 text-slate-700 dark:text-slate-300 font-medium">{t.label}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-slate-500 dark:text-slate-400">{fmt$(t.inPlaceRent)}/mo</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-slate-500 dark:text-slate-400">{fmt$(t.targetRent)}/mo</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-slate-500 dark:text-slate-400">
+                        <td className="px-2 py-1.5 text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap">{t.label}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-slate-500 dark:text-slate-400 whitespace-nowrap">{fmt$(t.inPlaceRent)}/mo</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-emerald-600 dark:text-emerald-400 whitespace-nowrap">{fmt$(t.targetRent)}/mo</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-amber-600 dark:text-amber-400 whitespace-nowrap">
+                          {t.preStabRent ? `${fmt$(t.preStabRent)}/mo` : '—'}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-slate-500 dark:text-slate-400 whitespace-nowrap">
                           {typePace < 1 ? `1 per ${Math.round(1 / typePace)} mo` : `${typePace.toFixed(1)}/mo`}
                         </td>
                       </tr>
@@ -263,6 +269,7 @@ export function RehabRentCalculator({
                   })}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
 

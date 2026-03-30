@@ -742,12 +742,14 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
               count: e.count,
               inPlaceRent: e.inPlaceRent || 0,
               targetRent: e.rentMonthly || 0,
+              preStabRent: e.preStabRent || 0,
             }))
           : [{
               label: 'SFR',
               count: 1,
               inPlaceRent: acquisition.sfrInPlaceRent || 0,
               targetRent: acquisition.sfrTargetRent || 0,
+              preStabRent: acquisition.sfrPreStabRent || 0,
             }];
 
         const calcAppliedYears: Record<number, number> = {};
