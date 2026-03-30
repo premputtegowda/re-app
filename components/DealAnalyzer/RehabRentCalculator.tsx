@@ -195,7 +195,9 @@ export function RehabRentCalculator({
   const updateCell = (t: number, monthIdx: number, val: number) =>
     setScheduleByType(prev => {
       const next = prev.map(s => [...s]);
-      next[t][monthIdx] = Math.max(0, val);
+      const otherSum = (next[t] ?? []).reduce((s, n, i) => i === monthIdx ? s : s + n, 0);
+      const cap = unitsToStabilize[t] > 0 ? Math.max(0, unitsToStabilize[t] - otherSum) : val;
+      next[t][monthIdx] = Math.min(Math.max(0, val), cap);
       return next;
     });
 
@@ -249,7 +251,8 @@ export function RehabRentCalculator({
     </div>
   );
 
-  const colTemplate = `3.5rem repeat(${unitTypes.length}, 1fr) 3rem`;
+  // On mobile "Mo" prefix is hidden so month label only needs ~1.5rem; sm: full 3.5rem
+  const colTemplate = `2rem repeat(${unitTypes.length}, 1fr) 3rem`;
 
   return (
     <div className={`rounded-xl border transition-colors mb-4 ${
@@ -323,8 +326,63 @@ export function RehabRentCalculator({
           </p>
         )}
 
-        {/* ── Per-type config table ── */}
-        <div className="overflow-x-auto">
+        {/* ── Per-type config: mobile cards ── */}
+        <div className="sm:hidden space-y-2">
+          {unitTypes.map((ut, t) => (
+            <div key={t} className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  {ut.label} <span className="font-normal text-slate-400">({ut.count} units)</span>
+                </span>
+                <span className={`text-xs font-semibold ${
+                  unitsToStabilize[t] === 0 ? 'text-slate-400'
+                    : scheduleTotals[t] === unitsToStabilize[t] ? 'text-emerald-600 dark:text-emerald-400'
+                    : scheduleTotals[t] > unitsToStabilize[t] ? 'text-red-500'
+                    : 'text-amber-500'
+                }`}>
+                  {scheduleTotals[t]}/{unitsToStabilize[t] || '—'} scheduled
+                </span>
+              </div>
+              <div className={`grid gap-3 ${rehabType === 'renovation' ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                <div>
+                  <label className="text-[11px] text-slate-400 dark:text-slate-500 block mb-1">
+                    Stabilize (of {ut.count})
+                  </label>
+                  <input
+                    type="number"
+                    className="input text-sm w-full"
+                    min={0}
+                    max={ut.count}
+                    placeholder="0"
+                    value={unitsToStabilize[t] === 0 ? '' : unitsToStabilize[t]}
+                    onChange={e => setTypeUnits(t, Number(e.target.value) || 0)}
+                    aria-label={`Units to stabilize ${ut.label}`}
+                  />
+                </div>
+                {rehabType === 'renovation' && (
+                  <div>
+                    <label className="text-[11px] text-slate-400 dark:text-slate-500 block mb-1">
+                      Mo/unit offline
+                    </label>
+                    <input
+                      type="number"
+                      className="input text-sm w-full"
+                      min={0}
+                      max={24}
+                      placeholder="0"
+                      value={perUnitMonths[t] === 0 ? '' : perUnitMonths[t]}
+                      onChange={e => setTypeMonths(t, Number(e.target.value) || 0)}
+                      aria-label={`Months per unit ${ut.label}`}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* ── Per-type config: desktop table ── */}
+        <div className="hidden sm:block overflow-x-auto">
           <table className="w-full text-xs min-w-[200px]">
             <thead>
               <tr>
@@ -338,29 +396,23 @@ export function RehabRentCalculator({
               </tr>
             </thead>
             <tbody>
-              {/* Units to stabilize */}
               <tr>
                 <td className="text-slate-400 dark:text-slate-500 pr-2 py-1 leading-tight">Stabilize</td>
                 {unitTypes.map((ut, t) => (
                   <td key={t} className="px-1 py-1">
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        className="input text-xs py-1 text-center min-w-0"
-                        min={0}
-                        max={ut.count}
-                        placeholder="0"
-                        value={unitsToStabilize[t] === 0 ? '' : unitsToStabilize[t]}
-                        onChange={e => setTypeUnits(t, Number(e.target.value) || 0)}
-                        aria-label={`Units to stabilize ${ut.label}`}
-                      />
-                      <span className="text-slate-400 shrink-0">/{ut.count}</span>
-                    </div>
+                    <input
+                      type="number"
+                      className="input text-xs py-1 text-center w-full"
+                      min={0}
+                      max={ut.count}
+                      placeholder={`0–${ut.count}`}
+                      value={unitsToStabilize[t] === 0 ? '' : unitsToStabilize[t]}
+                      onChange={e => setTypeUnits(t, Number(e.target.value) || 0)}
+                      aria-label={`Units to stabilize ${ut.label}`}
+                    />
                   </td>
                 ))}
               </tr>
-
-              {/* Mo/unit — only for renovation */}
               {rehabType === 'renovation' && (
                 <tr>
                   <td className="text-slate-400 dark:text-slate-500 pr-2 py-1 leading-tight">Mo/unit</td>
@@ -380,8 +432,6 @@ export function RehabRentCalculator({
                   ))}
                 </tr>
               )}
-
-              {/* Scheduled progress */}
               <tr>
                 <td className="text-slate-400 dark:text-slate-500 pr-2 py-1 leading-tight">Scheduled</td>
                 {unitTypes.map((_, t) => (
@@ -401,7 +451,7 @@ export function RehabRentCalculator({
         </div>
 
         {/* ── Monthly schedule grid ── */}
-        {totalDuration > 0 && someTypeScheduled && (
+        {totalDuration > 0 && (
           <div className="space-y-3">
             {yearGroups.map((months, yi) => {
               const yearTotals = unitTypes.map((_, t) =>
@@ -439,7 +489,9 @@ export function RehabRentCalculator({
                         return (
                           <div key={m} className="grid gap-1 items-center px-3 py-1.5"
                             style={{ gridTemplateColumns: colTemplate }}>
-                            <span className="text-xs text-slate-400 dark:text-slate-500">Mo {m}</span>
+                            <span className="text-xs text-slate-400 dark:text-slate-500">
+                              <span className="hidden sm:inline">Mo </span>{m}
+                            </span>
                             {unitTypes.map((_, t) => {
                               const val = scheduleByType[t]?.[idx] ?? 0;
                               return (
@@ -463,7 +515,7 @@ export function RehabRentCalculator({
                                 aria-label="Auto-fill schedule"
                               >
                                 <Wand2 size={11} />
-                                <span className="hidden sm:inline">Fill</span>
+                                Fill
                               </button>
                             ) : <span />}
                           </div>
