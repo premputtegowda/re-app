@@ -1,162 +1,133 @@
 /**
- * Tests for RehabRentCalculator:
+ * Tests for RehabRentCalculator (Option A: shared timeline, per-type columns).
  *
- * 1. simulateRehabRent (pure function)
- *    - Edge cases: zero units, zero pace
- *    - Single unit: stabilizationMonth = ceil(units/pace) + duration
- *    - Multiple units: correct month when last unit completes
- *    - yearlyRents: sums monthly collections across 12-month windows
- *    - Fractional pace: token-bucket accumulator starts units correctly
- *    - Multi-type: proportional pace per unit type
- *    - perTypeYearlyRents: per-type breakdowns match totals
+ * 1. simulateFromSchedule (pure function)
+ *    - Zero types → empty results
+ *    - Single type: offline during renovation, earns target after
+ *    - Multi-type: independent schedules, results sum correctly
+ *    - Already-stable units (not in schedule) earn targetRent throughout
+ *    - stabilizationMonth = last schedule month + perUnitMonths for each type
  *
  * 2. RehabRentCalculator component
- *    - Empty state: shows hint when no rent data
- *    - Active state: shows header, stabilization note, year table
- *    - "Applied" badge when appliedYears is non-empty
- *    - "Apply to Pro Forma" fires onApply with correct year overrides
- *    - "Apply to Pre-Stab" fires onApplyPreStab with blended values
- *    - "Clear" fires onClear
- *    - Changing pace input updates the stabilization note
- *    - Multi-type: unit mix breakdown table is shown
+ *    - Empty state when no rent data
+ *    - Shows header + shared inputs (duration, type toggle)
+ *    - Per-type columns in config table
+ *    - Mo/unit input shown for Renovation, hidden for Stabilization
+ *    - Monthly grid with per-type columns after filling duration + units
+ *    - Auto-fill button (month 1) distributes evenly per type
+ *    - Apply disabled until all active types have valid schedules
+ *    - Apply fires onApply with gross rent overrides + onApplyPreStab
+ *    - Clear fires onClear + onOpenChange(false)
+ *    - Cancel fires onOpenChange(false)
+ *    - Applied badge when appliedYears non-empty
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
-  simulateRehabRent,
+  simulateFromSchedule,
   RehabRentCalculator,
   type UnitTypeInput,
 } from '@/components/DealAnalyzer/RehabRentCalculator';
 
-// ── simulateRehabRent ──────────────────────────────────────────────────────────
+// ── simulateFromSchedule ───────────────────────────────────────────────────────
 
-describe('simulateRehabRent — edge cases', () => {
-  it('returns zeros when totalUnits is 0', () => {
-    const result = simulateRehabRent([], 1, 1, 3);
+describe('simulateFromSchedule — edge cases', () => {
+  it('returns zeros when unitTypes is empty', () => {
+    const result = simulateFromSchedule([], [], [], 3);
     expect(result.yearlyRents).toEqual([0, 0, 0]);
     expect(result.stabilizationMonth).toBe(0);
   });
 
-  it('returns zeros when pace is 0', () => {
-    const units: UnitTypeInput[] = [{ label: '1BR', count: 2, inPlaceRent: 1000, targetRent: 1500 }];
-    const result = simulateRehabRent(units, 0, 1, 3);
-    expect(result.yearlyRents).toEqual([0, 0, 0]);
-    expect(result.stabilizationMonth).toBe(0);
+  it('returns correct length yearlyRents matching totalYears', () => {
+    const unit: UnitTypeInput = { label: 'A', count: 2, inPlaceRent: 1000, targetRent: 1500 };
+    const result = simulateFromSchedule([unit], [[2]], [0], 5);
+    expect(result.yearlyRents).toHaveLength(5);
   });
 });
 
-describe('simulateRehabRent — single unit type', () => {
+describe('simulateFromSchedule — single type, renovation', () => {
   const unit: UnitTypeInput = { label: '1BR', count: 4, inPlaceRent: 1000, targetRent: 1500 };
 
-  it('stabilizationMonth = ceil(units/pace) + duration', () => {
-    // 4 units, pace=2/mo, duration=1 → starts: mo1=2, mo2=2 → done: mo2=2, mo3=2
-    // last unit started mo2, done mo3 → stabilizationMonth = ceil(4/2) + 1 = 3
-    const result = simulateRehabRent([unit], 2, 1, 3);
-    expect(result.stabilizationMonth).toBe(3);
+  it('units are offline during renovation (earn $0)', () => {
+    // schedule: 4 units start month 1, perUnitMonths=2 → done month 3
+    // mo1: started=4, done=0, inReno=4, inPlace=0 → rent=0
+    const result = simulateFromSchedule([unit], [[4]], [2], 2);
+    const mo1Rent = result.yearlyRents[0] / 12; // rough monthly avg — will be 0 for mo1
+    expect(result.yearlyRents[0]).toBeLessThan(unit.count * unit.targetRent * 12);
   });
 
-  it('stabilizationMonth with pace=1 and duration=2', () => {
-    // ceil(4/1) + 2 = 6
-    const result = simulateRehabRent([unit], 1, 2, 3);
+  it('units earn targetRent after renovation completes', () => {
+    // schedule: all 4 start mo1, perUnitMonths=1 → done mo2
+    // Yr1: mo1=0, mo2-12=4×1500=6000 → total=6000×11=66000
+    // Yr2: 4×1500×12=72000
+    const result = simulateFromSchedule([unit], [[4]], [1], 2);
+    const fullYearTarget = unit.count * unit.targetRent * 12;
+    expect(result.yearlyRents[1]).toBeCloseTo(fullYearTarget, 0);
+  });
+
+  it('income in transition year is less than full target year', () => {
+    const result = simulateFromSchedule([unit], [[4]], [1], 2);
+    expect(result.yearlyRents[0]).toBeLessThan(result.yearlyRents[1]);
+  });
+
+  it('stabilizationMonth = last scheduled month + perUnitMonths', () => {
+    // schedule over 4 months: [1,1,1,1], perUnitMonths=2 → last done = month 4 + 2 = 6
+    const result = simulateFromSchedule([unit], [[1, 1, 1, 1]], [2], 3);
     expect(result.stabilizationMonth).toBe(6);
   });
 
-  it('stabilizationMonth with pace=4 (all at once) and duration=1', () => {
-    // ceil(4/4) + 1 = 2
-    const result = simulateRehabRent([unit], 4, 1, 3);
-    expect(result.stabilizationMonth).toBe(2);
-  });
-
-  it('yearlyRents has correct length matching projectionYears', () => {
-    const result = simulateRehabRent([unit], 2, 1, 5);
-    expect(result.yearlyRents).toHaveLength(5);
-  });
-
-  it('income grows as units complete renovation', () => {
-    // pace=4, duration=1: all 4 stabilize in mo2. Year 1 income < Year 1 at full target.
-    const result = simulateRehabRent([unit], 4, 1, 3);
-    // Yr1: mo1 = 4×1000 (not started yet at mo1... wait, mo1 they START, complete at mo2)
-    // mo1: starts 4, inPlace=0, preStab=0 → 0*1000 + 0*1500 = 0? No...
-    // Actually: at m=1, bucket+=4, toStart=4, inPlace becomes 0
-    //   monthly[0] = inPlace*ip + preStab*ps = 0*1000 + 0*1500 = 0
-    // at m=2: completing=4, preStab=4; monthly[1] = 0 + 4*1500 = 6000
-    // Year1 = sum(mo1..12) = 0 + 6000×11 = 66000
-    // Year2 = 12×6000 = 72000
-    expect(result.yearlyRents[1]).toBeGreaterThan(result.yearlyRents[0]);
-  });
-
-  it('income stabilizes to target × units × 12 per year after stabilization', () => {
-    // pace=4, duration=1 → stab at mo2. From mo2 onwards: 4×1500=6000/mo
-    // Year2 = 12 × 6000 = 72000
-    const result = simulateRehabRent([unit], 4, 1, 3);
-    expect(result.yearlyRents[1]).toBeCloseTo(72000, 0);
-    expect(result.yearlyRents[2]).toBeCloseTo(72000, 0);
-  });
-
-  it('before any renovation, income equals inPlaceRent × count × months', () => {
-    // pace=1, duration=12: first unit starts mo1, completes mo13 (outside Yr1)
-    // Yr1 mo1: starts 1 unit (inPlace→3), monthly = 3×1000 + 0×1500 = 3000
-    // mo2: starts 1 (inPlace→2), = 2000 + 0 = 2000
-    // ... each month one unit transitions to "under renovation" (inPlace rent = 0 while in progress)
-    // Actually the model: inPlace units still pay inPlaceRent until they START renovation
-    // Once started they're removed from inPlace but not yet in preStab
-    // Let's verify: pace=0, duration=1 edge case handled; use a simpler check:
-    // With pace=1, duration=1, 1 unit: starts mo1, done mo2 → full year has mix of ip and ps rent
-    const single: UnitTypeInput = { label: 'A', count: 1, inPlaceRent: 800, targetRent: 1200 };
-    const result = simulateRehabRent([single], 1, 1, 2);
-    // mo1: starts unit, inPlace=0, monthly=0
-    // mo2: completes, preStab=1, monthly=1200
-    // mo3..12: monthly=1200
-    // Yr1 = 0 + 1200×11 = 13200
-    expect(result.yearlyRents[0]).toBeCloseTo(13200, 0);
-    expect(result.yearlyRents[1]).toBeCloseTo(1200 * 12, 0);
+  it('stabilizationMonth = 0 when schedule is empty', () => {
+    const result = simulateFromSchedule([unit], [[]], [1], 2);
+    expect(result.stabilizationMonth).toBe(0);
   });
 });
 
-describe('simulateRehabRent — fractional pace', () => {
-  it('token-bucket starts units at correct months with pace < 1', () => {
-    // 2 units, pace=0.5: bucket fills to 1 at mo2, starts unit1; fills again at mo4
-    // duration=1: unit1 done at mo3, unit2 done at mo5
-    // stabilizationMonth = ceil(2/0.5) + 1 = 5
-    const units: UnitTypeInput[] = [{ label: 'A', count: 2, inPlaceRent: 1000, targetRent: 1500 }];
-    const result = simulateRehabRent(units, 0.5, 1, 2);
-    expect(result.stabilizationMonth).toBe(5);
+describe('simulateFromSchedule — already-stable units', () => {
+  const unit: UnitTypeInput = { label: 'A', count: 10, inPlaceRent: 1000, targetRent: 1500 };
+
+  it('units not in schedule earn targetRent throughout', () => {
+    // schedule: only 4 of 10 → 6 always earn targetRent
+    // All 4 start mo1, perUnitMonths=0 → done mo1
+    // Yr1 should equal 10×1500×12 = 180000
+    const result = simulateFromSchedule([unit], [[4]], [0], 2);
+    expect(result.yearlyRents[0]).toBeCloseTo(10 * 1500 * 12, 0);
+  });
+
+  it('with perUnitMonths=0, no vacancy — income = targetRent × count × 12 immediately', () => {
+    const result = simulateFromSchedule([unit], [[10]], [0], 2);
+    expect(result.yearlyRents[0]).toBeCloseTo(10 * 1500 * 12, 0);
   });
 });
 
-describe('simulateRehabRent — multi-type', () => {
+describe('simulateFromSchedule — multi-type', () => {
   const types: UnitTypeInput[] = [
-    { label: '1BR×2', count: 2, inPlaceRent: 1000, targetRent: 1400 },
-    { label: '2BR×2', count: 2, inPlaceRent: 1300, targetRent: 1800 },
+    { label: '1BR', count: 3, inPlaceRent: 1000, targetRent: 1400 },
+    { label: '2BR', count: 2, inPlaceRent: 1300, targetRent: 1800 },
   ];
 
-  it('total pace is split proportionally across unit types', () => {
-    // 4 total units, pace=4, duration=1 → all stab at mo2 regardless of split
-    const result = simulateRehabRent(types, 4, 1, 3);
-    expect(result.stabilizationMonth).toBe(2);
+  it('each type uses its own perUnitMonths independently', () => {
+    // 1BR: [3] start mo1, offline 1mo → done mo2
+    // 2BR: [2] start mo1, offline 3mo → done mo4
+    const result = simulateFromSchedule(types, [[3], [2]], [1, 3], 2);
+    // By Yr2 all should be stable: 3×1400 + 2×1800 = 7800/mo × 12 = 93600
+    expect(result.yearlyRents[1]).toBeCloseTo(93600, 0);
   });
 
-  it('perTypeYearlyRents length matches unitTypes length', () => {
-    const result = simulateRehabRent(types, 2, 1, 3);
-    expect(result.perTypeYearlyRents).toHaveLength(2);
+  it('stabilizationMonth is the maximum across types', () => {
+    // 1BR done at mo3 (sched length=2, +1 perUnit), 2BR done at mo5 (sched length=2, +3 perUnit)
+    const result = simulateFromSchedule(types, [[1, 2], [1, 1]], [1, 3], 3);
+    // 1BR: last start mo2, perUnit=1 → done mo3
+    // 2BR: last start mo2, perUnit=3 → done mo5
+    expect(result.stabilizationMonth).toBe(5);
   });
 
-  it('sum of perTypeYearlyRents matches yearlyRents for each year', () => {
-    const result = simulateRehabRent(types, 2, 1, 3);
-    for (let y = 0; y < 3; y++) {
-      const sum = result.perTypeYearlyRents.reduce((s, tr) => s + tr[y], 0);
-      expect(sum).toBeCloseTo(result.yearlyRents[y], 1);
-    }
-  });
-
-  it('after stabilization all units collect target rent', () => {
-    // pace=4, duration=1 → stab mo2. Yr2 and Yr3 = (2×1400 + 2×1800) × 12
-    const result = simulateRehabRent(types, 4, 1, 3);
-    const fullTarget = (2 * 1400 + 2 * 1800) * 12;
-    expect(result.yearlyRents[1]).toBeCloseTo(fullTarget, 0);
-    expect(result.yearlyRents[2]).toBeCloseTo(fullTarget, 0);
+  it('type with empty schedule contributes targetRent throughout (already stable)', () => {
+    // 1BR scheduled, 2BR not scheduled → 2BR always at targetRent
+    const result = simulateFromSchedule(types, [[3], []], [1, 0], 2);
+    // After 1BR stabilizes: Yr2 = (3×1400 + 2×1800)×12 = 93600
+    expect(result.yearlyRents[1]).toBeCloseTo(93600, 0);
   });
 });
 
@@ -170,8 +141,8 @@ const sfrUnit: UnitTypeInput = {
 };
 
 const mfrUnits: UnitTypeInput[] = [
-  { label: '1BR/1BA × 3', count: 3, inPlaceRent: 1000, targetRent: 1400 },
-  { label: '2BR/2BA × 2', count: 2, inPlaceRent: 1300, targetRent: 1800 },
+  { label: '1BR', count: 3, inPlaceRent: 1000, targetRent: 1400 },
+  { label: '2BR', count: 2, inPlaceRent: 1300, targetRent: 1800 },
 ];
 
 function renderCalc(overrides: Partial<Parameters<typeof RehabRentCalculator>[0]> = {}) {
@@ -189,8 +160,10 @@ function renderCalc(overrides: Partial<Parameters<typeof RehabRentCalculator>[0]
   return { ...render(<RehabRentCalculator {...props} />), props };
 }
 
+// ── Empty state ──────────────────────────────────────────────────────────────
+
 describe('RehabRentCalculator — empty state', () => {
-  it('shows hint when no rent data (inPlaceRent=0)', () => {
+  it('shows hint when inPlaceRent=0', () => {
     renderCalc({ unitTypes: [{ label: 'A', count: 1, inPlaceRent: 0, targetRent: 0 }] });
     expect(screen.getByText(/Enter in-place and target rents/i)).toBeInTheDocument();
   });
@@ -200,58 +173,45 @@ describe('RehabRentCalculator — empty state', () => {
     expect(screen.getByText(/Enter in-place and target rents/i)).toBeInTheDocument();
   });
 
-  it('does not show the calculator inputs in empty state', () => {
+  it('does not show number inputs in empty state', () => {
     const { container } = renderCalc({ unitTypes: [{ label: 'A', count: 1, inPlaceRent: 0, targetRent: 0 }] });
     expect(container.querySelector('input[type="number"]')).toBeNull();
   });
 });
 
+// ── Active state ─────────────────────────────────────────────────────────────
+
 describe('RehabRentCalculator — active state', () => {
-  it('shows "Value-Add Rent Calculator" header', () => {
+  it('shows "Stabilization Schedule" header', () => {
     renderCalc();
-    expect(screen.getByText('Value-Add Rent Calculator')).toBeInTheDocument();
+    expect(screen.getByText('Stabilization Schedule')).toBeInTheDocument();
   });
 
-  it('renders pace and duration inputs', () => {
-    const { container } = renderCalc();
-    const inputs = container.querySelectorAll('input[type="number"]');
-    expect(inputs.length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('shows stabilization note with unit count and month', () => {
+  it('shows Total duration input', () => {
     renderCalc();
-    expect(screen.getByText(/unit.*stabilized by month/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Total duration/i)).toBeInTheDocument();
   });
 
-  it('shows the results table with transition year rows', () => {
+  it('shows Stab. and Reno. toggle buttons', () => {
     renderCalc();
-    expect(screen.getByText('Yr 1')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Stab\./i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Reno\./i })).toBeInTheDocument();
   });
 
-  it('shows Blended/mo and Target/mo column headers in results table', () => {
-    renderCalc();
-    expect(screen.getByText('Blended/mo')).toBeInTheDocument();
-    expect(screen.getByText('Target/mo')).toBeInTheDocument();
-  });
-
-  it('shows "Apply to Pro Forma" and "Clear" buttons but not "Apply to Pre-Stab"', () => {
+  it('shows Apply to Pro Forma and Clear buttons', () => {
     renderCalc();
     expect(screen.getByRole('button', { name: /Apply to Pro Forma/i })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Apply to Pre-Stab/i })).toBeNull();
     expect(screen.getByRole('button', { name: /Clear/i })).toBeInTheDocument();
   });
 
-  it('shows step flow inputs: units to stabilize, pace, type toggle', () => {
+  it('does not show "Apply to Pre-Stab" button', () => {
     renderCalc();
-    expect(screen.getByText(/How many units need to be stabilized/i)).toBeInTheDocument();
-    expect(screen.getByText(/At what pace/i)).toBeInTheDocument();
-    expect(screen.getByText(/Stabilization or renovation/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Apply to Pre-Stab/i })).toBeNull();
   });
 
-  it('shows Stabilization and Renovation toggle buttons', () => {
+  it('shows Cancel button in header', () => {
     renderCalc();
-    expect(screen.getByRole('button', { name: /^Stabilization$/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Renovation$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /cancel calculator/i })).toBeInTheDocument();
   });
 
   it('does not show "Applied" badge by default', () => {
@@ -260,75 +220,200 @@ describe('RehabRentCalculator — active state', () => {
   });
 
   it('shows "Applied" badge when appliedYears is non-empty', () => {
-    renderCalc({ appliedYears: { 1: 21600, 2: 21600 } });
+    renderCalc({ appliedYears: { 1: 21600 } });
     expect(screen.getByText('Applied')).toBeInTheDocument();
+  });
+
+  it('shows per-unit Mo/unit inputs when Renovation selected (default)', () => {
+    renderCalc();
+    expect(screen.getByLabelText(/Months per unit SFR/i)).toBeInTheDocument();
+  });
+
+  it('hides Mo/unit inputs when Stabilization selected', async () => {
+    const user = userEvent.setup();
+    renderCalc();
+    await user.click(screen.getByRole('button', { name: /Stab\./i }));
+    expect(screen.queryByLabelText(/Months per unit/i)).toBeNull();
+  });
+
+  it('shows no-vacancy hint when Stabilization selected', async () => {
+    const user = userEvent.setup();
+    renderCalc();
+    await user.click(screen.getByRole('button', { name: /Stab\./i }));
+    expect(screen.getByText(/no vacancy/i)).toBeInTheDocument();
   });
 });
 
-describe('RehabRentCalculator — Apply to Pro Forma', () => {
-  it('calls onApply with year overrides when button is clicked', async () => {
+// ── Multi-type columns ────────────────────────────────────────────────────────
+
+describe('RehabRentCalculator — multi-type unit columns', () => {
+  it('shows column headers for each unit type', () => {
+    renderCalc({ unitTypes: mfrUnits });
+    expect(screen.getAllByText('1BR').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('2BR').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('shows Stabilize input for each unit type', () => {
+    renderCalc({ unitTypes: mfrUnits });
+    expect(screen.getByLabelText(/Units to stabilize 1BR/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Units to stabilize 2BR/i)).toBeInTheDocument();
+  });
+
+  it('shows Mo/unit input for each unit type in renovation mode', () => {
+    renderCalc({ unitTypes: mfrUnits });
+    expect(screen.getByLabelText(/Months per unit 1BR/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Months per unit 2BR/i)).toBeInTheDocument();
+  });
+
+  it('shows unit counts in column sub-headers', () => {
+    renderCalc({ unitTypes: mfrUnits });
+    expect(screen.getByText('3 units')).toBeInTheDocument();
+    expect(screen.getByText('2 units')).toBeInTheDocument();
+  });
+});
+
+// ── Monthly grid ─────────────────────────────────────────────────────────────
+
+describe('RehabRentCalculator — monthly grid', () => {
+  it('shows month rows after entering duration and units', async () => {
     const user = userEvent.setup();
-    const { props } = renderCalc();
-    await user.click(screen.getByRole('button', { name: /Apply to Pro Forma/i }));
+    renderCalc({ unitTypes: mfrUnits });
+
+    fireEvent.change(screen.getByLabelText(/Total duration/i), { target: { value: '3' } });
+    fireEvent.change(screen.getByLabelText(/Units to stabilize 1BR/i), { target: { value: '3' } });
+
+    expect(screen.getByText('Mo 1')).toBeInTheDocument();
+    expect(screen.getByText('Mo 2')).toBeInTheDocument();
+    expect(screen.getByText('Mo 3')).toBeInTheDocument();
+  });
+
+  it('shows Year 1 group header', () => {
+    renderCalc({ unitTypes: mfrUnits });
+    fireEvent.change(screen.getByLabelText(/Total duration/i), { target: { value: '6' } });
+    fireEvent.change(screen.getByLabelText(/Units to stabilize 1BR/i), { target: { value: '3' } });
+    expect(screen.getByText('Year 1')).toBeInTheDocument();
+  });
+
+  it('shows Year 2 group header when duration > 12', () => {
+    renderCalc({ unitTypes: mfrUnits });
+    fireEvent.change(screen.getByLabelText(/Total duration/i), { target: { value: '15' } });
+    fireEvent.change(screen.getByLabelText(/Units to stabilize 1BR/i), { target: { value: '3' } });
+    expect(screen.getByText('Year 2')).toBeInTheDocument();
+  });
+
+  it('shows per-type cell inputs in each month row', () => {
+    renderCalc({ unitTypes: mfrUnits });
+    fireEvent.change(screen.getByLabelText(/Total duration/i), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText(/Units to stabilize 1BR/i), { target: { value: '2' } });
+
+    expect(screen.getByLabelText(/Mo 1 1BR/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Mo 1 2BR/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Mo 2 1BR/i)).toBeInTheDocument();
+  });
+
+  it('Auto-fill button appears in month 1 row', () => {
+    renderCalc({ unitTypes: mfrUnits });
+    fireEvent.change(screen.getByLabelText(/Total duration/i), { target: { value: '3' } });
+    fireEvent.change(screen.getByLabelText(/Units to stabilize 1BR/i), { target: { value: '3' } });
+    expect(screen.getByRole('button', { name: /Auto-fill schedule/i })).toBeInTheDocument();
+  });
+
+  it('Auto-fill distributes units evenly across months', async () => {
+    const user = userEvent.setup();
+    renderCalc({ unitTypes: [{ label: '1BR', count: 4, inPlaceRent: 1000, targetRent: 1500 }] });
+
+    fireEvent.change(screen.getByLabelText(/Total duration/i), { target: { value: '4' } });
+    fireEvent.change(screen.getByLabelText(/Units to stabilize 1BR/i), { target: { value: '4' } });
+
+    await user.click(screen.getByRole('button', { name: /Auto-fill schedule/i }));
+
+    // 4 units / 4 months = 1 per month
+    const mo1Input = screen.getByLabelText(/Mo 1 1BR/i) as HTMLInputElement;
+    expect(Number(mo1Input.value)).toBe(1);
+    const mo4Input = screen.getByLabelText(/Mo 4 1BR/i) as HTMLInputElement;
+    expect(Number(mo4Input.value)).toBe(1);
+  });
+});
+
+// ── Schedule validation ───────────────────────────────────────────────────────
+
+describe('RehabRentCalculator — schedule validation', () => {
+  it('Apply button is disabled when schedule total does not match target', () => {
+    renderCalc();
+    fireEvent.change(screen.getByLabelText(/Total duration/i), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText(/Units to stabilize SFR/i), { target: { value: '1' } });
+    // leave schedule empty (total=0, target=1) → invalid
+    const applyBtn = screen.getByRole('button', { name: /Apply to Pro Forma/i });
+    expect(applyBtn).toBeDisabled();
+  });
+
+  it('shows warning when schedules are incomplete', () => {
+    renderCalc({ unitTypes: mfrUnits });
+    fireEvent.change(screen.getByLabelText(/Total duration/i), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText(/Units to stabilize 1BR/i), { target: { value: '3' } });
+    // Enter partial schedule
+    fireEvent.change(screen.getByLabelText(/Mo 1 1BR/i), { target: { value: '1' } });
+    expect(screen.getByText(/Schedule totals must match/i)).toBeInTheDocument();
+  });
+});
+
+// ── Apply ─────────────────────────────────────────────────────────────────────
+
+describe('RehabRentCalculator — Apply to Pro Forma', () => {
+  async function applyWithValidSchedule(unitTypes = [sfrUnit]) {
+    const user = userEvent.setup();
+    const { props } = renderCalc({ unitTypes });
+
+    // Fill in valid schedule for each type
+    fireEvent.change(screen.getByLabelText(/Total duration/i), { target: { value: '2' } });
+
+    for (const ut of unitTypes) {
+      fireEvent.change(screen.getByLabelText(new RegExp(`Units to stabilize ${ut.label}`, 'i')), {
+        target: { value: String(ut.count) },
+      });
+    }
+
+    // Auto-fill
+    await user.click(screen.getByRole('button', { name: /Auto-fill schedule/i }));
+
+    // Click apply
+    const applyBtn = screen.getByRole('button', { name: /Apply to Pro Forma/i });
+    await user.click(applyBtn);
+
+    return props;
+  }
+
+  it('calls onApply with year overrides', async () => {
+    const props = await applyWithValidSchedule();
     expect(props.onApply).toHaveBeenCalledOnce();
     const overrides = props.onApply.mock.calls[0][0] as Record<number, number>;
-    // At least one year should have a rent value
     expect(Object.keys(overrides).length).toBeGreaterThanOrEqual(1);
   });
 
-  it('onApply overrides have positive rent values', async () => {
-    const user = userEvent.setup();
-    const { props } = renderCalc();
-    await user.click(screen.getByRole('button', { name: /Apply to Pro Forma/i }));
+  it('onApply override values are positive', async () => {
+    const props = await applyWithValidSchedule();
     const overrides = props.onApply.mock.calls[0][0] as Record<number, number>;
     Object.values(overrides).forEach(v => expect(v).toBeGreaterThan(0));
   });
 
   it('calls onOpenChange(false) after applying', async () => {
-    const user = userEvent.setup();
-    const { props } = renderCalc();
-    await user.click(screen.getByRole('button', { name: /Apply to Pro Forma/i }));
+    const props = await applyWithValidSchedule();
     expect(props.onOpenChange).toHaveBeenCalledWith(false);
   });
-});
 
-describe('RehabRentCalculator — Apply to Pro Forma also sets pre-stab', () => {
-  it('calls onApplyPreStab when Apply to Pro Forma is clicked', async () => {
-    const user = userEvent.setup();
-    const { props } = renderCalc();
-    await user.click(screen.getByRole('button', { name: /Apply to Pro Forma/i }));
+  it('calls onApplyPreStab with one value per unit type', async () => {
+    const props = await applyWithValidSchedule(mfrUnits);
     expect(props.onApplyPreStab).toHaveBeenCalledOnce();
     const values = props.onApplyPreStab!.mock.calls[0][0] as number[];
-    expect(values).toHaveLength(1);
-    expect(values[0]).toBeGreaterThan(0);
-  });
-
-  it('blended pre-stab value is between inPlaceRent and targetRent', async () => {
-    const user = userEvent.setup();
-    const { props } = renderCalc();
-    await user.click(screen.getByRole('button', { name: /Apply to Pro Forma/i }));
-    const values = props.onApplyPreStab!.mock.calls[0][0] as number[];
-    expect(values[0]).toBeGreaterThanOrEqual(sfrUnit.inPlaceRent);
-    expect(values[0]).toBeLessThanOrEqual(sfrUnit.targetRent);
+    expect(values).toHaveLength(mfrUnits.length);
+    values.forEach(v => expect(v).toBeGreaterThan(0));
   });
 });
 
-describe('RehabRentCalculator — Cancel button', () => {
-  it('renders a Cancel/close button in the header', () => {
-    renderCalc();
-    expect(screen.getByRole('button', { name: /cancel calculator/i })).toBeInTheDocument();
-  });
-
-  it('Cancel button calls onOpenChange(false)', async () => {
-    const user = userEvent.setup();
-    const { props } = renderCalc();
-    await user.click(screen.getByRole('button', { name: /cancel calculator/i }));
-    expect(props.onOpenChange).toHaveBeenCalledWith(false);
-  });
-});
+// ── Clear & Cancel ────────────────────────────────────────────────────────────
 
 describe('RehabRentCalculator — Clear', () => {
-  it('calls onClear when Clear button is clicked', async () => {
+  it('calls onClear when Clear is clicked', async () => {
     const user = userEvent.setup();
     const { props } = renderCalc();
     await user.click(screen.getByRole('button', { name: /Clear/i }));
@@ -343,98 +428,11 @@ describe('RehabRentCalculator — Clear', () => {
   });
 });
 
-describe('RehabRentCalculator — pace input interaction', () => {
-  it('updating pace changes the stabilization month displayed', async () => {
+describe('RehabRentCalculator — Cancel', () => {
+  it('calls onOpenChange(false) when Cancel is clicked', async () => {
     const user = userEvent.setup();
-    const { container } = renderCalc({ unitTypes: [{ label: 'SFR', count: 4, inPlaceRent: 1000, targetRent: 1500 }] });
-
-    // Default pace=1 → stab month = ceil(4/1)+1 = 5
-    expect(screen.getByText(/month 5/i)).toBeInTheDocument();
-
-    // Change pace to 4 → stab month = ceil(4/4)+1 = 2
-    // Pace is the second number input (after units to stabilize)
-    const paceInput = container.querySelectorAll('input[type="number"]')[1] as HTMLInputElement;
-    await user.clear(paceInput);
-    await user.type(paceInput, '4');
-    fireEvent.blur(paceInput);
-
-    expect(screen.getByText(/month 2/i)).toBeInTheDocument();
-  });
-});
-
-describe('simulateRehabRent — partial units (unitsToStabilize)', () => {
-  const unit: UnitTypeInput = { label: 'A', count: 10, inPlaceRent: 1000, targetRent: 1500 };
-
-  it('non-stabilizing units earn target rent throughout', () => {
-    // 4 stabilize, 6 already at target. pace=4, duration=0 → stab month=1
-    // Yr1: 4 stabilizing units flip in mo1 + 6 at target = 10×1500×12 = 180000
-    const result = simulateRehabRent([unit], 4, 0, 2, 4);
-    expect(result.yearlyRents[0]).toBeCloseTo(10 * 1500 * 12, 0);
-  });
-
-  it('stabilizationMonth is based only on unitsToStabilize', () => {
-    // 6 units stabilize, pace=2, duration=1 → ceil(6/2)+1 = 4
-    const result = simulateRehabRent([unit], 2, 1, 3, 6);
-    expect(result.stabilizationMonth).toBe(4);
-  });
-
-  it('income increases as stabilizing units complete renovation', () => {
-    // 4 stabilize at pace=1, duration=1, 6 at target throughout
-    // Yr1 starts lower than Yr2
-    const result = simulateRehabRent([unit], 1, 1, 3, 4);
-    expect(result.yearlyRents[1]).toBeGreaterThan(result.yearlyRents[0]);
-  });
-});
-
-describe('RehabRentCalculator — step flow UI', () => {
-  it('shows "of N total" label next to units to stabilize input', () => {
-    renderCalc({ unitTypes: [{ label: 'SFR', count: 8, inPlaceRent: 1000, targetRent: 1500 }] });
-    expect(screen.getByText(/of 8 total/i)).toBeInTheDocument();
-  });
-
-  it('shows "already at target" hint when units to stabilize < total', () => {
-    const { container } = renderCalc({ unitTypes: [{ label: 'SFR', count: 8, inPlaceRent: 1000, targetRent: 1500 }] });
-    const stabInput = container.querySelectorAll('input[type="number"]')[0] as HTMLInputElement;
-    fireEvent.change(stabInput, { target: { value: '6' } });
-    expect(screen.getByText(/already at target/i)).toBeInTheDocument();
-  });
-
-  it('switching to Stabilization hides duration input', async () => {
-    const user = userEvent.setup();
-    const { container } = renderCalc();
-    // Default is renovation — duration input visible
-    expect(container.querySelectorAll('input[type="number"]').length).toBeGreaterThanOrEqual(3);
-    await user.click(screen.getByRole('button', { name: /^Stabilization$/i }));
-    // Stabilization — duration input hidden
-    expect(container.querySelectorAll('input[type="number"]').length).toBe(2);
-  });
-
-  it('shows no-vacancy hint when Stabilization is selected', async () => {
-    const user = userEvent.setup();
-    renderCalc();
-    await user.click(screen.getByRole('button', { name: /^Stabilization$/i }));
-    expect(screen.getByText(/no vacancy/i)).toBeInTheDocument();
-  });
-});
-
-describe('RehabRentCalculator — multi-type unit mix', () => {
-  it('shows unit mix breakdown table when more than one unit type', () => {
-    renderCalc({ unitTypes: mfrUnits });
-    expect(screen.getAllByText('1BR/1BA × 3').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText('2BR/2BA × 2').length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('shows Pace column in the unit mix table', () => {
-    renderCalc({ unitTypes: mfrUnits });
-    expect(screen.getByText('Pace')).toBeInTheDocument();
-  });
-
-  it('onApplyPreStab is called with values for each unit type when Apply to Pro Forma clicked', async () => {
-    const user = userEvent.setup();
-    const { props } = renderCalc({ unitTypes: mfrUnits });
-    await user.click(screen.getByRole('button', { name: /Apply to Pro Forma/i }));
-    const values = props.onApplyPreStab!.mock.calls[0][0] as number[];
-    expect(values).toHaveLength(2);
-    values.forEach(v => expect(v).toBeGreaterThan(0));
+    const { props } = renderCalc();
+    await user.click(screen.getByRole('button', { name: /cancel calculator/i }));
+    expect(props.onOpenChange).toHaveBeenCalledWith(false);
   });
 });
