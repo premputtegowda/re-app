@@ -136,9 +136,14 @@ function groupByYear(totalMonths: number): number[][] {
 
 function evenDistribute(n: number, dur: number): number[] {
   if (n === 0 || dur === 0) return Array(dur).fill(0);
-  const base = Math.floor(n / dur);
-  const extra = n - base * dur;
-  return Array.from({ length: dur }, (_, i) => (i < extra ? base + 1 : base));
+  const result = Array(dur).fill(0);
+  let placed = 0;
+  for (let i = 0; i < dur; i++) {
+    const target = Math.round(n * (i + 1) / dur);
+    result[i] = target - placed;
+    placed = target;
+  }
+  return result;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -177,7 +182,7 @@ export function RehabRentCalculator({
   // ── Mode ──
   const [mode, setMode] = useState<'renovate' | 'stabilize' | 'manual'>(() => {
     const s = initialState?.mode;
-    if (!s || (s as string) === 'calculator') return 'renovate';
+    if (!s || (s as string) === 'calculator' || s === 'stabilize') return 'renovate';
     return s;
   });
 
@@ -360,7 +365,7 @@ export function RehabRentCalculator({
       {/* ── Mode switcher ── */}
       <div className="px-3.5 pb-3">
         <div className="flex rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden text-xs font-medium">
-          {(['renovate', 'stabilize', 'manual'] as const).map((m, i) => (
+          {(['renovate', 'manual'] as const).map((m, i) => (
             <button
               key={m}
               type="button"
@@ -371,18 +376,17 @@ export function RehabRentCalculator({
                   : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/40'
               }`}
             >
-              {m === 'renovate' ? 'Renovate' : m === 'stabilize' ? 'Stabilize' : 'Enter My Numbers'}
+              {m === 'renovate' ? 'Renovate' : 'Enter My Numbers'}
             </button>
           ))}
         </div>
         <p className="mt-1.5 text-[11px] text-slate-400 dark:text-slate-500">
           {mode === 'renovate' && 'Units go offline during renovation, then earn target rent.'}
-          {mode === 'stabilize' && 'Units flip to target rent immediately — no vacancy.'}
           {mode === 'manual' && 'Enter your own pre-stab rent and duration directly.'}
         </p>
       </div>
 
-      {/* ── Rents per unit type ── */}
+      {/* ── Unit type table ── */}
       <div className="border-t border-slate-200 dark:border-slate-700">
         <table className="w-full text-xs">
           <thead>
@@ -390,6 +394,9 @@ export function RehabRentCalculator({
               <th className="px-3 py-2 text-left font-medium text-slate-500 dark:text-slate-400">Unit Type</th>
               <th className="px-3 py-2 text-right font-medium text-slate-500 dark:text-slate-400">In-Place</th>
               <th className="px-3 py-2 text-right font-medium text-slate-500 dark:text-slate-400">Target</th>
+              {mode === 'renovate' && (
+                <th className="px-2 py-2 text-right font-medium text-slate-500 dark:text-slate-400">To Renovate</th>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
@@ -423,11 +430,41 @@ export function RehabRentCalculator({
                     />
                   </div>
                 </td>
+                {mode === 'renovate' && (
+                  <td className="px-2 py-1.5">
+                    <input
+                      type="number" min={0} max={ut.count} placeholder="0"
+                      className="input text-xs text-right w-full"
+                      value={unitsToStabilize[t] === 0 ? '' : unitsToStabilize[t]}
+                      onChange={e => setTypeUnits(t, Number(e.target.value) || 0)}
+                      aria-label={`Units to renovate ${ut.label}`}
+                    />
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {/* ── Months offline (shared, renovate mode only) ── */}
+      {mode === 'renovate' && (
+        <div className="px-3.5 py-3 border-t border-slate-200 dark:border-slate-700 flex items-center gap-3">
+          <label className="text-xs font-medium text-slate-500 dark:text-slate-400 shrink-0">
+            Months offline per unit
+          </label>
+          <input
+            type="number" min={0} max={24} step={0.25} placeholder="e.g. 1.5"
+            className="input text-sm w-28"
+            value={perUnitMonths[0] === 0 ? '' : perUnitMonths[0]}
+            onChange={e => {
+              const v = Math.min(24, Math.max(0, Number(e.target.value) || 0));
+              setPerUnitMonths(unitTypes.map(() => v));
+            }}
+            aria-label="Months offline per unit"
+          />
+        </div>
+      )}
 
       {/* ── Manual entry mode ── */}
       {mode === 'manual' && (
@@ -539,70 +576,11 @@ export function RehabRentCalculator({
       {(mode === 'renovate' || mode === 'stabilize') && (
         <div className="px-3.5 pb-4 space-y-5 border-t border-slate-200 dark:border-slate-700 pt-4">
 
-          {/* ── Step 1: Units per type ── */}
-          <div className="space-y-2">
-            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
-              Step 1 — Units to {mode === 'renovate' ? 'renovate' : 'stabilize'}
-            </p>
-            {unitTypes.map((ut, t) => (
-              <div key={t} className="rounded-lg border border-slate-200 dark:border-slate-700 p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
-                    {ut.label} <span className="font-normal text-slate-400">({ut.count} total)</span>
-                  </span>
-                  <span className={`text-xs font-semibold ${
-                    unitsToStabilize[t] === 0 ? 'text-slate-400'
-                      : scheduleTotals[t] === unitsToStabilize[t] ? 'text-emerald-600 dark:text-emerald-400'
-                      : scheduleTotals[t] > unitsToStabilize[t] ? 'text-red-500'
-                      : 'text-amber-500'
-                  }`}>
-                    {scheduleTotals[t]}/{unitsToStabilize[t] || '—'} scheduled
-                  </span>
-                </div>
-                <div className={`grid gap-3 ${mode === 'renovate' ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                  <div>
-                    <label className="text-[11px] text-slate-400 dark:text-slate-500 block mb-1">
-                      Units (of {ut.count})
-                    </label>
-                    <input
-                      type="number"
-                      className="input text-sm w-full"
-                      min={0}
-                      max={ut.count}
-                      placeholder="0"
-                      value={unitsToStabilize[t] === 0 ? '' : unitsToStabilize[t]}
-                      onChange={e => setTypeUnits(t, Number(e.target.value) || 0)}
-                      aria-label={`Units to ${mode} ${ut.label}`}
-                    />
-                  </div>
-                  {mode === 'renovate' && (
-                    <div>
-                      <label className="text-[11px] text-slate-400 dark:text-slate-500 block mb-1">
-                        Months offline / unit
-                      </label>
-                      <input
-                        type="number"
-                        className="input text-sm w-full"
-                        min={0}
-                        max={24}
-                        step={0.25}
-                        placeholder="e.g. 1.5"
-                        value={perUnitMonths[t] === 0 ? '' : perUnitMonths[t]}
-                        onChange={e => setTypeMonths(t, Number(e.target.value) || 0)}
-                        aria-label={`Months offline per unit ${ut.label}`}
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* ── Step 2: Total duration ── */}
+          {/* ── Step 1: Total duration ── */}
           {someTypeScheduled && (
             <div className="space-y-2">
               <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
-                Step 2 — Total {mode === 'renovate' ? 'renovation' : 'stabilization'} duration (months)
+                Step 1 — Total renovation duration (months)
               </p>
               <input
                 type="number"
@@ -622,7 +600,7 @@ export function RehabRentCalculator({
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
-                  Step 3 — Schedule
+                  Step 2 — Schedule
                 </p>
                 <button
                   type="button"
