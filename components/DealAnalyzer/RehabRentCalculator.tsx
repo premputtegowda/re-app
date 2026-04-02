@@ -213,6 +213,7 @@ export function RehabRentCalculator({
   const [perUnitMonths, setPerUnitMonths]       = useState<number[]>(() => initialState?.perUnitMonths ?? unitTypes.map(() => 0));
   const [scheduleByType, setScheduleByType]     = useState<number[][]>(() => initialState?.scheduleByType ?? unitTypes.map(() => []));
   const [openYear, setOpenYear]                 = useState<number | null>(null);
+  const [autoFilled, setAutoFilled]             = useState(false);
 
   // ── Manual mode state ──
   const [manualDuration, setManualDuration]         = useState(() => initialState?.manualDuration ?? 0);
@@ -267,7 +268,8 @@ export function RehabRentCalculator({
   const setTypeMonths = (t: number, val: number) =>
     setPerUnitMonths(prev => { const n = [...prev]; n[t] = Math.min(24, Math.max(0, val)); return n; });
 
-  const updateCell = (t: number, monthIdx: number, val: number) =>
+  const updateCell = (t: number, monthIdx: number, val: number) => {
+    setAutoFilled(false);
     setScheduleByType(prev => {
       const next = prev.map(s => [...s]);
       const otherSum = (next[t] ?? []).reduce((s, n, i) => i === monthIdx ? s : s + n, 0);
@@ -275,16 +277,25 @@ export function RehabRentCalculator({
       next[t][monthIdx] = Math.min(Math.max(0, val), cap);
       return next;
     });
+  };
+
+  const computeAutoFill = (units: number[], dur: number) =>
+    unitTypes.map((_, t) => {
+      const n = units[t];
+      if (n === 0 || dur === 0) return Array(dur).fill(0);
+      return evenDistribute(n, dur);
+    });
 
   const autoFillAll = () => {
-    setScheduleByType(
-      unitTypes.map((_, t) => {
-        const n = unitsToStabilize[t];
-        if (n === 0 || totalDuration === 0) return Array(totalDuration).fill(0);
-        return evenDistribute(n, totalDuration);
-      })
-    );
+    setScheduleByType(computeAutoFill(unitsToStabilize, totalDuration));
+    setAutoFilled(true);
   };
+
+  // Re-run auto-fill whenever units, duration, or offline months change — if auto-fill is active
+  useEffect(() => {
+    if (!autoFilled) return;
+    setScheduleByType(computeAutoFill(unitsToStabilize, totalDuration));
+  }, [unitsToStabilize, totalDuration, perUnitMonths, autoFilled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const result = useMemo<SimulationResult | null>(() => {
     if (!hasRentData || !scheduleValid) return null;
@@ -325,6 +336,7 @@ export function RehabRentCalculator({
     setPerUnitMonths(unitTypes.map(() => 0));
     setScheduleByType(unitTypes.map(() => []));
     setOpenYear(null);
+    setAutoFilled(false);
   };
 
   if (unitTypes.length === 0) return (
@@ -376,12 +388,12 @@ export function RehabRentCalculator({
                   : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/40'
               }`}
             >
-              {m === 'renovate' ? 'Renovate' : 'Enter My Numbers'}
+              {m === 'renovate' ? 'Stabilize' : 'Enter My Numbers'}
             </button>
           ))}
         </div>
         <p className="mt-1.5 text-[11px] text-slate-400 dark:text-slate-500">
-          {mode === 'renovate' && 'Units go offline during renovation, then earn target rent.'}
+          {mode === 'renovate' && 'Units go offline during stabilization, then earn target rent.'}
           {mode === 'manual' && 'Enter your own pre-stab rent and duration directly.'}
         </p>
       </div>
@@ -580,7 +592,7 @@ export function RehabRentCalculator({
           {someTypeScheduled && (
             <div className="space-y-2">
               <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
-                Step 1 — Total renovation duration (months)
+                Step 1 — Total stabilization duration (months)
               </p>
               <input
                 type="number"
@@ -602,16 +614,31 @@ export function RehabRentCalculator({
                 <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
                   Step 2 — Schedule
                 </p>
-                <button
-                  type="button"
-                  onClick={autoFillAll}
-                  className="flex items-center gap-1 text-xs text-primary-600 dark:text-primary-400 hover:text-primary-700 font-medium touch-manipulation"
-                  title="Distribute units evenly across months"
-                  aria-label="Auto-fill schedule"
-                >
-                  <Wand2 size={12} />
-                  Auto-fill
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={autoFillAll}
+                    className="flex items-center gap-1 text-xs text-primary-600 dark:text-primary-400 hover:text-primary-700 font-medium touch-manipulation"
+                    title="Distribute units evenly across months"
+                    aria-label="Auto-fill schedule"
+                  >
+                    <Wand2 size={12} />
+                    Auto-fill
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setScheduleByType(unitTypes.map(() => Array(totalDuration).fill(0)));
+                      setAutoFilled(false);
+                    }}
+                    className="flex items-center gap-1 text-xs text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 font-medium touch-manipulation"
+                    title="Clear schedule"
+                    aria-label="Clear schedule"
+                  >
+                    <X size={12} />
+                    Clear
+                  </button>
+                </div>
               </div>
               <p className="text-[11px] text-slate-400 dark:text-slate-500">
                 Enter how many units start each month, or use Auto-fill to distribute evenly.
@@ -626,9 +653,18 @@ export function RehabRentCalculator({
                     <div className="px-3 py-1.5 bg-slate-100 dark:bg-slate-700/50 flex items-center justify-between">
                       <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Year {yi + 1}</span>
                       <div className="flex gap-3">
-                        {unitTypes.map((ut, t) => yearTotals[t] > 0 && (
-                          <span key={t} className="text-[11px] text-slate-400">{ut.label}: {yearTotals[t]}</span>
-                        ))}
+                        {unitTypes.map((ut, t) => {
+                          const scheduled = scheduleTotals[t];
+                          const target = unitsToStabilize[t];
+                          if (target === 0) return null;
+                          const over = scheduled > target;
+                          const done = scheduled === target;
+                          return (
+                            <span key={t} className={`text-[11px] font-medium ${over ? 'text-red-500' : done ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-500'}`}>
+                              {ut.label}: {scheduled}/{target}
+                            </span>
+                          );
+                        })}
                       </div>
                     </div>
 
