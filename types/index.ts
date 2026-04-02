@@ -317,6 +317,7 @@ export interface ProFormaData {
   yearOverrides?: Record<number, {
     grossRent?: number;
     grossRentSystem?: boolean;       // true = set by rent schedule / calculator (not manual)
+    yr1Blocked?: boolean;            // true = Year 1 override anchors the chain (Yr2+ rebase from it)
     grossRentGrowthPct?: number;     // growth rate FROM prev year TO this year
     otherIncome?: number;
     otherIncomeGrowthPct?: number;
@@ -324,6 +325,11 @@ export interface ProFormaData {
     creditLossPct?: number;
     expenses?: Record<string, number>; // expenseId -> overridden value
     expenseGrowthPcts?: Record<string, number>; // expenseId -> growth rate
+    // Tracks which fields were written by auto-cascade (not manually entered).
+    // Cascade overwrites these; manual edits clear them.
+    cascadedFields?: Partial<Record<'grossRent' | 'otherIncome' | 'vacancyPct' | 'creditLossPct' | 'grossRentGrowthPct' | 'otherIncomeGrowthPct', true>>;
+    cascadedExpenses?: Record<string, true>;        // expenseId -> cascaded
+    cascadedExpenseGrowthPcts?: Record<string, true>; // expenseId -> cascaded
   }>;
 }
 

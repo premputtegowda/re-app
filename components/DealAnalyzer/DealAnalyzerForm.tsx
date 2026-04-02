@@ -552,20 +552,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       case 3: {
         const hasMfr = acquisition.propertyType === 'mfr' && acquisition.unitMix.length > 0;
 
-        const PreStabHeader = ({ onOpen }: { onOpen: () => void }) => (
-          <span className="flex items-center gap-1.5 justify-end">
-            Pre-Stab
-            <button
-              type="button"
-              onClick={onOpen}
-              className="flex items-center text-amber-500 hover:text-amber-600 dark:text-amber-400 dark:hover:text-amber-300 transition-colors"
-              title="Use calculator"
-            >
-              <Calculator size={11} />
-            </button>
-          </span>
-        );
-
         const mfrRentFields = ['inPlaceRent', 'rentMonthly'] as const;
         const mfrRentLabels = { inPlaceRent: 'In-Place', rentMonthly: 'Target' };
 
@@ -576,7 +562,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
               <button
                 type="button"
                 onClick={() => setCalcOpen(true)}
-                className="sm:hidden flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 font-medium transition-colors"
+                className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 font-medium transition-colors"
               >
                 <Calculator size={12} />
                 Calculator
@@ -615,17 +601,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                       );
                     })}
                   </div>
-                  {(entry.preStabRent || 0) > 0 && (
-                    <div className="pt-1 flex items-center justify-between">
-                      <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500 flex items-center gap-1">
-                        Pre-Stab avg/unit
-                        <span className="text-[9px] text-blue-400 dark:text-blue-500">(calc)</span>
-                      </span>
-                      <span className="text-xs font-semibold tabular-nums text-blue-600 dark:text-blue-400">
-                        ${Math.round(entry.preStabRent || 0).toLocaleString()}/mo
-                      </span>
-                    </div>
-                  )}
                 </div>
               ))}
               {(() => {
@@ -645,14 +620,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                         </div>
                       ))}
                     </div>
-                    {avgPreStab > 0 && (
-                      <div className="flex items-center justify-between pt-0.5 border-t border-slate-200 dark:border-slate-600">
-                        <p className="text-[10px] font-medium text-slate-400 flex items-center gap-1">
-                          Pre-Stab avg/unit <span className="text-[9px] text-blue-400">(calc)</span>
-                        </p>
-                        <p className="text-xs font-semibold tabular-nums text-blue-600 dark:text-blue-400">{fmt(avgPreStab)}/mo</p>
-                      </div>
-                    )}
                   </div>
                 );
               })()}
@@ -673,9 +640,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                         )}
                       </span>
                     </th>
-                    <th className="px-3 py-2 text-right text-xs font-medium text-slate-500 dark:text-slate-400">
-                      <PreStabHeader onOpen={() => setCalcOpen(true)} />
-                    </th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-slate-500 dark:text-slate-400">Pre-Stab</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
@@ -755,16 +720,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 );
               })}
             </div>
-            {(acquisition.sfrPreStabRent || 0) > 0 && (
-              <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-blue-50/60 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800/40">
-                <span className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                  Pre-Stab avg/unit <span className="text-[10px] text-blue-400">(from calculator)</span>
-                </span>
-                <span className="text-sm font-semibold tabular-nums text-blue-600 dark:text-blue-400">
-                  ${Math.round(acquisition.sfrPreStabRent || 0).toLocaleString()}/mo
-                </span>
-              </div>
-            )}
           </div>
         );
 
@@ -810,6 +765,18 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 onOpenChange={setCalcOpen}
                 initialState={calcState}
                 onStateChange={setCalcState}
+                onApplyRents={(rents) => {
+                  if (hasMfr) {
+                    updateAcquisition('unitMix', acquisition.unitMix.map((u, i) => ({
+                      ...u,
+                      inPlaceRent: rents[i]?.inPlace ?? u.inPlaceRent,
+                      rentMonthly: rents[i]?.target  ?? u.rentMonthly,
+                    })));
+                  } else {
+                    updateAcquisition('sfrInPlaceRent', rents[0]?.inPlace ?? acquisition.sfrInPlaceRent);
+                    updateAcquisition('sfrTargetRent',  rents[0]?.target  ?? acquisition.sfrTargetRent);
+                  }
+                }}
                 onApplyPreStab={(values) => {
                   if (hasMfr) {
                     updateAcquisition('unitMix', acquisition.unitMix.map((u, i) => ({
@@ -846,12 +813,18 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 </div>
               </div>
             )}
-            <ProFormaGrid
-              data={proForma}
-              onChange={setProForma}
-              projectionYears={acquisition.projectionYears}
-              showWarnings={isVisited}
-            />
+            {proForma.grossRent.stabilized > 0 ? (
+              <ProFormaGrid
+                data={proForma}
+                onChange={setProForma}
+                projectionYears={acquisition.projectionYears}
+                showWarnings={isVisited}
+              />
+            ) : (
+              <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-700 p-6 text-center text-sm text-slate-400 dark:text-slate-500">
+                Use the calculator above to set rent — the Pro Forma will appear here.
+              </div>
+            )}
           </>
         );
       }
