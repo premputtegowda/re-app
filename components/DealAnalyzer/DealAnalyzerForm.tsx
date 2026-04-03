@@ -12,7 +12,8 @@ import { StepRenovation } from './steps/StepRenovation';
 import { StepExit } from './steps/StepExit';
 import { ResultsPanel } from './ResultsPanel';
 import { ProFormaGrid, defaultProForma } from './ProFormaGrid';
-import { RehabRentCalculator, type CalcPersistedState } from './RehabRentCalculator';
+import { RehabRentCalculator } from './RehabRentCalculator';
+import type { CalcPersistedState } from '@/types';
 import { projectScenario } from '@/utils/dealAnalyzerCalc';
 import { useDealAnalyzerStore, type DealAnalyzerDraft } from '@/lib/dealAnalyzerStore';
 import type {
@@ -191,7 +192,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const [errors, setErrors] = useState<string[]>([]);
   const [errorStep, setErrorStep] = useState<number | null>(null);
   const [calcOpen, setCalcOpen] = useState(false);
-  const [calcState, setCalcState] = useState<CalcPersistedState | undefined>(undefined);
+  const [calcState, setCalcState] = useState<CalcPersistedState | undefined>(initialDeal?.calcState);
 
   // Form data
   const [acquisition, setAcquisition] = useState<CoCAcquisition>(
@@ -337,29 +338,39 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       const allHaveInPlace = acquisition.unitMix.every((e) => (e.inPlaceRent || 0) > 0);
 
       setOperations((prev) => ({ ...prev, grossRentMonthly: totalTarget }));
-      setProForma((prev) => ({
-        ...prev,
-        grossRent: {
-          ...prev.grossRent,
-          ...(allHaveTarget  ? { stabilized: totalTarget * 12 } : { stabilized: 0 }),
-          ...(allHaveInPlace ? { t12: totalInPlace * 12 }       : { t12: 0 }),
-        },
-        yearOverrides: applyRentOverrides(prev, totalPreStab * 12, allHaveTarget ? totalTarget * 12 : 0),
-      }));
+      setProForma((prev) => {
+        const hasCalcOverrides = Object.values(prev.yearOverrides ?? {}).some(ov => ov?.grossRentSystem === true);
+        return {
+          ...prev,
+          grossRent: {
+            ...prev.grossRent,
+            ...(allHaveTarget  ? { stabilized: totalTarget * 12 } : { stabilized: 0 }),
+            ...(allHaveInPlace ? { t12: totalInPlace * 12 }       : { t12: 0 }),
+          },
+          yearOverrides: hasCalcOverrides
+            ? prev.yearOverrides
+            : applyRentOverrides(prev, totalPreStab * 12, allHaveTarget ? totalTarget * 12 : 0),
+        };
+      });
     } else if (acquisition.propertyType === 'sfr') {
       const target  = acquisition.sfrTargetRent  || 0;
       const inPlace = acquisition.sfrInPlaceRent || 0;
       const preStab = acquisition.sfrPreStabRent || 0;
       if (target > 0) setOperations((prev) => ({ ...prev, grossRentMonthly: target }));
-      setProForma((prev) => ({
-        ...prev,
-        grossRent: {
-          ...prev.grossRent,
-          stabilized: target  > 0 ? target  * 12 : prev.grossRent.stabilized,
-          t12:        inPlace > 0 ? inPlace * 12 : prev.grossRent.t12,
-        },
-        yearOverrides: applyRentOverrides(prev, preStab * 12, target * 12),
-      }));
+      setProForma((prev) => {
+        const hasCalcOverrides = Object.values(prev.yearOverrides ?? {}).some(ov => ov?.grossRentSystem === true);
+        return {
+          ...prev,
+          grossRent: {
+            ...prev.grossRent,
+            stabilized: target  > 0 ? target  * 12 : prev.grossRent.stabilized,
+            t12:        inPlace > 0 ? inPlace * 12 : prev.grossRent.t12,
+          },
+          yearOverrides: hasCalcOverrides
+            ? prev.yearOverrides
+            : applyRentOverrides(prev, preStab * 12, target * 12),
+        };
+      });
     }
   }, [acquisition.unitMix, acquisition.propertyType, acquisition.sfrTargetRent, acquisition.sfrInPlaceRent, acquisition.sfrPreStabRent]);
 
@@ -451,6 +462,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         currentStep: activeStep,
         visitedSteps: Array.from(completedSteps),
         activeType,
+        ...(calcState ? { calcState } : {}),
       }, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined);
     }
 
@@ -498,6 +510,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       currentStep: activeStep,
       visitedSteps: Array.from(completedSteps),
       activeType,
+      ...(calcState ? { calcState } : {}),
     };
 
     if (savedDealId) {
@@ -748,15 +761,13 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         return (
           <>
             {rentSchedule}
-            {calcOpen && (
-              <div
-                className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
-                onClick={(e) => { if (e.target === e.currentTarget) setCalcOpen(false); }}
-              >
-                {/* Backdrop */}
-                <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-                {/* Sheet */}
-                <div className="relative w-full sm:max-w-lg max-h-[85dvh] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-white dark:bg-slate-800 shadow-2xl">
+            {/* Always mounted so effects keep running when closed — hidden via CSS */}
+            <div
+              className={calcOpen ? 'fixed inset-0 z-50 flex items-end sm:items-center justify-center' : 'hidden'}
+              onClick={(e) => { if (calcOpen && e.target === e.currentTarget) setCalcOpen(false); }}
+            >
+              {calcOpen && <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />}
+              <div className={calcOpen ? 'relative w-full sm:max-w-lg max-h-[85dvh] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-white dark:bg-slate-800 shadow-2xl' : ''}>
               <RehabRentCalculator
                 unitTypes={unitTypes}
                 projectionYears={acquisition.projectionYears}
@@ -810,10 +821,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                   });
                 }}
               />
-                </div>
               </div>
-            )}
-            {proForma.grossRent.stabilized > 0 ? (
+            </div>
+            {proForma.grossRent.stabilized > 0 && Object.values(proForma.yearOverrides ?? {}).some(ov => ov?.grossRentSystem) ? (
               <ProFormaGrid
                 data={proForma}
                 onChange={setProForma}

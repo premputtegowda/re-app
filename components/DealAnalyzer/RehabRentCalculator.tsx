@@ -5,21 +5,9 @@ import { Zap, X, Wand2, ChevronDown, ChevronUp } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-export interface LocalRent {
-  inPlace: number;
-  target: number;
-}
-
-export interface CalcPersistedState {
-  mode: 'renovate' | 'stabilize' | 'manual';
-  totalDuration: number;
-  unitsToStabilize: number[];
-  perUnitMonths: number[];
-  scheduleByType: number[][];
-  manualDuration: number;
-  manualPreStabRents: number[];
-  localRents: LocalRent[];
-}
+import type { CalcPersistedState, CalcLocalRent as LocalRent } from '@/types';
+export type { CalcPersistedState };
+export type { CalcLocalRent as LocalRent } from '@/types';
 
 export interface UnitTypeInput {
   label: string;
@@ -235,6 +223,21 @@ export function RehabRentCalculator({
     setManualDuration(0);
     setLocalRents(unitTypes.map(ut => ({ inPlace: ut.inPlaceRent, target: ut.targetRent })));
   }, [unitTypes.length]);
+
+  // Sync rent changes from the form back into localRents (bidirectional sync).
+  // Echo-back guard: when the calculator pushes rents → form → unitTypes, the values
+  // already match localRents so the functional update returns prev unchanged.
+  useEffect(() => {
+    setLocalRents(prev => {
+      const updated = prev.map((r, t) => {
+        const ut = unitTypes[t];
+        if (!ut) return r;
+        if (r.inPlace === ut.inPlaceRent && r.target === ut.targetRent) return r;
+        return { inPlace: ut.inPlaceRent, target: ut.targetRent };
+      });
+      return updated.every((r, t) => r === prev[t]) ? prev : updated;
+    });
+  }, [unitTypes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     setScheduleByType(prev =>

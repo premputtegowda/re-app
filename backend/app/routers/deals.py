@@ -29,6 +29,7 @@ class DealPayload(BaseModel):
     mcRanges: dict[str, Any] | None = None
     mcResults: Any | None = None
     currentStep: int | None = None
+    calcState: dict[str, Any] | None = None
     savedAt: str
     updatedAt: str
 
@@ -44,6 +45,7 @@ class DealResponse(BaseModel):
     mcRanges: dict[str, Any] | None
     mcResults: Any | None
     currentStep: int | None
+    calcState: dict[str, Any] | None
     savedAt: str
     updatedAt: str
 
@@ -61,6 +63,7 @@ class DealUpdatePayload(BaseModel):
     mcRanges: dict[str, Any] | None = None
     mcResults: Any | None = None
     currentStep: int | None = None
+    calcState: dict[str, Any] | None = None
     updatedAt: str
 
 
@@ -78,6 +81,7 @@ def _to_response(deal: SavedDeal) -> DealResponse:
         mcRanges=deal.mc_ranges_data,
         mcResults=deal.mc_results_data,
         currentStep=deal.current_step,
+        calcState=deal.calc_state_data,
         savedAt=deal.saved_at.isoformat(),
         updatedAt=deal.updated_at.isoformat(),
     )
@@ -138,6 +142,7 @@ async def create_deal(
         mc_ranges_data=payload.mcRanges,
         mc_results_data=payload.mcResults,
         current_step=payload.currentStep,
+        calc_state_data=payload.calcState,
         saved_at=saved_at,
         updated_at=updated_at,
     )
@@ -174,6 +179,7 @@ async def update_deal(
     deal.mc_ranges_data = payload.mcRanges
     deal.mc_results_data = payload.mcResults
     deal.current_step = payload.currentStep
+    deal.calc_state_data = payload.calcState
     deal.updated_at = datetime.utcnow()
 
     await db.commit()

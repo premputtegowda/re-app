@@ -3,7 +3,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { api } from '@/lib/api';
-import type { CoCScenario, CoCResult, CoCAcquisition, CoCOperations, CoCRefinance, CoCScenarioType, ProFormaData, SavedDeal } from '@/types';
+import type { CoCScenario, CoCResult, CoCAcquisition, CoCOperations, CoCRefinance, CoCScenarioType, ProFormaData, SavedDeal, CalcPersistedState } from '@/types';
 
 // Use crypto.randomUUID() for stable UUIDs that work as backend keys
 const generateId = () => crypto.randomUUID();
@@ -18,6 +18,7 @@ export interface DealAnalyzerDraft {
   currentStep: number;
   visitedSteps: number[];
   activeType: CoCScenarioType;
+  calcState?: CalcPersistedState;
 }
 
 interface CoCStore {
@@ -112,6 +113,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
           results,
           ...(mcRanges ? { mcRanges } : {}),
           ...(mcResults !== undefined ? { mcResults } : {}),
+          ...(draft.calcState ? { calcState: draft.calcState } : {}),
           savedAt,
           updatedAt: savedAt,
         };
@@ -128,6 +130,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
           results,
           mcRanges,
           mcResults,
+          calcState: draft.calcState,
           savedAt,
           updatedAt: savedAt,
         }).catch((err) => console.error('[DealStore] Failed to sync new deal to backend:', err));
@@ -147,6 +150,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
                 operations: draft.operations,
                 proForma: draft.proForma,
                 refinance: draft.refinance,
+                ...(draft.calcState !== undefined ? { calcState: draft.calcState } : {}),
               } : {}),
               ...(mcRanges !== undefined ? { mcRanges } : {}),
               ...(mcResults !== undefined ? { mcResults } : {}),
@@ -167,6 +171,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
             mcRanges: mcRanges !== undefined ? mcRanges : deal.mcRanges,
             mcResults: mcResults !== undefined ? mcResults : deal.mcResults,
             currentStep: deal.currentStep,
+            calcState: draft?.calcState ?? deal.calcState,
             updatedAt,
           }).catch((err) => console.error('[DealStore] Failed to sync deal update to backend:', err));
         }
@@ -248,6 +253,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
             mcRanges: d.mcRanges ?? undefined,
             mcResults: d.mcResults ?? undefined,
             currentStep: d.currentStep ?? undefined,
+            calcState: d.calcState ?? undefined,
             savedAt: d.savedAt,
             updatedAt: d.updatedAt,
           }));

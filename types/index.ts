@@ -362,6 +362,22 @@ export interface CoCYearlyProjection {
 
 export interface MCRangeEntry { min: number; mode: number; max: number; }
 
+export interface CalcLocalRent {
+  inPlace: number;
+  target: number;
+}
+
+export interface CalcPersistedState {
+  mode: 'renovate' | 'stabilize' | 'manual';
+  totalDuration: number;
+  unitsToStabilize: number[];
+  perUnitMonths: number[];
+  scheduleByType: number[][];
+  manualDuration: number;
+  manualPreStabRents: number[];
+  localRents: CalcLocalRent[];
+}
+
 export interface SavedDeal {
   id: string;
   name: string;
@@ -373,6 +389,7 @@ export interface SavedDeal {
   mcRanges?: Record<string, MCRangeEntry>;
   mcResults?: unknown; // SavedMCResults — typed as unknown to avoid circular import
   currentStep?: number;
+  calcState?: CalcPersistedState;
   savedAt: string;
   updatedAt: string;
 }

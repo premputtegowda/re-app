@@ -30,6 +30,8 @@ class SavedDeal(Base):
     mc_ranges_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     mc_results_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     current_step: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    calc_state_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    calc_state_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     saved_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(

@@ -538,6 +538,7 @@ export const api = {
     mcRanges?: unknown;
     mcResults?: unknown;
     currentStep?: number;
+    calcState?: unknown;
     savedAt: string;
     updatedAt: string;
   }) {
@@ -562,6 +563,7 @@ export const api = {
     mcRanges?: unknown;
     mcResults?: unknown;
     currentStep?: number;
+    calcState?: unknown;
     updatedAt: string;
   }) {
     const response = await authFetch(`/api/deals/${dealId}`, {
