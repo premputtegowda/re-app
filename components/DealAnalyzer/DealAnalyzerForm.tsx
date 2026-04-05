@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Pencil, Calculator, AlertTriangle, MapPin, CreditCard, Hammer, BarChart2, TrendingUp, ChevronRight, Check, Zap } from 'lucide-react';
+import { Pencil, Calculator, AlertTriangle, MapPin, CreditCard, Hammer, BarChart2, TrendingUp, ChevronRight, ChevronUp, Check, Zap } from 'lucide-react';
 import { Card } from '@/components/UI/Card';
 import { Button } from '@/components/UI/Button';
 import { StepProperty } from './steps/StepProperty';
@@ -218,6 +218,21 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const [calcCollapsed, setCalcCollapsed] = useState(() =>
     Object.values(initialDeal?.proForma?.yearOverrides ?? {}).some(ov => ov?.grossRentSystem) ?? false
   );
+
+  // Accordion open states for Operations step
+  const [rentOpen, setRentOpen]         = useState(true);
+  const [valueAddOpen, setValueAddOpen] = useState(() => {
+    const hasMfr = initialDeal?.acquisition?.propertyType === 'mfr';
+    return hasMfr
+      ? (initialDeal?.acquisition?.unitMix ?? []).some(e => (e.rentMonthly || 0) > 0)
+      : (initialDeal?.acquisition?.sfrTargetRent || 0) > 0;
+  });
+  const [stabOpen, setStabOpen]         = useState(() => {
+    const hasCalcOvs = Object.values(initialDeal?.proForma?.yearOverrides ?? {}).some(ov => ov?.grossRentSystem);
+    const hasPreStab = (initialDeal?.acquisition?.unitMix ?? []).some(e => (e.preStabRent || 0) > 0)
+      || (initialDeal?.acquisition?.sfrPreStabRent || 0) > 0;
+    return !hasCalcOvs && !hasPreStab;
+  });
 
   // Form data
   const [acquisition, setAcquisition] = useState<CoCAcquisition>(
@@ -681,172 +696,83 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
           }
         }
 
-        const cardClass = 'rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-white dark:bg-slate-800';
-        const headerClass = 'px-4 py-3 bg-slate-50 dark:bg-slate-700/40 border-b border-slate-200 dark:border-slate-700';
+        const card = 'rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-white dark:bg-slate-800';
+        const totalUnits = hasMfr ? acquisition.unitMix.reduce((s, e) => s + e.count, 0) : 1;
+
+        // ── Accordion summaries ──
+        const rentSummary = hasMfr
+          ? acquisition.unitMix.map(e =>
+              `${e.beds}BR $${e.inPlaceRent || 0}→$${e.rentMonthly || 0} ×${e.count}`
+            ).join(' · ')
+          : `$${acquisition.sfrInPlaceRent || 0} → $${acquisition.sfrTargetRent || 0}`;
+
+        const totalReno = unitsToRenovate.reduce((s, n) => s + n, 0);
+        const totalLU   = leaseUpUnitsArr.reduce((s, n) => s + n, 0);
+        const valueAddSummary = isValueAdd === false
+          ? 'No — already at market'
+          : isValueAdd === true
+            ? [totalReno > 0 && `${totalReno} reno`, totalLU > 0 && `${totalLU} lease-up`].filter(Boolean).join(' · ') || 'Plan set'
+            : '';
+
+        const stabSummary = stepComplete
+          ? preStabMethod === 'calculator'
+            ? `${stabDuration} mo · Schedule applied`
+            : `${stabDuration} mo · Manual`
+          : '';
+
+        // ── Accordion header renderer ──
+        const AccordionHeader = ({
+          num, title, summary, isOpen, onToggle, isComplete,
+        }: { num: number; title: string; summary: string; isOpen: boolean; onToggle: () => void; isComplete: boolean }) => (
+          <button
+            type="button"
+            onClick={onToggle}
+            className="w-full flex items-center gap-3 px-4 py-3.5 text-left touch-manipulation"
+          >
+            <span className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
+              isComplete
+                ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400'
+                : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+            }`}>
+              {isComplete ? <Check size={12} /> : <span className="text-xs font-bold">{num}</span>}
+            </span>
+            <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex-1">{title}</span>
+            {!isOpen && summary && (
+              <span className="text-xs text-slate-400 dark:text-slate-500 mr-1 truncate max-w-[150px]">{summary}</span>
+            )}
+            {isOpen
+              ? <ChevronUp size={16} className="text-slate-400 shrink-0" />
+              : <ChevronRight size={16} className="text-slate-400 shrink-0" />}
+          </button>
+        );
 
         return (
           <div className="space-y-3">
 
-            {/* ── 1. Rent card ── */}
-            <div className={cardClass}>
-              <div className={headerClass}>
-                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Rent</p>
-                <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Estimate ok if exact figures aren't available</p>
-              </div>
-              {hasMfr ? (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-100 dark:border-slate-700/60">
-                      <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-400">Unit Type</th>
-                      <th className="px-3 py-2.5 text-right text-xs font-medium text-slate-400">Current Rent</th>
-                      <th className="px-3 py-2.5 text-right text-xs font-medium text-slate-400">
-                        <span className="flex items-center justify-end gap-1">
-                          Target
-                          {isVisited && acquisition.unitMix.some(e => !(e.rentMonthly || 0)) && (
-                            <AlertTriangle size={12} className="text-amber-500" data-testid="mfr-target-rent-warning" />
-                          )}
-                        </span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
-                    {acquisition.unitMix.map((entry) => (
-                      <tr key={entry.id}>
-                        <td className="px-4 py-2.5 text-xs font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">
-                          {entry.beds}BR/{entry.baths}BA <span className="text-slate-400 font-normal">×{entry.count}</span>
-                        </td>
-                        {(['inPlaceRent', 'rentMonthly'] as const).map(field => {
-                          const warn = field === 'rentMonthly' && isVisited && !(entry[field] || 0);
-                          return (
-                            <td key={field} className="px-2 py-2">
-                              <div className="relative">
-                                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">$</span>
-                                <input
-                                  type="number" min={0} placeholder="0"
-                                  className={`input text-sm pl-5 text-right w-full ${warn ? 'border-amber-300 focus:ring-amber-400' : ''}`}
-                                  value={(entry[field] || 0) === 0 ? '' : entry[field]}
-                                  onChange={e => updateAcquisition('unitMix', acquisition.unitMix.map(u =>
-                                    u.id === entry.id ? { ...u, [field]: Number(e.target.value) } : u
-                                  ))}
-                                />
-                              </div>
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <div className="px-4 py-4 grid grid-cols-2 gap-3">
-                  {([
-                    { field: 'sfrInPlaceRent', label: 'Current Rent' },
-                    { field: 'sfrTargetRent',  label: 'Target' },
-                  ] as const).map(({ field, label }) => {
-                    const warn = field === 'sfrTargetRent' && isVisited && !acquisition[field];
-                    return (
-                      <div key={field}>
-                        <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1">
-                          {label}
-                          {warn && <AlertTriangle size={12} className="text-amber-500" data-testid="sfr-target-rent-warning" />}
-                        </label>
-                        <div className="relative">
-                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">$</span>
-                          <input
-                            type="number" min={0} placeholder="0"
-                            className={`input text-sm pl-6 ${warn ? 'border-amber-300 focus:ring-amber-400' : ''}`}
-                            value={(acquisition[field] || 0) === 0 ? '' : acquisition[field]}
-                            onChange={e => updateAcquisition(field, Number(e.target.value))}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* ── 2. Renovation question ── */}
-            {hasTargetRent && (
-              <div className={cardClass}>
-                <div className="px-4 py-4">
-                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-3">
-                    Will any units be renovated or leased up?
-                  </p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {([
-                      { val: false, label: 'No', sub: 'Already at market' },
-                      { val: true,  label: 'Yes', sub: 'Value-add' },
-                    ] as const).map(({ val, label, sub }) => (
-                      <button
-                        key={String(val)}
-                        type="button"
-                        onClick={() => {
-                          setIsValueAdd(val);
-                          if (!val) {
-                            // Clear pre-stab data when switching to stabilized
-                            if (hasMfr) {
-                              updateAcquisition('unitMix', acquisition.unitMix.map(u => ({ ...u, preStabRent: 0 })));
-                            } else {
-                              updateAcquisition('sfrPreStabRent', 0);
-                            }
-                            setProForma(prev => {
-                              const ovs = { ...(prev.yearOverrides ?? {}) };
-                              for (let y = 1; y <= acquisition.projectionYears; y++) {
-                                if (ovs[y]) {
-                                  const { grossRent: _r, grossRentSystem: _s, ...rest } = ovs[y];
-                                  ovs[y] = Object.keys(rest).length ? rest : undefined as never;
-                                  if (!ovs[y]) delete ovs[y];
-                                }
-                              }
-                              return { ...prev, yearOverrides: ovs };
-                            });
-                          }
-                        }}
-                        className={`py-3.5 px-3 rounded-xl text-left transition-colors ${
-                          isValueAdd === val
-                            ? 'bg-primary-600 text-white'
-                            : 'bg-slate-100 dark:bg-slate-700/60 text-slate-600 dark:text-slate-300 active:bg-slate-200'
-                        }`}
-                      >
-                        <p className="text-sm font-semibold">{label}</p>
-                        <p className={`text-xs mt-0.5 ${isValueAdd === val ? 'text-primary-100' : 'text-slate-400'}`}>{sub}</p>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* ── 2b. No-reno rent gap notice ── */}
-            {isValueAdd === false && (
-              hasMfr
-                ? acquisition.unitMix.some(e => (e.inPlaceRent || 0) < (e.rentMonthly || 0))
-                : (acquisition.sfrInPlaceRent || 0) < (acquisition.sfrTargetRent || 0)
-            ) && (
-              <div className="px-4 py-3 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40 flex items-start gap-2">
-                <AlertTriangle size={14} className="text-amber-500 mt-0.5 shrink-0" />
-                <p className="text-xs text-amber-700 dark:text-amber-400">
-                  Current rent is below target. Since no renovation or lease-up is planned, the Pro Forma will use target rent starting Year 1.
-                </p>
-              </div>
-            )}
-
-            {/* ── 3. Value-add details ── */}
-            {isValueAdd === true && (
-              <>
-                {/* 3a. Renovation plan */}
-                <div className={cardClass}>
-                  <div className={headerClass}>
-                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Stabilization Plan</p>
-                  </div>
-                  {hasMfr ? (<>
-                    <table className="w-full text-sm">
+            {/* ── Section 1: Rent ── */}
+            <div className={card}>
+              <AccordionHeader
+                num={1} title="Rent" summary={rentSummary}
+                isOpen={rentOpen} onToggle={() => setRentOpen(o => !o)}
+                isComplete={hasTargetRent}
+              />
+              {rentOpen && (
+                <div className="border-t border-slate-100 dark:border-slate-700/60">
+                  <p className="px-4 pt-3 text-xs text-slate-400 dark:text-slate-500">Estimate ok if exact figures aren't available</p>
+                  {hasMfr ? (
+                    <table className="w-full text-sm mt-1">
                       <thead>
                         <tr className="border-b border-slate-100 dark:border-slate-700/60">
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-400">Unit Type</th>
-                          <th className="px-3 py-2.5 text-right text-xs font-medium text-slate-400">Units to Renovate</th>
-                          <th className="px-3 py-2.5 text-right text-xs font-medium text-slate-400">Lease-up</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-slate-400">Unit Type</th>
+                          <th className="px-3 py-2 text-right text-xs font-medium text-slate-400">Current</th>
+                          <th className="px-3 py-2 text-right text-xs font-medium text-slate-400">
+                            <span className="flex items-center justify-end gap-1">
+                              Target
+                              {isVisited && acquisition.unitMix.some(e => !(e.rentMonthly || 0)) && (
+                                <AlertTriangle size={12} className="text-amber-500" data-testid="mfr-target-rent-warning" />
+                              )}
+                            </span>
+                          </th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
@@ -855,312 +781,450 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                             <td className="px-4 py-2.5 text-xs font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">
                               {entry.beds}BR/{entry.baths}BA <span className="text-slate-400 font-normal">×{entry.count}</span>
                             </td>
-                            <td className="px-2 py-2">
-                              <input
-                                type="number" min={0} max={entry.count} placeholder="0"
-                                className="input text-sm text-right w-full"
-                                value={(entry.unitsToRenovate ?? 0) === 0 ? '' : entry.unitsToRenovate}
-                                onChange={e => updateAcquisition('unitMix', acquisition.unitMix.map(u =>
-                                  u.id === entry.id ? { ...u, unitsToRenovate: Math.min(Number(e.target.value) || 0, entry.count) } : u
-                                ))}
-                              />
-                            </td>
-                            <td className="px-2 py-2">
-                              <input
-                                type="number" min={0}
-                                max={entry.count - (entry.unitsToRenovate ?? 0)}
-                                placeholder="0"
-                                className="input text-sm text-right w-full"
-                                value={(entry.leaseUpUnits ?? 0) === 0 ? '' : entry.leaseUpUnits}
-                                onChange={e => {
-                                  const val = Math.min(
-                                    Number(e.target.value) || 0,
-                                    entry.count - (entry.unitsToRenovate ?? 0)
-                                  );
-                                  updateAcquisition('unitMix', acquisition.unitMix.map(u =>
-                                    u.id === entry.id ? { ...u, leaseUpUnits: val } : u
-                                  ));
-                                }}
-                              />
-                            </td>
+                            {(['inPlaceRent', 'rentMonthly'] as const).map(field => {
+                              const warn = field === 'rentMonthly' && isVisited && !(entry[field] || 0);
+                              return (
+                                <td key={field} className="px-2 py-2">
+                                  <div className="relative">
+                                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">$</span>
+                                    <input
+                                      type="number" min={0} placeholder="0"
+                                      className={`input text-sm pl-5 text-right w-full ${warn ? 'border-amber-300 focus:ring-amber-400' : ''}`}
+                                      value={(entry[field] || 0) === 0 ? '' : entry[field]}
+                                      onChange={e => {
+                                        updateAcquisition('unitMix', acquisition.unitMix.map(u =>
+                                          u.id === entry.id ? { ...u, [field]: Number(e.target.value) } : u
+                                        ));
+                                        if (field === 'rentMonthly' && Number(e.target.value) > 0) {
+                                          setRentOpen(false);
+                                          setValueAddOpen(true);
+                                        }
+                                      }}
+                                    />
+                                  </div>
+                                </td>
+                              );
+                            })}
                           </tr>
                         ))}
                       </tbody>
                     </table>
-                    {isVisited && acquisition.unitMix.some(e =>
-                      (e.inPlaceRent || 0) < (e.rentMonthly || 0) &&
-                      (e.unitsToRenovate ?? 0) === 0 &&
-                      (e.leaseUpUnits ?? 0) === 0
-                    ) && (
-                      <div className="px-4 py-2.5 border-t border-amber-100 dark:border-amber-900/30 bg-amber-50 dark:bg-amber-900/10">
-                        <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
-                          <AlertTriangle size={12} />
-                          Some units have current rent below target but aren't assigned to renovation or lease-up.
-                        </p>
-                      </div>
-                    )}
-                  </> ) : (
-                    <div className="px-4 py-3.5 flex items-center justify-between">
-                      <span className="text-sm text-slate-600 dark:text-slate-300">1 unit to renovate</span>
-                      <div className="flex items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400">
-                        <span>Target</span>
-                        <div className="relative">
-                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">$</span>
-                          <input
-                            type="number" min={0} placeholder="0"
-                            className="input text-sm pl-5 text-right w-28"
-                            value={(acquisition.sfrTargetRent || 0) === 0 ? '' : acquisition.sfrTargetRent}
-                            onChange={e => updateAcquisition('sfrTargetRent', Number(e.target.value))}
-                          />
-                        </div>
-                      </div>
+                  ) : (
+                    <div className="px-4 py-3 grid grid-cols-2 gap-3">
+                      {([
+                        { field: 'sfrInPlaceRent' as const, label: 'Current' },
+                        { field: 'sfrTargetRent'  as const, label: 'Target'  },
+                      ]).map(({ field, label }) => {
+                        const warn = field === 'sfrTargetRent' && isVisited && !acquisition[field];
+                        return (
+                          <div key={field}>
+                            <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1">
+                              {label}
+                              {warn && <AlertTriangle size={12} className="text-amber-500" data-testid="sfr-target-rent-warning" />}
+                            </label>
+                            <div className="relative">
+                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                              <input
+                                type="number" min={0} placeholder="0"
+                                className={`input text-sm pl-6 ${warn ? 'border-amber-300 focus:ring-amber-400' : ''}`}
+                                value={(acquisition[field] || 0) === 0 ? '' : acquisition[field]}
+                                onChange={e => {
+                                  updateAcquisition(field, Number(e.target.value));
+                                  if (field === 'sfrTargetRent' && Number(e.target.value) > 0) {
+                                    setRentOpen(false);
+                                    setValueAddOpen(true);
+                                  }
+                                }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
+              )}
+            </div>
 
-                {/* 3b. Timeline */}
-                <div className={cardClass}>
-                  <div className={headerClass}>
-                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Timeline</p>
-                  </div>
-                  <div className="px-4 py-4 grid grid-cols-2 gap-4">
+            {/* ── Section 2: Value-Add Plan ── */}
+            {hasTargetRent && (
+              <div className={card}>
+                <AccordionHeader
+                  num={2} title="Value-Add Plan" summary={valueAddSummary}
+                  isOpen={valueAddOpen} onToggle={() => setValueAddOpen(o => !o)}
+                  isComplete={isValueAdd !== null}
+                />
+                {valueAddOpen && (
+                  <div className="border-t border-slate-100 dark:border-slate-700/60 px-4 py-4 space-y-4">
+
+                    {/* Yes / No */}
                     <div>
-                      <label className="text-xs font-medium text-slate-500 dark:text-slate-400 block mb-1.5">
-                        Stabilization duration
-                      </label>
-                      <div className="relative">
-                        <input
-                          type="number" min={1} max={acquisition.projectionYears * 12} placeholder="e.g. 12"
-                          className="input text-sm pr-10"
-                          value={stabDuration === 0 ? '' : stabDuration}
-                          onChange={e => setStabDuration(Math.min(acquisition.projectionYears * 12, Math.max(0, Number(e.target.value) || 0)))}
-                        />
-                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">mo</span>
+                      <p className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-2.5">
+                        Will any units be renovated or leased up?
+                      </p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {([
+                          { val: false as const, label: 'No',  sub: 'Already at market' },
+                          { val: true  as const, label: 'Yes', sub: 'Value-add'          },
+                        ]).map(({ val, label, sub }) => (
+                          <button
+                            key={String(val)}
+                            type="button"
+                            onClick={() => {
+                              setIsValueAdd(val);
+                              if (!val) {
+                                if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map(u => ({ ...u, preStabRent: 0 })));
+                                else updateAcquisition('sfrPreStabRent', 0);
+                                setProForma(prev => {
+                                  const ovs = { ...(prev.yearOverrides ?? {}) };
+                                  for (let y = 1; y <= acquisition.projectionYears; y++) {
+                                    if (ovs[y]) {
+                                      const { grossRent: _r, grossRentSystem: _s, ...rest } = ovs[y];
+                                      ovs[y] = Object.keys(rest).length ? rest : undefined as never;
+                                      if (!ovs[y]) delete ovs[y];
+                                    }
+                                  }
+                                  return { ...prev, yearOverrides: ovs };
+                                });
+                                setValueAddOpen(false);
+                              } else {
+                                setValueAddOpen(false);
+                                setStabOpen(true);
+                              }
+                            }}
+                            className={`py-3 px-3 rounded-xl text-left transition-colors ${
+                              isValueAdd === val
+                                ? 'bg-primary-600 text-white'
+                                : 'bg-slate-100 dark:bg-slate-700/60 text-slate-600 dark:text-slate-300'
+                            }`}
+                          >
+                            <p className="text-sm font-semibold">{label}</p>
+                            <p className={`text-xs mt-0.5 ${isValueAdd === val ? 'text-primary-100' : 'text-slate-400'}`}>{sub}</p>
+                          </button>
+                        ))}
                       </div>
                     </div>
-                    {someReno && (
+
+                    {/* Rent gap notice (No selected) */}
+                    {isValueAdd === false && (
+                      hasMfr
+                        ? acquisition.unitMix.some(e => (e.inPlaceRent || 0) < (e.rentMonthly || 0))
+                        : (acquisition.sfrInPlaceRent || 0) < (acquisition.sfrTargetRent || 0)
+                    ) && (
+                      <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40">
+                        <AlertTriangle size={13} className="text-amber-500 mt-0.5 shrink-0" />
+                        <p className="text-xs text-amber-700 dark:text-amber-400">
+                          Current rent is below target. The Pro Forma will use target rent starting Year 1.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Stabilization plan table (Yes selected) */}
+                    {isValueAdd === true && (
+                      <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                        {hasMfr ? (
+                          <>
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="bg-slate-50 dark:bg-slate-700/40 border-b border-slate-100 dark:border-slate-700/60">
+                                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-400">Unit Type</th>
+                                  <th className="px-3 py-2 text-right text-xs font-medium text-slate-400">Renovation</th>
+                                  <th className="px-3 py-2 text-right text-xs font-medium text-slate-400">Lease-up</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                                {acquisition.unitMix.map(entry => (
+                                  <tr key={entry.id}>
+                                    <td className="px-4 py-2.5 text-xs font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">
+                                      {entry.beds}BR/{entry.baths}BA <span className="text-slate-400 font-normal">×{entry.count}</span>
+                                    </td>
+                                    <td className="px-2 py-2">
+                                      <input
+                                        type="number" min={0} max={entry.count} placeholder="0"
+                                        className="input text-sm text-right w-full"
+                                        value={(entry.unitsToRenovate ?? 0) === 0 ? '' : entry.unitsToRenovate}
+                                        onChange={e => updateAcquisition('unitMix', acquisition.unitMix.map(u =>
+                                          u.id === entry.id ? { ...u, unitsToRenovate: Math.min(Number(e.target.value) || 0, entry.count) } : u
+                                        ))}
+                                      />
+                                    </td>
+                                    <td className="px-2 py-2">
+                                      <input
+                                        type="number" min={0} max={entry.count - (entry.unitsToRenovate ?? 0)} placeholder="0"
+                                        className="input text-sm text-right w-full"
+                                        value={(entry.leaseUpUnits ?? 0) === 0 ? '' : entry.leaseUpUnits}
+                                        onChange={e => {
+                                          const val = Math.min(Number(e.target.value) || 0, entry.count - (entry.unitsToRenovate ?? 0));
+                                          updateAcquisition('unitMix', acquisition.unitMix.map(u =>
+                                            u.id === entry.id ? { ...u, leaseUpUnits: val } : u
+                                          ));
+                                        }}
+                                      />
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            {isVisited && acquisition.unitMix.some(e =>
+                              (e.inPlaceRent || 0) < (e.rentMonthly || 0) &&
+                              (e.unitsToRenovate ?? 0) === 0 && (e.leaseUpUnits ?? 0) === 0
+                            ) && (
+                              <div className="px-4 py-2.5 border-t border-amber-100 dark:border-amber-900/30 bg-amber-50 dark:bg-amber-900/10">
+                                <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                                  <AlertTriangle size={12} />
+                                  Some units have current rent below target but aren't assigned to renovation or lease-up.
+                                </p>
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="px-4 py-3.5 flex items-center justify-between">
+                            <span className="text-sm text-slate-600 dark:text-slate-300">1 unit to renovate</span>
+                            <div className="flex items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400">
+                              <span>Target</span>
+                              <div className="relative">
+                                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">$</span>
+                                <input
+                                  type="number" min={0} placeholder="0"
+                                  className="input text-sm pl-5 text-right w-28"
+                                  value={(acquisition.sfrTargetRent || 0) === 0 ? '' : acquisition.sfrTargetRent}
+                                  onChange={e => updateAcquisition('sfrTargetRent', Number(e.target.value))}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Section 3: Stabilization ── */}
+            {isValueAdd === true && (
+              <div className={card}>
+                <AccordionHeader
+                  num={3} title="Stabilization" summary={stabSummary}
+                  isOpen={stabOpen} onToggle={() => setStabOpen(o => !o)}
+                  isComplete={stepComplete}
+                />
+                {stabOpen && (
+                  <div className="border-t border-slate-100 dark:border-slate-700/60 space-y-4 px-4 py-4">
+
+                    {/* Timeline */}
+                    <div className={`grid gap-4 ${someReno ? 'grid-cols-2' : 'grid-cols-1'}`}>
                       <div>
-                        <label className="text-xs font-medium text-slate-500 dark:text-slate-400 block mb-1.5">
-                          Offline per unit
-                        </label>
+                        <label className="text-xs font-medium text-slate-500 dark:text-slate-400 block mb-1.5">Duration</label>
                         <div className="relative">
                           <input
-                            type="number" min={0} max={24} step={0.25} placeholder="e.g. 1.5"
-                            className="input text-sm pr-10"
-                            value={offlinePerUnit === 0 ? '' : offlinePerUnit}
-                            onChange={e => setOfflinePerUnit(Math.min(24, Math.max(0, Number(e.target.value) || 0)))}
+                            type="number" min={1} max={acquisition.projectionYears * 12} placeholder="e.g. 12"
+                            className="input text-sm pr-10 w-full"
+                            value={stabDuration === 0 ? '' : stabDuration}
+                            onChange={e => setStabDuration(Math.min(acquisition.projectionYears * 12, Math.max(0, Number(e.target.value) || 0)))}
                           />
                           <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">mo</span>
                         </div>
                       </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* 3c. Method choice */}
-                <div className={`${cardClass} divide-y divide-slate-100 dark:divide-slate-700/60`}>
-                  {([
-                    { val: 'calculator' as const, icon: <Zap size={18} />, label: 'Build a schedule', sub: 'Calculate from renovation plan' },
-                    { val: 'manual' as const,     icon: <Pencil size={18} />, label: 'Enter manually', sub: 'I know my pre-stab rent' },
-                  ]).map(({ val, icon, label, sub }) => (
-                    <button
-                      key={val}
-                      type="button"
-                      onClick={() => setPreStabMethod(val)}
-                      className={`w-full flex items-center gap-3 px-4 py-4 text-left transition-colors ${
-                        preStabMethod === val
-                          ? 'bg-primary-50 dark:bg-primary-900/20'
-                          : 'hover:bg-slate-50 dark:hover:bg-slate-700/30 active:bg-slate-100'
-                      }`}
-                    >
-                      <span className={preStabMethod === val ? 'text-primary-600 dark:text-primary-400' : 'text-slate-400'}>
-                        {icon}
-                      </span>
-                      <div className="flex-1">
-                        <p className={`text-sm font-semibold ${preStabMethod === val ? 'text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200'}`}>
-                          {label}
-                        </p>
-                        <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{sub}</p>
-                      </div>
-                      {preStabMethod === val && <Check size={18} className="text-primary-600 dark:text-primary-400 shrink-0" />}
-                    </button>
-                  ))}
-                </div>
-
-                {/* 3d. Calculator section */}
-                {preStabMethod === 'calculator' && (
-                  calcCollapsed ? (
-                    <button
-                      type="button"
-                      onClick={() => setCalcCollapsed(false)}
-                      className={`w-full ${cardClass} px-4 py-3.5 flex items-center justify-between`}
-                    >
-                      <span className="flex items-center gap-2 text-sm font-medium text-slate-600 dark:text-slate-300">
-                        <Zap size={16} className="text-primary-500" />
-                        Schedule
-                      </span>
-                      <span className="flex items-center gap-2 text-sm font-medium text-emerald-600 dark:text-emerald-400">
-                        Applied
-                        <Check size={16} />
-                        <ChevronRight size={16} className="text-slate-400" />
-                      </span>
-                    </button>
-                  ) : (
-                    <div className={cardClass}>
-                      <RehabRentCalculator
-                        hideHeader={false}
-                        unitTypes={unitTypes}
-                        projectionYears={acquisition.projectionYears}
-                        appliedYears={calcAppliedYears}
-                        grossRentGrowthPct={proForma.grossRent.growthPct}
-                        externalDuration={stabDuration}
-                        externalOffline={offlinePerUnit}
-                        externalUnitsToStabilize={unitsToRenovate}
-                        externalLeaseUpToStabilize={leaseUpUnitsArr}
-                        onOpenChange={v => { if (!v) setCalcCollapsed(true); }}
-                        initialState={calcState}
-                        onStateChange={setCalcState}
-                        onApplyRents={(rents) => {
-                          if (hasMfr) {
-                            updateAcquisition('unitMix', acquisition.unitMix.map((u, i) => ({
-                              ...u,
-                              inPlaceRent: rents[i]?.inPlace ?? u.inPlaceRent,
-                              rentMonthly: rents[i]?.target  ?? u.rentMonthly,
-                            })));
-                          } else {
-                            updateAcquisition('sfrInPlaceRent', rents[0]?.inPlace ?? acquisition.sfrInPlaceRent);
-                            updateAcquisition('sfrTargetRent',  rents[0]?.target  ?? acquisition.sfrTargetRent);
-                          }
-                        }}
-                        onApplyPreStab={(values) => {
-                          if (hasMfr) {
-                            updateAcquisition('unitMix', acquisition.unitMix.map((u, i) => ({
-                              ...u,
-                              preStabRent: Math.round(values[i] ?? 0),
-                            })));
-                          } else {
-                            updateAcquisition('sfrPreStabRent', Math.round(values[0] ?? 0));
-                          }
-                        }}
-                        onApply={(overrides) => {
-                          setProForma(prev => {
-                            const ovs = { ...(prev.yearOverrides ?? {}) };
-                            Object.entries(overrides).forEach(([yr, rent]) => {
-                              const y = Number(yr);
-                              ovs[y] = { ...(ovs[y] ?? {}), grossRent: rent, grossRentSystem: true };
-                            });
-                            return { ...prev, yearOverrides: ovs };
-                          });
-                          setCalcCollapsed(true);
-                        }}
-                        onClear={() => {
-                          setProForma(prev => {
-                            const ovs = { ...(prev.yearOverrides ?? {}) };
-                            for (let y = 1; y <= acquisition.projectionYears; y++) {
-                              if (ovs[y]) {
-                                const { grossRent: _removed, ...rest } = ovs[y];
-                                if (Object.keys(rest).length > 0) ovs[y] = rest; else delete ovs[y];
-                              }
-                            }
-                            return { ...prev, yearOverrides: ovs };
-                          });
-                        }}
-                      />
-                    </div>
-                  )
-                )}
-
-                {/* 3e. Manual pre-stab inputs */}
-                {preStabMethod === 'manual' && (
-                  <div className={cardClass}>
-                    <div className={headerClass}>
-                      <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Pre-stab Rent</p>
-                      <p className="text-xs text-slate-400 mt-0.5">$/mo per unit during stabilization</p>
-                    </div>
-                    <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
-                      {hasMfr ? acquisition.unitMix.map(entry => (
-                        <div key={entry.id} className="px-4 py-3 flex items-center justify-between gap-3">
-                          <span className="text-sm font-medium text-slate-600 dark:text-slate-300 shrink-0">
-                            {entry.beds}BR/{entry.baths}BA <span className="text-slate-400 font-normal text-xs">×{entry.count}</span>
-                          </span>
-                          <div className="relative w-32">
-                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                      {someReno && (
+                        <div>
+                          <label className="text-xs font-medium text-slate-500 dark:text-slate-400 block mb-1.5">Offline per unit</label>
+                          <div className="relative">
                             <input
-                              type="number" min={0} placeholder="0"
-                              className="input text-sm pl-6 text-right w-full"
-                              value={(entry.preStabRent || 0) === 0 ? '' : entry.preStabRent}
-                              onChange={e => updateAcquisition('unitMix', acquisition.unitMix.map(u =>
-                                u.id === entry.id ? { ...u, preStabRent: Number(e.target.value) } : u
-                              ))}
+                              type="number" min={0} max={24} step={0.25} placeholder="e.g. 1.5"
+                              className="input text-sm pr-10 w-full"
+                              value={offlinePerUnit === 0 ? '' : offlinePerUnit}
+                              onChange={e => setOfflinePerUnit(Math.min(24, Math.max(0, Number(e.target.value) || 0)))}
                             />
-                          </div>
-                        </div>
-                      )) : (
-                        <div className="px-4 py-3 flex items-center justify-between gap-3">
-                          <span className="text-sm font-medium text-slate-600 dark:text-slate-300">SFR</span>
-                          <div className="relative w-32">
-                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">$</span>
-                            <input
-                              type="number" min={0} placeholder="0"
-                              className="input text-sm pl-6 text-right w-full"
-                              value={(acquisition.sfrPreStabRent || 0) === 0 ? '' : acquisition.sfrPreStabRent}
-                              onChange={e => updateAcquisition('sfrPreStabRent', Number(e.target.value))}
-                            />
+                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">mo</span>
                           </div>
                         </div>
                       )}
                     </div>
-                    {isVisited && !hasPreStab && (
-                      <div className="px-4 py-2.5 border-t border-amber-100 dark:border-amber-900/30 bg-amber-50 dark:bg-amber-900/10">
-                        <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
-                          <AlertTriangle size={12} />
-                          Pre-stab rent is required to generate the Pro Forma.
+
+                    {/* Method toggle */}
+                    <div>
+                      <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">Pre-stab rent</p>
+                      <div className="flex rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden text-sm font-medium">
+                        {([
+                          { val: 'calculator' as const, label: 'Build a schedule' },
+                          { val: 'manual'     as const, label: 'Enter manually'   },
+                        ]).map((opt, i) => (
+                          <button
+                            key={opt.val}
+                            type="button"
+                            onClick={() => setPreStabMethod(opt.val)}
+                            className={`flex-1 py-2.5 transition-colors ${i > 0 ? 'border-l border-slate-200 dark:border-slate-700' : ''} ${
+                              preStabMethod === opt.val
+                                ? 'bg-primary-600 text-white'
+                                : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/40'
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Calculator */}
+                    {preStabMethod === 'calculator' && (
+                      calcCollapsed ? (
+                        <button
+                          type="button"
+                          onClick={() => setCalcCollapsed(false)}
+                          className="w-full flex items-center justify-between px-4 py-3 rounded-xl border border-emerald-200 dark:border-emerald-800/40 bg-emerald-50 dark:bg-emerald-900/10"
+                        >
+                          <span className="flex items-center gap-2 text-sm font-medium text-emerald-700 dark:text-emerald-300">
+                            <Check size={15} />
+                            Schedule applied
+                          </span>
+                          <span className="text-xs text-slate-400">tap to edit</span>
+                        </button>
+                      ) : (
+                        <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden -mx-4">
+                          <RehabRentCalculator
+                            hideHeader={false}
+                            unitTypes={unitTypes}
+                            projectionYears={acquisition.projectionYears}
+                            appliedYears={calcAppliedYears}
+                            grossRentGrowthPct={proForma.grossRent.growthPct}
+                            externalDuration={stabDuration}
+                            externalOffline={offlinePerUnit}
+                            externalUnitsToStabilize={unitsToRenovate}
+                            externalLeaseUpToStabilize={leaseUpUnitsArr}
+                            onOpenChange={v => { if (!v) setCalcCollapsed(true); }}
+                            initialState={calcState}
+                            onStateChange={setCalcState}
+                            onApplyRents={rents => {
+                              if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map((u, i) => ({
+                                ...u, inPlaceRent: rents[i]?.inPlace ?? u.inPlaceRent, rentMonthly: rents[i]?.target ?? u.rentMonthly,
+                              })));
+                              else {
+                                updateAcquisition('sfrInPlaceRent', rents[0]?.inPlace ?? acquisition.sfrInPlaceRent);
+                                updateAcquisition('sfrTargetRent',  rents[0]?.target  ?? acquisition.sfrTargetRent);
+                              }
+                            }}
+                            onApplyPreStab={values => {
+                              if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map((u, i) => ({ ...u, preStabRent: Math.round(values[i] ?? 0) })));
+                              else updateAcquisition('sfrPreStabRent', Math.round(values[0] ?? 0));
+                            }}
+                            onApply={overrides => {
+                              setProForma(prev => {
+                                const ovs = { ...(prev.yearOverrides ?? {}) };
+                                Object.entries(overrides).forEach(([yr, rent]) => {
+                                  const y = Number(yr);
+                                  ovs[y] = { ...(ovs[y] ?? {}), grossRent: rent, grossRentSystem: true };
+                                });
+                                return { ...prev, yearOverrides: ovs };
+                              });
+                              setCalcCollapsed(true);
+                              setStabOpen(false);
+                            }}
+                            onClear={() => {
+                              setProForma(prev => {
+                                const ovs = { ...(prev.yearOverrides ?? {}) };
+                                for (let y = 1; y <= acquisition.projectionYears; y++) {
+                                  if (ovs[y]) {
+                                    const { grossRent: _r, ...rest } = ovs[y];
+                                    if (Object.keys(rest).length > 0) ovs[y] = rest; else delete ovs[y];
+                                  }
+                                }
+                                return { ...prev, yearOverrides: ovs };
+                              });
+                            }}
+                          />
+                        </div>
+                      )
+                    )}
+
+                    {/* Manual pre-stab inputs */}
+                    {preStabMethod === 'manual' && (
+                      <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                        <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-700/40 border-b border-slate-100 dark:border-slate-700/60">
+                          <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Pre-stab rent — $/mo per unit</p>
+                        </div>
+                        <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                          {hasMfr ? acquisition.unitMix.map(entry => (
+                            <div key={entry.id} className="px-4 py-3 flex items-center justify-between gap-3">
+                              <span className="text-sm font-medium text-slate-600 dark:text-slate-300 shrink-0">
+                                {entry.beds}BR/{entry.baths}BA <span className="text-slate-400 font-normal text-xs">×{entry.count}</span>
+                              </span>
+                              <div className="relative w-32">
+                                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                                <input
+                                  type="number" min={0} placeholder="0"
+                                  className="input text-sm pl-6 text-right w-full"
+                                  value={(entry.preStabRent || 0) === 0 ? '' : entry.preStabRent}
+                                  onChange={e => updateAcquisition('unitMix', acquisition.unitMix.map(u =>
+                                    u.id === entry.id ? { ...u, preStabRent: Number(e.target.value) } : u
+                                  ))}
+                                />
+                              </div>
+                            </div>
+                          )) : (
+                            <div className="px-4 py-3 flex items-center justify-between gap-3">
+                              <span className="text-sm font-medium text-slate-600 dark:text-slate-300">SFR</span>
+                              <div className="relative w-32">
+                                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                                <input
+                                  type="number" min={0} placeholder="0"
+                                  className="input text-sm pl-6 text-right w-full"
+                                  value={(acquisition.sfrPreStabRent || 0) === 0 ? '' : acquisition.sfrPreStabRent}
+                                  onChange={e => updateAcquisition('sfrPreStabRent', Number(e.target.value))}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        {isVisited && !hasPreStab && (
+                          <div className="px-4 py-2.5 border-t border-amber-100 dark:border-amber-900/30 bg-amber-50 dark:bg-amber-900/10">
+                            <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                              <AlertTriangle size={12} />
+                              Pre-stab rent is required to generate the Pro Forma.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Schedule incomplete notice */}
+                    {isVisited && calcScheduleIncomplete && (
+                      <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40">
+                        <AlertTriangle size={13} className="text-amber-500 mt-0.5 shrink-0" />
+                        <p className="text-xs text-amber-700 dark:text-amber-400">
+                          Complete the schedule for all renovation and lease-up units — it's needed to calculate rent for the Pro Forma.
                         </p>
                       </div>
                     )}
-                  </div>
-                )}
 
-                {/* 3f. Pre-stab Rent Schedule */}
-                {preStabRows.length > 0 && (
-                  <div className={cardClass}>
-                    <div className={headerClass}>
-                      <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Pre-stab Rent Schedule</p>
-                    </div>
-                    <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
-                      {(() => {
-                        const totalUnits = hasMfr
-                          ? acquisition.unitMix.reduce((s, e) => s + e.count, 0)
-                          : 1;
-                        return preStabRows.map(({ year, rent }) => (
-                          <div key={year} className="px-4 py-3 flex items-center justify-between">
-                            <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Year {year}</span>
-                            <div className="text-right">
-                              <p className="text-sm font-bold text-amber-600 dark:text-amber-400 tabular-nums">{fmtRent(rent)}/yr</p>
-                              <p className="text-xs text-slate-400 dark:text-slate-500 tabular-nums">
-                                {fmtRent(Math.round(rent / 12))}/mo · {fmtRent(Math.round(rent / 12 / totalUnits))}/unit
-                              </p>
+                    {/* Pre-stab Rent Schedule */}
+                    {preStabRows.length > 0 && (
+                      <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                        <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-700/40 border-b border-slate-100 dark:border-slate-700/60">
+                          <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Pre-stab rent schedule</p>
+                        </div>
+                        <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                          {preStabRows.map(({ year, rent }) => (
+                            <div key={year} className="px-4 py-3 flex items-center justify-between">
+                              <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Year {year}</span>
+                              <div className="text-right">
+                                <p className="text-sm font-bold text-amber-600 dark:text-amber-400 tabular-nums">{fmtRent(rent)}/yr</p>
+                                <p className="text-xs text-slate-400 dark:text-slate-500 tabular-nums">
+                                  {fmtRent(Math.round(rent / 12))}/mo · {fmtRent(Math.round(rent / 12 / totalUnits))}/unit
+                                </p>
+                              </div>
                             </div>
-                          </div>
-                        ));
-                      })()}
-                    </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                   </div>
                 )}
-              </>
-            )}
-
-            {/* ── 3g. Schedule incomplete notice ── */}
-            {isVisited && calcScheduleIncomplete && (
-              <div className="px-4 py-3 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40 flex items-start gap-2">
-                <AlertTriangle size={14} className="text-amber-500 mt-0.5 shrink-0" />
-                <p className="text-xs text-amber-700 dark:text-amber-400">
-                  Complete the schedule for all renovation and lease-up units — it's needed to calculate rent for the Pro Forma.
-                </p>
               </div>
             )}
 
-            {/* ── 4. Pro Forma ── */}
+            {/* ── Pro Forma ── */}
             {stepComplete && (
               <ProFormaGrid
                 data={proForma}
