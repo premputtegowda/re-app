@@ -229,6 +229,8 @@ export interface CoCUnitMixEntry {
   inPlaceRent: number;   // current avg rent
   preStabRent: number;   // rent during lease-up/renovation period
   rentMonthly: number;   // target (stabilized) rent
+  unitsToRenovate?: number;
+  leaseUpUnits?: number;
 }
 
 export interface CoCAcquisition {
@@ -376,6 +378,8 @@ export interface CalcPersistedState {
   manualDuration: number;
   manualPreStabRents: number[];
   localRents: CalcLocalRent[];
+  leaseUpToStabilize: number[];
+  leaseUpScheduleByType: number[][];
 }
 
 export interface SavedDeal {

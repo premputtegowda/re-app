@@ -28,6 +28,7 @@ export interface SimulationResult {
 export function simulateFromSchedule(
   unitTypes: UnitTypeInput[],
   scheduleByType: number[][],
+  leaseUpScheduleByType: number[][],
   perUnitMonthsByType: number[],
   totalYears: number
 ): SimulationResult {
@@ -35,6 +36,18 @@ export function simulateFromSchedule(
 
   const completionsByType: Map<number, number>[] = unitTypes.map(() => new Map());
   const partialRentByType: Map<number, number>[] = unitTypes.map(() => new Map());
+
+  const leaseUpFlipsByType: Map<number, number>[] = unitTypes.map(() => new Map());
+
+  for (let t = 0; t < unitTypes.length; t++) {
+    const leaseUpSched = leaseUpScheduleByType[t] ?? [];
+    for (let i = 0; i < leaseUpSched.length; i++) {
+      const count = leaseUpSched[i];
+      if (count === 0) continue;
+      const flipMonth = i + 1; // lease-up units flip to target AT this month
+      leaseUpFlipsByType[t].set(flipMonth, (leaseUpFlipsByType[t].get(flipMonth) ?? 0) + count);
+    }
+  }
 
   for (let t = 0; t < unitTypes.length; t++) {
     const sched       = scheduleByType[t] ?? [];
@@ -60,8 +73,9 @@ export function simulateFromSchedule(
   }
 
   const stableByType = unitTypes.map((ut, t) => {
-    const scheduled = (scheduleByType[t] ?? []).reduce((s, n) => s + n, 0);
-    return Math.max(0, ut.count - scheduled);
+    const scheduledReno = (scheduleByType[t] ?? []).reduce((s, n) => s + n, 0);
+    const scheduledLeaseUp = (leaseUpScheduleByType[t] ?? []).reduce((s, n) => s + n, 0);
+    return Math.max(0, ut.count - scheduledReno - scheduledLeaseUp);
   });
 
   const monthly: number[] = [];
@@ -76,6 +90,7 @@ export function simulateFromSchedule(
       const staticUnits = Math.max(0, ut.count - scheduledTotal);
 
       stableByType[t] += completionsByType[t].get(m) ?? 0;
+      stableByType[t] += leaseUpFlipsByType[t].get(m) ?? 0;
 
       const startedSoFar = sched.slice(0, m).reduce((s, n) => s + n, 0);
       const doneSoFar = stableByType[t] - staticUnits;
@@ -100,6 +115,10 @@ export function simulateFromSchedule(
     const sched = scheduleByType[t] ?? [];
     if (sched.some(n => n > 0)) {
       maxStabMonth = Math.max(maxStabMonth, Math.ceil(sched.length + (perUnitMonthsByType[t] ?? 0)));
+    }
+    const leaseUpSched = leaseUpScheduleByType[t] ?? [];
+    if (leaseUpSched.some(n => n > 0)) {
+      maxStabMonth = Math.max(maxStabMonth, leaseUpSched.length);
     }
   }
 
@@ -148,6 +167,11 @@ interface RehabRentCalculatorProps {
   grossRentGrowthPct?: number;
   initialState?: CalcPersistedState;
   onStateChange?: (state: CalcPersistedState) => void;
+  externalDuration?: number;
+  externalOffline?: number;
+  externalUnitsToStabilize?: number[];
+  externalLeaseUpToStabilize?: number[];
+  hideHeader?: boolean;
 }
 
 export function RehabRentCalculator({
@@ -162,6 +186,11 @@ export function RehabRentCalculator({
   grossRentGrowthPct = 0,
   initialState,
   onStateChange,
+  externalDuration,
+  externalOffline,
+  externalUnitsToStabilize,
+  externalLeaseUpToStabilize,
+  hideHeader,
 }: RehabRentCalculatorProps) {
   const setOpen = (v: boolean) => { onOpenChange?.(v); };
 
@@ -200,6 +229,8 @@ export function RehabRentCalculator({
   const [unitsToStabilize, setUnitsToStabilize] = useState<number[]>(() => initialState?.unitsToStabilize ?? unitTypes.map(() => 0));
   const [perUnitMonths, setPerUnitMonths]       = useState<number[]>(() => initialState?.perUnitMonths ?? unitTypes.map(() => 0));
   const [scheduleByType, setScheduleByType]     = useState<number[][]>(() => initialState?.scheduleByType ?? unitTypes.map(() => []));
+  const [leaseUpToStabilize, setLeaseUpToStabilize] = useState<number[]>(() => initialState?.leaseUpToStabilize ?? unitTypes.map(() => 0));
+  const [leaseUpScheduleByType, setLeaseUpScheduleByType] = useState<number[][]>(() => initialState?.leaseUpScheduleByType ?? unitTypes.map(() => []));
   const [openYear, setOpenYear]                 = useState<number | null>(null);
   const [autoFilled, setAutoFilled]             = useState(false);
 
@@ -208,8 +239,8 @@ export function RehabRentCalculator({
   const [manualPreStabRents, setManualPreStabRents] = useState<number[]>(() => initialState?.manualPreStabRents ?? unitTypes.map(() => 0));
 
   useEffect(() => {
-    onStateChange?.({ mode, totalDuration, unitsToStabilize, perUnitMonths, scheduleByType, manualDuration, manualPreStabRents, localRents });
-  }, [mode, totalDuration, unitsToStabilize, perUnitMonths, scheduleByType, manualDuration, manualPreStabRents, localRents]); // eslint-disable-line react-hooks/exhaustive-deps
+    onStateChange?.({ mode, totalDuration, unitsToStabilize, perUnitMonths, scheduleByType, manualDuration, manualPreStabRents, localRents, leaseUpToStabilize, leaseUpScheduleByType });
+  }, [mode, totalDuration, unitsToStabilize, perUnitMonths, scheduleByType, manualDuration, manualPreStabRents, localRents, leaseUpToStabilize, leaseUpScheduleByType]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const prevUnitTypesLengthRef = useRef(unitTypes.length);
   useEffect(() => {
@@ -221,8 +252,30 @@ export function RehabRentCalculator({
     setTotalDuration(0);
     setManualPreStabRents(unitTypes.map(() => 0));
     setManualDuration(0);
+    setLeaseUpToStabilize(unitTypes.map(() => 0));
+    setLeaseUpScheduleByType(unitTypes.map(() => []));
     setLocalRents(unitTypes.map(ut => ({ inPlace: ut.inPlaceRent, target: ut.targetRent })));
   }, [unitTypes.length]);
+
+  useEffect(() => {
+    if (externalDuration === undefined) return;
+    setTotalDuration(externalDuration);
+  }, [externalDuration]);
+
+  useEffect(() => {
+    if (externalOffline === undefined) return;
+    setPerUnitMonths(unitTypes.map(() => externalOffline));
+  }, [externalOffline, unitTypes.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!externalUnitsToStabilize) return;
+    setUnitsToStabilize(externalUnitsToStabilize.map((n, t) => Math.min(n, unitTypes[t]?.count ?? n)));
+  }, [externalUnitsToStabilize]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!externalLeaseUpToStabilize) return;
+    setLeaseUpToStabilize(externalLeaseUpToStabilize.map((n, t) => Math.min(n, unitTypes[t]?.count ?? n)));
+  }, [externalLeaseUpToStabilize]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync rent changes from the form back into localRents (bidirectional sync).
   // Echo-back guard: when the calculator pushes rents → form → unitTypes, the values
@@ -247,6 +300,14 @@ export function RehabRentCalculator({
     );
   }, [totalDuration, unitTypes.length]);
 
+  useEffect(() => {
+    setLeaseUpScheduleByType(prev =>
+      unitTypes.map((_, t) =>
+        Array.from({ length: totalDuration }, (_, i) => prev[t]?.[i] ?? 0)
+      )
+    );
+  }, [totalDuration, unitTypes.length]);
+
   const offlineMonths = (t: number) => mode === 'stabilize' ? 0 : (perUnitMonths[t] ?? 0);
 
   const scheduleTotals = useMemo(
@@ -254,15 +315,23 @@ export function RehabRentCalculator({
     [scheduleByType, unitTypes.length]
   );
 
+  const leaseUpScheduleTotals = useMemo(
+    () => unitTypes.map((_, t) => (leaseUpScheduleByType[t] ?? []).reduce((s, n) => s + n, 0)),
+    [leaseUpScheduleByType, unitTypes.length]
+  );
+
   const someTypeScheduled = unitsToStabilize.some(u => u > 0);
+
+  const someLeaseUpScheduled = leaseUpToStabilize.some(u => u > 0);
 
   const scheduleValid = useMemo(() =>
     totalDuration > 0 &&
-    someTypeScheduled &&
+    (someTypeScheduled || someLeaseUpScheduled) &&
     unitTypes.every((_, t) =>
-      unitsToStabilize[t] === 0 || scheduleTotals[t] === unitsToStabilize[t]
+      (unitsToStabilize[t] === 0 || scheduleTotals[t] === unitsToStabilize[t]) &&
+      (leaseUpToStabilize[t] === 0 || leaseUpScheduleTotals[t] === leaseUpToStabilize[t])
     ),
-    [totalDuration, someTypeScheduled, unitTypes, unitsToStabilize, scheduleTotals]
+    [totalDuration, someTypeScheduled, someLeaseUpScheduled, unitTypes, unitsToStabilize, scheduleTotals, leaseUpToStabilize, leaseUpScheduleTotals]
   );
 
   const setTypeUnits = (t: number, val: number) =>
@@ -271,12 +340,26 @@ export function RehabRentCalculator({
   const setTypeMonths = (t: number, val: number) =>
     setPerUnitMonths(prev => { const n = [...prev]; n[t] = Math.min(24, Math.max(0, val)); return n; });
 
+  const setLeaseUpUnits = (t: number, val: number) =>
+    setLeaseUpToStabilize(prev => { const n = [...prev]; n[t] = Math.min(unitTypes[t].count, Math.max(0, val)); return n; });
+
   const updateCell = (t: number, monthIdx: number, val: number) => {
     setAutoFilled(false);
     setScheduleByType(prev => {
       const next = prev.map(s => [...s]);
       const otherSum = (next[t] ?? []).reduce((s, n, i) => i === monthIdx ? s : s + n, 0);
       const cap = unitsToStabilize[t] > 0 ? Math.max(0, unitsToStabilize[t] - otherSum) : val;
+      next[t][monthIdx] = Math.min(Math.max(0, val), cap);
+      return next;
+    });
+  };
+
+  const updateLeaseUpCell = (t: number, monthIdx: number, val: number) => {
+    setAutoFilled(false);
+    setLeaseUpScheduleByType(prev => {
+      const next = prev.map(s => [...s]);
+      const otherSum = (next[t] ?? []).reduce((s, n, i) => i === monthIdx ? s : s + n, 0);
+      const cap = leaseUpToStabilize[t] > 0 ? Math.max(0, leaseUpToStabilize[t] - otherSum) : val;
       next[t][monthIdx] = Math.min(Math.max(0, val), cap);
       return next;
     });
@@ -291,6 +374,7 @@ export function RehabRentCalculator({
 
   const autoFillAll = () => {
     setScheduleByType(computeAutoFill(unitsToStabilize, totalDuration));
+    setLeaseUpScheduleByType(computeAutoFill(leaseUpToStabilize, totalDuration));
     setAutoFilled(true);
   };
 
@@ -298,17 +382,19 @@ export function RehabRentCalculator({
   useEffect(() => {
     if (!autoFilled) return;
     setScheduleByType(computeAutoFill(unitsToStabilize, totalDuration));
-  }, [unitsToStabilize, totalDuration, perUnitMonths, autoFilled]); // eslint-disable-line react-hooks/exhaustive-deps
+    setLeaseUpScheduleByType(computeAutoFill(leaseUpToStabilize, totalDuration));
+  }, [unitsToStabilize, leaseUpToStabilize, totalDuration, perUnitMonths, autoFilled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const result = useMemo<SimulationResult | null>(() => {
     if (!hasRentData || !scheduleValid) return null;
     return simulateFromSchedule(
       effectiveUnitTypes,
       scheduleByType,
+      leaseUpScheduleByType,
       unitTypes.map((_, t) => offlineMonths(t)),
       Math.max(projectionYears, 2)
     );
-  }, [effectiveUnitTypes, scheduleByType, mode, perUnitMonths, projectionYears, hasRentData, scheduleValid]);
+  }, [effectiveUnitTypes, scheduleByType, leaseUpScheduleByType, mode, perUnitMonths, projectionYears, hasRentData, scheduleValid]);
 
   const transitionYears = useMemo(() => {
     if (!result) return [];
@@ -340,6 +426,8 @@ export function RehabRentCalculator({
     setScheduleByType(unitTypes.map(() => []));
     setOpenYear(null);
     setAutoFilled(false);
+    setLeaseUpToStabilize(unitTypes.map(() => 0));
+    setLeaseUpScheduleByType(unitTypes.map(() => []));
   };
 
   if (unitTypes.length === 0) return (
@@ -357,7 +445,7 @@ export function RehabRentCalculator({
     }`}>
 
       {/* ── Header ── */}
-      <div className="flex items-center justify-between px-3.5 py-3">
+      {!hideHeader && <div className="flex items-center justify-between px-3.5 py-3">
         <div className="flex items-center gap-2">
           <Zap size={14} className={isApplied ? 'text-blue-500' : 'text-slate-400'} />
           <span className={`text-sm font-medium ${isApplied ? 'text-blue-700 dark:text-blue-300' : 'text-slate-600 dark:text-slate-400'}`}>
@@ -375,7 +463,7 @@ export function RehabRentCalculator({
           <X size={14} />
           <span className="hidden sm:inline">Close</span>
         </button>
-      </div>
+      </div>}
 
       {/* ── Mode switcher ── */}
       <div className="px-3.5 pb-3">
@@ -409,8 +497,11 @@ export function RehabRentCalculator({
               <th className="px-3 py-2 text-left font-medium text-slate-500 dark:text-slate-400">Unit Type</th>
               <th className="px-3 py-2 text-right font-medium text-slate-500 dark:text-slate-400">In-Place</th>
               <th className="px-3 py-2 text-right font-medium text-slate-500 dark:text-slate-400">Target</th>
-              {mode === 'renovate' && (
-                <th className="px-2 py-2 text-right font-medium text-slate-500 dark:text-slate-400">To Renovate</th>
+              {externalUnitsToStabilize === undefined && (
+                <>
+                  <th className="px-2 py-2 text-right font-medium text-slate-500 dark:text-slate-400">Renovation</th>
+                  <th className="px-2 py-2 text-right font-medium text-slate-500 dark:text-slate-400">Lease-up</th>
+                </>
               )}
             </tr>
           </thead>
@@ -445,16 +536,27 @@ export function RehabRentCalculator({
                     />
                   </div>
                 </td>
-                {mode === 'renovate' && (
-                  <td className="px-2 py-1.5">
-                    <input
-                      type="number" min={0} max={ut.count} placeholder="0"
-                      className="input text-xs text-right w-full"
-                      value={unitsToStabilize[t] === 0 ? '' : unitsToStabilize[t]}
-                      onChange={e => setTypeUnits(t, Number(e.target.value) || 0)}
-                      aria-label={`Units to renovate ${ut.label}`}
-                    />
-                  </td>
+                {externalUnitsToStabilize === undefined && (
+                  <>
+                    <td className="px-2 py-1.5">
+                      <input
+                        type="number" min={0} max={ut.count} placeholder="0"
+                        className="input text-xs text-right w-full"
+                        value={unitsToStabilize[t] === 0 ? '' : unitsToStabilize[t]}
+                        onChange={e => setTypeUnits(t, Number(e.target.value) || 0)}
+                        aria-label={`Units to renovate ${ut.label}`}
+                      />
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <input
+                        type="number" min={0} max={ut.count} placeholder="0"
+                        className="input text-xs text-right w-full"
+                        value={leaseUpToStabilize[t] === 0 ? '' : leaseUpToStabilize[t]}
+                        onChange={e => setLeaseUpUnits(t, Number(e.target.value) || 0)}
+                        aria-label={`Lease-up units ${ut.label}`}
+                      />
+                    </td>
+                  </>
                 )}
               </tr>
             ))}
@@ -463,7 +565,7 @@ export function RehabRentCalculator({
       </div>
 
       {/* ── Months offline (shared, renovate mode only) ── */}
-      {mode === 'renovate' && (
+      {mode === 'renovate' && externalOffline === undefined && (
         <div className="px-3.5 py-3 border-t border-slate-200 dark:border-slate-700 flex items-center gap-3">
           <label className="text-xs font-medium text-slate-500 dark:text-slate-400 shrink-0">
             Months offline per unit
@@ -592,7 +694,7 @@ export function RehabRentCalculator({
         <div className="px-3.5 pb-4 space-y-5 border-t border-slate-200 dark:border-slate-700 pt-4">
 
           {/* ── Step 1: Total duration ── */}
-          {someTypeScheduled && (
+          {someTypeScheduled && externalDuration === undefined && (
             <div className="space-y-2">
               <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
                 Step 1 — Total stabilization duration (months)
@@ -657,14 +759,24 @@ export function RehabRentCalculator({
                       <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Year {yi + 1}</span>
                       <div className="flex gap-3">
                         {unitTypes.map((ut, t) => {
-                          const scheduled = scheduleTotals[t];
-                          const target = unitsToStabilize[t];
-                          if (target === 0) return null;
-                          const over = scheduled > target;
-                          const done = scheduled === target;
+                          const renoScheduled = scheduleTotals[t];
+                          const renoTarget = unitsToStabilize[t];
+                          const leaseUpScheduled = leaseUpScheduleTotals[t];
+                          const leaseUpTarget = leaseUpToStabilize[t];
+                          if (renoTarget === 0 && leaseUpTarget === 0) return null;
                           return (
-                            <span key={t} className={`text-[11px] font-medium ${over ? 'text-red-500' : done ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-500'}`}>
-                              {ut.label}: {scheduled}/{target}
+                            <span key={t} className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                              {ut.label}:
+                              {renoTarget > 0 && (
+                                <span className={` ml-1 ${renoScheduled > renoTarget ? 'text-red-500' : renoScheduled === renoTarget ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-500'}`}>
+                                  R {renoScheduled}/{renoTarget}
+                                </span>
+                              )}
+                              {leaseUpTarget > 0 && (
+                                <span className={` ml-1 ${leaseUpScheduled > leaseUpTarget ? 'text-red-500' : leaseUpScheduled === leaseUpTarget ? 'text-blue-600 dark:text-blue-400' : 'text-amber-500'}`}>
+                                  L {leaseUpScheduled}/{leaseUpTarget}
+                                </span>
+                              )}
                             </span>
                           );
                         })}
@@ -687,25 +799,52 @@ export function RehabRentCalculator({
                       {months.map(m => {
                         const idx = m - 1;
                         return (
-                          <div key={m} className="px-3 py-2">
-                            <div className="grid gap-2 items-center"
-                              style={{ gridTemplateColumns: `5rem repeat(${unitTypes.length}, 1fr)` }}>
-                              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 tabular-nums">Mo {m}</span>
-                              {unitTypes.map((ut, t) => {
-                                const val = scheduleByType[t]?.[idx] ?? 0;
-                                return (
-                                  <input key={t}
-                                    type="number"
-                                    className="input text-base px-1 py-1 text-center w-full"
-                                    min={0}
-                                    placeholder="0"
-                                    value={val === 0 ? '' : val}
-                                    onChange={e => updateCell(t, idx, Number(e.target.value) || 0)}
-                                    aria-label={`Mo ${m} ${ut.label}`}
-                                  />
-                                );
-                              })}
-                            </div>
+                          <div key={m} className="px-3 py-2 space-y-1.5">
+                              {/* Renovation row */}
+                              {someTypeScheduled && (
+                                <div className="grid gap-2 items-center"
+                                  style={{ gridTemplateColumns: `4rem 3.5rem repeat(${unitTypes.length}, 1fr)` }}>
+                                  <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 tabular-nums">Mo {m}</span>
+                                  <span className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">Reno</span>
+                                  {unitTypes.map((ut, t) => {
+                                    const val = scheduleByType[t]?.[idx] ?? 0;
+                                    return (
+                                      <input key={t}
+                                        type="number"
+                                        className="input text-base px-1 py-1 text-center w-full"
+                                        min={0}
+                                        placeholder="0"
+                                        value={val === 0 ? '' : val}
+                                        onChange={e => updateCell(t, idx, Number(e.target.value) || 0)}
+                                        aria-label={`Mo ${m} Reno ${ut.label}`}
+                                      />
+                                    );
+                                  })}
+                                </div>
+                              )}
+                              {/* Lease-up row */}
+                              {someLeaseUpScheduled && (
+                                <div className="grid gap-2 items-center"
+                                  style={{ gridTemplateColumns: `4rem 3.5rem repeat(${unitTypes.length}, 1fr)` }}>
+                                  <span className="text-xs tabular-nums text-transparent select-none">{someTypeScheduled ? '' : `Mo ${m}`}</span>
+                                  {!someTypeScheduled && <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 tabular-nums" style={{gridColumn: '1'}}>Mo {m}</span>}
+                                  <span className="text-[10px] text-blue-500 dark:text-blue-400 font-medium">L/U</span>
+                                  {unitTypes.map((ut, t) => {
+                                    const val = leaseUpScheduleByType[t]?.[idx] ?? 0;
+                                    return (
+                                      <input key={t}
+                                        type="number"
+                                        className="input text-base px-1 py-1 text-center w-full border-blue-200 dark:border-blue-800/40"
+                                        min={0}
+                                        placeholder="0"
+                                        value={val === 0 ? '' : val}
+                                        onChange={e => updateLeaseUpCell(t, idx, Number(e.target.value) || 0)}
+                                        aria-label={`Mo ${m} LeaseUp ${ut.label}`}
+                                      />
+                                    );
+                                  })}
+                                </div>
+                              )}
                           </div>
                         );
                       })}
@@ -714,8 +853,11 @@ export function RehabRentCalculator({
                 );
               })}
 
-              {!scheduleValid && someTypeScheduled && totalDuration > 0 &&
-                unitTypes.some((_, t) => unitsToStabilize[t] > 0 && scheduleTotals[t] !== unitsToStabilize[t]) && (
+              {!scheduleValid && (someTypeScheduled || someLeaseUpScheduled) && totalDuration > 0 &&
+                unitTypes.some((_, t) =>
+                  (unitsToStabilize[t] > 0 && scheduleTotals[t] !== unitsToStabilize[t]) ||
+                  (leaseUpToStabilize[t] > 0 && leaseUpScheduleTotals[t] !== leaseUpToStabilize[t])
+                ) && (
                 <p className="text-[11px] text-amber-500">
                   Schedule totals must match unit targets before applying.
                 </p>

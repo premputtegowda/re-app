@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Pencil, Calculator, AlertTriangle, MapPin, CreditCard, Hammer, BarChart2, TrendingUp } from 'lucide-react';
+import { Pencil, Calculator, AlertTriangle, MapPin, CreditCard, Hammer, BarChart2, TrendingUp, ChevronRight, Check, Zap } from 'lucide-react';
 import { Card } from '@/components/UI/Card';
 import { Button } from '@/components/UI/Button';
 import { StepProperty } from './steps/StepProperty';
@@ -191,9 +191,33 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const [pausedActiveStep, setPausedActiveStep] = useState<number | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [errorStep, setErrorStep] = useState<number | null>(null);
-  const [calcOpen, setCalcOpen] = useState(false);
-  const [showProForma, setShowProForma] = useState(false);
   const [calcState, setCalcState] = useState<CalcPersistedState | undefined>(initialDeal?.calcState);
+  const [isValueAdd, setIsValueAdd] = useState<boolean | null>(() => {
+    if (!initialDeal) return null;
+    const isMfr = initialDeal.acquisition.propertyType === 'mfr';
+    const hasPreStab = isMfr
+      ? initialDeal.acquisition.unitMix.some(e => (e.preStabRent || 0) > 0)
+      : (initialDeal.acquisition.sfrPreStabRent || 0) > 0;
+    const hasCalcOverrides = Object.values(initialDeal.proForma.yearOverrides ?? {}).some(ov => ov?.grossRentSystem);
+    if (hasPreStab || hasCalcOverrides) return true;
+    return null;
+  });
+  const [preStabMethod, setPreStabMethod] = useState<'calculator' | 'manual' | null>(() => {
+    if (!initialDeal) return null;
+    const isMfr = initialDeal.acquisition.propertyType === 'mfr';
+    const hasPreStab = isMfr
+      ? initialDeal.acquisition.unitMix.some(e => (e.preStabRent || 0) > 0)
+      : (initialDeal.acquisition.sfrPreStabRent || 0) > 0;
+    const hasCalcOverrides = Object.values(initialDeal.proForma.yearOverrides ?? {}).some(ov => ov?.grossRentSystem);
+    if (hasCalcOverrides) return 'calculator';
+    if (hasPreStab) return 'manual';
+    return null;
+  });
+  const [stabDuration, setStabDuration] = useState(() => initialDeal?.calcState?.totalDuration ?? 0);
+  const [offlinePerUnit, setOfflinePerUnit] = useState(() => initialDeal?.calcState?.perUnitMonths?.[0] ?? 0);
+  const [calcCollapsed, setCalcCollapsed] = useState(() =>
+    Object.values(initialDeal?.proForma?.yearOverrides ?? {}).some(ov => ov?.grossRentSystem) ?? false
+  );
 
   // Form data
   const [acquisition, setAcquisition] = useState<CoCAcquisition>(
@@ -574,185 +598,32 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       case 3: {
         const hasMfr = acquisition.propertyType === 'mfr' && acquisition.unitMix.length > 0;
 
-        const mfrRentFields = ['inPlaceRent', 'rentMonthly', 'preStabRent'] as const;
-        const mfrRentLabels = { inPlaceRent: 'In-Place', rentMonthly: 'Target', preStabRent: 'Pre-Stab' };
+        const hasTargetRent = hasMfr
+          ? acquisition.unitMix.some(e => (e.rentMonthly || 0) > 0)
+          : (acquisition.sfrTargetRent || 0) > 0;
 
-        const rentSchedule = hasMfr ? (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <p className="label">Rent Schedule ($/mo per unit)</p>
-              <button
-                type="button"
-                onClick={() => setCalcOpen(true)}
-                className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 font-medium transition-colors"
-              >
-                <Calculator size={12} />
-                Calculator
-              </button>
-            </div>
+        const hasPreStab = hasMfr
+          ? acquisition.unitMix.some(e => (e.preStabRent || 0) > 0)
+          : (acquisition.sfrPreStabRent || 0) > 0;
 
-            {/* Mobile: card per unit type */}
-            <div className="sm:hidden rounded-xl border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-700/60 overflow-hidden">
-              {acquisition.unitMix.map((entry) => (
-                <div key={entry.id} className="px-3 py-2.5 space-y-2">
-                  <p className="text-xs font-semibold text-slate-600 dark:text-slate-400">
-                    {entry.beds}BR/{entry.baths}BA × {entry.count}
-                  </p>
-                  <div className="grid grid-cols-3 gap-2">
-                    {mfrRentFields.map((field) => {
-                      const warnCell = isVisited && !(entry[field] || 0) && (
-                        field === 'rentMonthly' || (field === 'preStabRent' && (entry.rentMonthly || 0) > 0)
-                      );
-                      return (
-                        <div key={field}>
-                          <label className="text-[10px] font-medium text-slate-400 dark:text-slate-500 mb-0.5 flex items-center gap-0.5">
-                            {mfrRentLabels[field]}
-                            {warnCell && (
-                              <AlertTriangle size={10} className="text-amber-500 shrink-0" />
-                            )}
-                          </label>
-                          <input
-                            type="number"
-                            className={`input text-sm text-right w-full ${warnCell ? 'border-amber-300 focus:ring-amber-400' : ''}`}
-                            min={0}
-                            placeholder="0"
-                            value={(entry[field] || 0) === 0 ? '' : entry[field]}
-                            onChange={(e) => updateAcquisition('unitMix', acquisition.unitMix.map((u) =>
-                              u.id === entry.id ? { ...u, [field]: Number(e.target.value) } : u
-                            ))}
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-              {(() => {
-                const totalUnits = acquisition.unitMix.reduce((s, e) => s + e.count, 0);
-                if (totalUnits === 0) return null;
-                const avgInPlace = acquisition.unitMix.reduce((s, e) => s + e.count * (e.inPlaceRent || 0), 0) / totalUnits;
-                const avgTarget  = acquisition.unitMix.reduce((s, e) => s + e.count * (e.rentMonthly || 0), 0) / totalUnits;
-                const avgPreStab = acquisition.unitMix.reduce((s, e) => s + e.count * (e.preStabRent || 0), 0) / totalUnits;
-                const fmt = (n: number) => n === 0 ? '—' : `$${Math.round(n).toLocaleString()}`;
-                return (
-                  <div className="px-3 py-2 bg-slate-50 dark:bg-slate-700/30 border-t-2 border-slate-200 dark:border-slate-600 space-y-1.5">
-                    <div className="grid grid-cols-3 gap-2">
-                      {[avgInPlace, avgTarget, avgPreStab].map((val, i) => (
-                        <div key={i}>
-                          <p className="text-[10px] font-medium text-slate-400 mb-0.5">{['In-Place avg', 'Target avg', 'Pre-Stab avg'][i]}</p>
-                          <p className={`text-xs font-semibold tabular-nums ${i === 2 ? 'text-blue-600 dark:text-blue-400' : 'text-slate-700 dark:text-slate-300'}`}>{fmt(val)}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
+        const calcApplied = Object.values(proForma.yearOverrides ?? {}).some(ov => ov?.grossRentSystem);
 
-            {/* Desktop: table */}
-            <div className="hidden sm:block rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-slate-50 dark:bg-slate-700/50">
-                    <th className="px-3 py-2 text-left text-xs font-medium text-slate-500 dark:text-slate-400">Unit Type</th>
-                    <th className="px-3 py-2 text-right text-xs font-medium text-slate-500 dark:text-slate-400">In-Place</th>
-                    <th className="px-3 py-2 text-right text-xs font-medium text-slate-500 dark:text-slate-400">
-                      <span className="flex items-center justify-end gap-1">
-                        Target
-                        {isVisited && acquisition.unitMix.some(e => !(e.rentMonthly || 0)) && (
-                          <AlertTriangle size={12} className="text-amber-500 shrink-0" data-testid="mfr-target-rent-warning" />
-                        )}
-                      </span>
-                    </th>
-                    <th className="px-3 py-2 text-right text-xs font-medium text-slate-500 dark:text-slate-400">Pre-Stab</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
-                  {acquisition.unitMix.map((entry) => (
-                    <tr key={entry.id}>
-                      <td className="px-3 py-2 text-xs font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap">
-                        {entry.beds}BR/{entry.baths}BA × {entry.count}
-                      </td>
-                      {mfrRentFields.map((field) => {
-                        const warnCell = isVisited && !(entry[field] || 0) && (
-                          field === 'rentMonthly' || (field === 'preStabRent' && (entry.rentMonthly || 0) > 0)
-                        );
-                        return (
-                          <td key={field} className="px-2 py-1.5">
-                            <input
-                              type="number"
-                              className={`input text-sm text-right w-full ${warnCell ? 'border-amber-300 focus:ring-amber-400' : ''}`}
-                              min={0}
-                              placeholder="0"
-                              value={(entry[field] || 0) === 0 ? '' : entry[field]}
-                              onChange={(e) => updateAcquisition('unitMix', acquisition.unitMix.map((u) =>
-                                u.id === entry.id ? { ...u, [field]: Number(e.target.value) } : u
-                              ))}
-                            />
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-                {(() => {
-                  const totalUnits = acquisition.unitMix.reduce((s, e) => s + e.count, 0);
-                  if (totalUnits === 0) return null;
-                  const avgInPlace  = acquisition.unitMix.reduce((s, e) => s + e.count * (e.inPlaceRent  || 0), 0) / totalUnits;
-                  const avgTarget   = acquisition.unitMix.reduce((s, e) => s + e.count * (e.rentMonthly  || 0), 0) / totalUnits;
-                  const avgPreStab  = acquisition.unitMix.reduce((s, e) => s + e.count * (e.preStabRent  || 0), 0) / totalUnits;
-                  const fmt = (n: number) => n === 0 ? '—' : `$${Math.round(n).toLocaleString()}`;
-                  return (
-                    <tfoot>
-                      <tr className="border-t-2 border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-700/30">
-                        <td className="px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400">Avg/unit</td>
-                        <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-slate-700 dark:text-slate-300">{fmt(avgInPlace)}</td>
-                        <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-slate-700 dark:text-slate-300">{fmt(avgTarget)}</td>
-                        <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums text-blue-600 dark:text-blue-400">{fmt(avgPreStab)}</td>
-                      </tr>
-                    </tfoot>
-                  );
-                })()}
-              </table>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <p className="label">Rent Schedule ($/mo)</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {([
-                { field: 'sfrInPlaceRent',  label: 'In-Place' },
-                { field: 'sfrTargetRent',   label: 'Target'   },
-                { field: 'sfrPreStabRent',  label: 'Pre-Stab' },
-              ] as const).map(({ field, label }) => {
-                const warnField = isVisited && !acquisition[field] && (
-                  field === 'sfrTargetRent' ||
-                  (field === 'sfrPreStabRent' && !!acquisition.sfrTargetRent)
-                );
-                return (
-                  <div key={field}>
-                    <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 flex items-center gap-1">
-                      {label}
-                      {warnField && <AlertTriangle size={12} className="text-amber-500 shrink-0" data-testid={field === 'sfrTargetRent' ? 'sfr-target-rent-warning' : 'sfr-prestab-rent-warning'} />}
-                    </label>
-                    <input
-                      type="number"
-                      className={`input text-sm ${warnField ? 'border-amber-300 focus:ring-amber-400' : ''}`}
-                      min={0}
-                      placeholder="0"
-                      value={(acquisition[field] || 0) === 0 ? '' : acquisition[field]}
-                      onChange={(e) => updateAcquisition(field, Number(e.target.value))}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
+        const stepComplete =
+          isValueAdd === false ||
+          (isValueAdd === true && preStabMethod === 'calculator' && calcApplied) ||
+          (isValueAdd === true && preStabMethod === 'manual' && hasPreStab);
+
+        const unitsToRenovate = hasMfr
+          ? acquisition.unitMix.map(e => e.unitsToRenovate ?? 0)
+          : [1];
+
+        const leaseUpUnitsArr = hasMfr
+          ? acquisition.unitMix.map(e => e.leaseUpUnits ?? 0)
+          : [0];
 
         const unitTypes = hasMfr
           ? acquisition.unitMix.map(e => ({
-              label: `${e.beds}BR/${e.baths}BA × ${e.count}`,
+              label: `${e.beds}BR/${e.baths}BA`,
               count: e.count,
               inPlaceRent: e.inPlaceRent || 0,
               targetRent: e.rentMonthly || 0,
@@ -772,93 +643,494 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
           if (ov !== undefined) calcAppliedYears[y] = ov;
         }
 
+        // Pre-stab schedule rows — from yearOverrides (calc) or computed (manual)
+        const fmtRent = (n: number) => `$${Math.round(n).toLocaleString()}`;
+        const preStabRows: { year: number; rent: number; label: string }[] = [];
+        if (calcApplied) {
+          Object.entries(proForma.yearOverrides ?? {})
+            .filter(([, ov]) => ov?.grossRentSystem && typeof ov?.grossRent === 'number')
+            .sort(([a], [b]) => Number(a) - Number(b))
+            .forEach(([yr, ov]) => preStabRows.push({ year: Number(yr), rent: ov!.grossRent!, label: '' }));
+        } else if (hasPreStab && stabDuration > 0) {
+          const totalPreStabMonthly = hasMfr
+            ? acquisition.unitMix.reduce((s, e) => s + e.count * (e.preStabRent || 0), 0)
+            : (acquisition.sfrPreStabRent || 0);
+          const totalTargetMonthly = hasMfr
+            ? acquisition.unitMix.reduce((s, e) => s + e.count * (e.rentMonthly || 0), 0)
+            : (acquisition.sfrTargetRent || 0);
+          const totalYears = Math.ceil(stabDuration / 12);
+          for (let y = 1; y <= totalYears; y++) {
+            const preStabMonths = Math.min(12, stabDuration - (y - 1) * 12);
+            const targetMonths = 12 - preStabMonths;
+            const rent = totalPreStabMonthly * preStabMonths + totalTargetMonthly * targetMonths;
+            preStabRows.push({ year: y, rent, label: `${preStabMonths} pre-stab + ${targetMonths} at target` });
+          }
+        }
+
+        const cardClass = 'rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-white dark:bg-slate-800';
+        const headerClass = 'px-4 py-3 bg-slate-50 dark:bg-slate-700/40 border-b border-slate-200 dark:border-slate-700';
+
         return (
-          <>
-            {rentSchedule}
-            {/* Always mounted so effects keep running when closed — hidden via CSS */}
-            <div
-              className={calcOpen ? 'fixed inset-0 z-50 flex items-end sm:items-center justify-center' : 'hidden'}
-              onClick={(e) => { if (calcOpen && e.target === e.currentTarget) setCalcOpen(false); }}
-            >
-              {calcOpen && <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />}
-              <div className={calcOpen ? 'relative w-full sm:max-w-lg max-h-[85dvh] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-white dark:bg-slate-800 shadow-2xl' : ''}>
-              <RehabRentCalculator
-                unitTypes={unitTypes}
-                projectionYears={acquisition.projectionYears}
-                appliedYears={calcAppliedYears}
-                grossRentGrowthPct={proForma.grossRent.growthPct}
-                onOpenChange={setCalcOpen}
-                initialState={calcState}
-                onStateChange={setCalcState}
-                onApplyRents={(rents) => {
-                  if (hasMfr) {
-                    updateAcquisition('unitMix', acquisition.unitMix.map((u, i) => ({
-                      ...u,
-                      inPlaceRent: rents[i]?.inPlace ?? u.inPlaceRent,
-                      rentMonthly: rents[i]?.target  ?? u.rentMonthly,
-                    })));
-                  } else {
-                    updateAcquisition('sfrInPlaceRent', rents[0]?.inPlace ?? acquisition.sfrInPlaceRent);
-                    updateAcquisition('sfrTargetRent',  rents[0]?.target  ?? acquisition.sfrTargetRent);
-                  }
-                }}
-                onApplyPreStab={(values) => {
-                  if (hasMfr) {
-                    updateAcquisition('unitMix', acquisition.unitMix.map((u, i) => ({
-                      ...u,
-                      preStabRent: Math.round(values[i] ?? 0),
-                    })));
-                  } else {
-                    updateAcquisition('sfrPreStabRent', Math.round(values[0] ?? 0));
-                  }
-                }}
-                onApply={(overrides) => {
-                  setProForma(prev => {
-                    const ovs = { ...(prev.yearOverrides ?? {}) };
-                    Object.entries(overrides).forEach(([yr, rent]) => {
-                      const y = Number(yr);
-                      ovs[y] = { ...(ovs[y] ?? {}), grossRent: rent, grossRentSystem: true };
-                    });
-                    return { ...prev, yearOverrides: ovs };
-                  });
-                }}
-                onClear={() => {
-                  setProForma(prev => {
-                    const ovs = { ...(prev.yearOverrides ?? {}) };
-                    for (let y = 1; y <= acquisition.projectionYears; y++) {
-                      if (ovs[y]) {
-                        const { grossRent: _removed, ...rest } = ovs[y];
-                        if (Object.keys(rest).length > 0) ovs[y] = rest; else delete ovs[y];
-                      }
-                    }
-                    return { ...prev, yearOverrides: ovs };
-                  });
-                }}
-              />
+          <div className="space-y-3">
+
+            {/* ── 1. Rent card ── */}
+            <div className={cardClass}>
+              <div className={headerClass}>
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Rent</p>
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Estimate ok if exact figures aren't available</p>
               </div>
+              {hasMfr ? (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-100 dark:border-slate-700/60">
+                      <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-400">Unit Type</th>
+                      <th className="px-3 py-2.5 text-right text-xs font-medium text-slate-400">Current Rent</th>
+                      <th className="px-3 py-2.5 text-right text-xs font-medium text-slate-400">
+                        <span className="flex items-center justify-end gap-1">
+                          Target
+                          {isVisited && acquisition.unitMix.some(e => !(e.rentMonthly || 0)) && (
+                            <AlertTriangle size={12} className="text-amber-500" data-testid="mfr-target-rent-warning" />
+                          )}
+                        </span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                    {acquisition.unitMix.map((entry) => (
+                      <tr key={entry.id}>
+                        <td className="px-4 py-2.5 text-xs font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">
+                          {entry.beds}BR/{entry.baths}BA <span className="text-slate-400 font-normal">×{entry.count}</span>
+                        </td>
+                        {(['inPlaceRent', 'rentMonthly'] as const).map(field => {
+                          const warn = field === 'rentMonthly' && isVisited && !(entry[field] || 0);
+                          return (
+                            <td key={field} className="px-2 py-2">
+                              <div className="relative">
+                                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">$</span>
+                                <input
+                                  type="number" min={0} placeholder="0"
+                                  className={`input text-sm pl-5 text-right w-full ${warn ? 'border-amber-300 focus:ring-amber-400' : ''}`}
+                                  value={(entry[field] || 0) === 0 ? '' : entry[field]}
+                                  onChange={e => updateAcquisition('unitMix', acquisition.unitMix.map(u =>
+                                    u.id === entry.id ? { ...u, [field]: Number(e.target.value) } : u
+                                  ))}
+                                />
+                              </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="px-4 py-4 grid grid-cols-2 gap-3">
+                  {([
+                    { field: 'sfrInPlaceRent', label: 'Current Rent' },
+                    { field: 'sfrTargetRent',  label: 'Target' },
+                  ] as const).map(({ field, label }) => {
+                    const warn = field === 'sfrTargetRent' && isVisited && !acquisition[field];
+                    return (
+                      <div key={field}>
+                        <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1">
+                          {label}
+                          {warn && <AlertTriangle size={12} className="text-amber-500" data-testid="sfr-target-rent-warning" />}
+                        </label>
+                        <div className="relative">
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                          <input
+                            type="number" min={0} placeholder="0"
+                            className={`input text-sm pl-6 ${warn ? 'border-amber-300 focus:ring-amber-400' : ''}`}
+                            value={(acquisition[field] || 0) === 0 ? '' : acquisition[field]}
+                            onChange={e => updateAcquisition(field, Number(e.target.value))}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-            {proForma.grossRent.stabilized > 0 || showProForma ? (
+
+            {/* ── 2. Renovation question ── */}
+            {hasTargetRent && (
+              <div className={cardClass}>
+                <div className="px-4 py-4">
+                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-3">
+                    Will any units be renovated to increase rent?
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {([
+                      { val: false, label: 'No', sub: 'Already at market' },
+                      { val: true,  label: 'Yes', sub: 'Value-add' },
+                    ] as const).map(({ val, label, sub }) => (
+                      <button
+                        key={String(val)}
+                        type="button"
+                        onClick={() => {
+                          setIsValueAdd(val);
+                          if (!val) {
+                            // Clear pre-stab data when switching to stabilized
+                            if (hasMfr) {
+                              updateAcquisition('unitMix', acquisition.unitMix.map(u => ({ ...u, preStabRent: 0 })));
+                            } else {
+                              updateAcquisition('sfrPreStabRent', 0);
+                            }
+                            setProForma(prev => {
+                              const ovs = { ...(prev.yearOverrides ?? {}) };
+                              for (let y = 1; y <= acquisition.projectionYears; y++) {
+                                if (ovs[y]) {
+                                  const { grossRent: _r, grossRentSystem: _s, ...rest } = ovs[y];
+                                  ovs[y] = Object.keys(rest).length ? rest : undefined as never;
+                                  if (!ovs[y]) delete ovs[y];
+                                }
+                              }
+                              return { ...prev, yearOverrides: ovs };
+                            });
+                          }
+                        }}
+                        className={`py-3.5 px-3 rounded-xl text-left transition-colors ${
+                          isValueAdd === val
+                            ? 'bg-primary-600 text-white'
+                            : 'bg-slate-100 dark:bg-slate-700/60 text-slate-600 dark:text-slate-300 active:bg-slate-200'
+                        }`}
+                      >
+                        <p className="text-sm font-semibold">{label}</p>
+                        <p className={`text-xs mt-0.5 ${isValueAdd === val ? 'text-primary-100' : 'text-slate-400'}`}>{sub}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── 3. Value-add details ── */}
+            {isValueAdd === true && (
+              <>
+                {/* 3a. Renovation plan */}
+                <div className={cardClass}>
+                  <div className={headerClass}>
+                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Stabilization Plan</p>
+                  </div>
+                  {hasMfr ? (<>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-100 dark:border-slate-700/60">
+                          <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-400">Unit Type</th>
+                          <th className="px-3 py-2.5 text-right text-xs font-medium text-slate-400">Target After Reno</th>
+                          <th className="px-3 py-2.5 text-right text-xs font-medium text-slate-400">Units to Renovate</th>
+                          <th className="px-3 py-2.5 text-right text-xs font-medium text-slate-400">Lease-up</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                        {acquisition.unitMix.map(entry => (
+                          <tr key={entry.id}>
+                            <td className="px-4 py-2.5 text-xs font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">
+                              {entry.beds}BR/{entry.baths}BA <span className="text-slate-400 font-normal">×{entry.count}</span>
+                            </td>
+                            <td className="px-2 py-2">
+                              <div className="relative">
+                                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">$</span>
+                                <input
+                                  type="number" min={0} placeholder="0"
+                                  className="input text-sm pl-5 text-right w-full"
+                                  value={(entry.rentMonthly || 0) === 0 ? '' : entry.rentMonthly}
+                                  onChange={e => updateAcquisition('unitMix', acquisition.unitMix.map(u =>
+                                    u.id === entry.id ? { ...u, rentMonthly: Number(e.target.value) } : u
+                                  ))}
+                                />
+                              </div>
+                            </td>
+                            <td className="px-2 py-2">
+                              <input
+                                type="number" min={0} max={entry.count} placeholder="0"
+                                className="input text-sm text-right w-full"
+                                value={(entry.unitsToRenovate ?? 0) === 0 ? '' : entry.unitsToRenovate}
+                                onChange={e => updateAcquisition('unitMix', acquisition.unitMix.map(u =>
+                                  u.id === entry.id ? { ...u, unitsToRenovate: Math.min(Number(e.target.value) || 0, entry.count) } : u
+                                ))}
+                              />
+                            </td>
+                            <td className="px-2 py-2">
+                              <input
+                                type="number" min={0}
+                                max={entry.count - (entry.unitsToRenovate ?? 0)}
+                                placeholder="0"
+                                className="input text-sm text-right w-full"
+                                value={(entry.leaseUpUnits ?? 0) === 0 ? '' : entry.leaseUpUnits}
+                                onChange={e => {
+                                  const val = Math.min(
+                                    Number(e.target.value) || 0,
+                                    entry.count - (entry.unitsToRenovate ?? 0)
+                                  );
+                                  updateAcquisition('unitMix', acquisition.unitMix.map(u =>
+                                    u.id === entry.id ? { ...u, leaseUpUnits: val } : u
+                                  ));
+                                }}
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {isVisited && acquisition.unitMix.some(e =>
+                      (e.inPlaceRent || 0) < (e.rentMonthly || 0) &&
+                      ((e.unitsToRenovate ?? 0) + (e.leaseUpUnits ?? 0)) < e.count
+                    ) && (
+                      <div className="px-4 py-2.5 border-t border-amber-100 dark:border-amber-900/30 bg-amber-50 dark:bg-amber-900/10">
+                        <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                          <AlertTriangle size={12} />
+                          Some units have current rent below target but aren't assigned to renovation or lease-up.
+                        </p>
+                      </div>
+                    )}
+                  </> ) : (
+                    <div className="px-4 py-3.5 flex items-center justify-between">
+                      <span className="text-sm text-slate-600 dark:text-slate-300">1 unit to renovate</span>
+                      <div className="flex items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400">
+                        <span>Target</span>
+                        <div className="relative">
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">$</span>
+                          <input
+                            type="number" min={0} placeholder="0"
+                            className="input text-sm pl-5 text-right w-28"
+                            value={(acquisition.sfrTargetRent || 0) === 0 ? '' : acquisition.sfrTargetRent}
+                            onChange={e => updateAcquisition('sfrTargetRent', Number(e.target.value))}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 3b. Timeline */}
+                <div className={cardClass}>
+                  <div className={headerClass}>
+                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Timeline</p>
+                  </div>
+                  <div className="px-4 py-4 grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-medium text-slate-500 dark:text-slate-400 block mb-1.5">
+                        Stabilization duration
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="number" min={1} max={acquisition.projectionYears * 12} placeholder="e.g. 12"
+                          className="input text-sm pr-10"
+                          value={stabDuration === 0 ? '' : stabDuration}
+                          onChange={e => setStabDuration(Math.min(acquisition.projectionYears * 12, Math.max(0, Number(e.target.value) || 0)))}
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">mo</span>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-500 dark:text-slate-400 block mb-1.5">
+                        Offline per unit
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="number" min={0} max={24} step={0.25} placeholder="e.g. 1.5"
+                          className="input text-sm pr-10"
+                          value={offlinePerUnit === 0 ? '' : offlinePerUnit}
+                          onChange={e => setOfflinePerUnit(Math.min(24, Math.max(0, Number(e.target.value) || 0)))}
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">mo</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3c. Method choice */}
+                <div className={`${cardClass} divide-y divide-slate-100 dark:divide-slate-700/60`}>
+                  {([
+                    { val: 'calculator' as const, icon: <Zap size={18} />, label: 'Build a schedule', sub: 'Calculate from renovation plan' },
+                    { val: 'manual' as const,     icon: <Pencil size={18} />, label: 'Enter manually', sub: 'I know my pre-stab rent' },
+                  ]).map(({ val, icon, label, sub }) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setPreStabMethod(val)}
+                      className={`w-full flex items-center gap-3 px-4 py-4 text-left transition-colors ${
+                        preStabMethod === val
+                          ? 'bg-primary-50 dark:bg-primary-900/20'
+                          : 'hover:bg-slate-50 dark:hover:bg-slate-700/30 active:bg-slate-100'
+                      }`}
+                    >
+                      <span className={preStabMethod === val ? 'text-primary-600 dark:text-primary-400' : 'text-slate-400'}>
+                        {icon}
+                      </span>
+                      <div className="flex-1">
+                        <p className={`text-sm font-semibold ${preStabMethod === val ? 'text-primary-700 dark:text-primary-300' : 'text-slate-700 dark:text-slate-200'}`}>
+                          {label}
+                        </p>
+                        <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{sub}</p>
+                      </div>
+                      {preStabMethod === val && <Check size={18} className="text-primary-600 dark:text-primary-400 shrink-0" />}
+                    </button>
+                  ))}
+                </div>
+
+                {/* 3d. Calculator section */}
+                {preStabMethod === 'calculator' && (
+                  calcCollapsed ? (
+                    <button
+                      type="button"
+                      onClick={() => setCalcCollapsed(false)}
+                      className={`w-full ${cardClass} px-4 py-3.5 flex items-center justify-between`}
+                    >
+                      <span className="flex items-center gap-2 text-sm font-medium text-slate-600 dark:text-slate-300">
+                        <Zap size={16} className="text-primary-500" />
+                        Schedule
+                      </span>
+                      <span className="flex items-center gap-2 text-sm font-medium text-emerald-600 dark:text-emerald-400">
+                        Applied
+                        <Check size={16} />
+                        <ChevronRight size={16} className="text-slate-400" />
+                      </span>
+                    </button>
+                  ) : (
+                    <div className={cardClass}>
+                      <RehabRentCalculator
+                        hideHeader={false}
+                        unitTypes={unitTypes}
+                        projectionYears={acquisition.projectionYears}
+                        appliedYears={calcAppliedYears}
+                        grossRentGrowthPct={proForma.grossRent.growthPct}
+                        externalDuration={stabDuration}
+                        externalOffline={offlinePerUnit}
+                        externalUnitsToStabilize={unitsToRenovate}
+                        externalLeaseUpToStabilize={leaseUpUnitsArr}
+                        onOpenChange={v => { if (!v) setCalcCollapsed(true); }}
+                        initialState={calcState}
+                        onStateChange={setCalcState}
+                        onApplyRents={(rents) => {
+                          if (hasMfr) {
+                            updateAcquisition('unitMix', acquisition.unitMix.map((u, i) => ({
+                              ...u,
+                              inPlaceRent: rents[i]?.inPlace ?? u.inPlaceRent,
+                              rentMonthly: rents[i]?.target  ?? u.rentMonthly,
+                            })));
+                          } else {
+                            updateAcquisition('sfrInPlaceRent', rents[0]?.inPlace ?? acquisition.sfrInPlaceRent);
+                            updateAcquisition('sfrTargetRent',  rents[0]?.target  ?? acquisition.sfrTargetRent);
+                          }
+                        }}
+                        onApplyPreStab={(values) => {
+                          if (hasMfr) {
+                            updateAcquisition('unitMix', acquisition.unitMix.map((u, i) => ({
+                              ...u,
+                              preStabRent: Math.round(values[i] ?? 0),
+                            })));
+                          } else {
+                            updateAcquisition('sfrPreStabRent', Math.round(values[0] ?? 0));
+                          }
+                        }}
+                        onApply={(overrides) => {
+                          setProForma(prev => {
+                            const ovs = { ...(prev.yearOverrides ?? {}) };
+                            Object.entries(overrides).forEach(([yr, rent]) => {
+                              const y = Number(yr);
+                              ovs[y] = { ...(ovs[y] ?? {}), grossRent: rent, grossRentSystem: true };
+                            });
+                            return { ...prev, yearOverrides: ovs };
+                          });
+                          setCalcCollapsed(true);
+                        }}
+                        onClear={() => {
+                          setProForma(prev => {
+                            const ovs = { ...(prev.yearOverrides ?? {}) };
+                            for (let y = 1; y <= acquisition.projectionYears; y++) {
+                              if (ovs[y]) {
+                                const { grossRent: _removed, ...rest } = ovs[y];
+                                if (Object.keys(rest).length > 0) ovs[y] = rest; else delete ovs[y];
+                              }
+                            }
+                            return { ...prev, yearOverrides: ovs };
+                          });
+                        }}
+                      />
+                    </div>
+                  )
+                )}
+
+                {/* 3e. Manual pre-stab inputs */}
+                {preStabMethod === 'manual' && (
+                  <div className={cardClass}>
+                    <div className={headerClass}>
+                      <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Pre-stab Rent</p>
+                      <p className="text-xs text-slate-400 mt-0.5">$/mo per unit during stabilization</p>
+                    </div>
+                    <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                      {hasMfr ? acquisition.unitMix.map(entry => (
+                        <div key={entry.id} className="px-4 py-3 flex items-center justify-between gap-3">
+                          <span className="text-sm font-medium text-slate-600 dark:text-slate-300 shrink-0">
+                            {entry.beds}BR/{entry.baths}BA <span className="text-slate-400 font-normal text-xs">×{entry.count}</span>
+                          </span>
+                          <div className="relative w-32">
+                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                            <input
+                              type="number" min={0} placeholder="0"
+                              className="input text-sm pl-6 text-right w-full"
+                              value={(entry.preStabRent || 0) === 0 ? '' : entry.preStabRent}
+                              onChange={e => updateAcquisition('unitMix', acquisition.unitMix.map(u =>
+                                u.id === entry.id ? { ...u, preStabRent: Number(e.target.value) } : u
+                              ))}
+                            />
+                          </div>
+                        </div>
+                      )) : (
+                        <div className="px-4 py-3 flex items-center justify-between gap-3">
+                          <span className="text-sm font-medium text-slate-600 dark:text-slate-300">SFR</span>
+                          <div className="relative w-32">
+                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                            <input
+                              type="number" min={0} placeholder="0"
+                              className="input text-sm pl-6 text-right w-full"
+                              value={(acquisition.sfrPreStabRent || 0) === 0 ? '' : acquisition.sfrPreStabRent}
+                              onChange={e => updateAcquisition('sfrPreStabRent', Number(e.target.value))}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* 3f. Pre-stab Rent Schedule */}
+                {preStabRows.length > 0 && (
+                  <div className={cardClass}>
+                    <div className={headerClass}>
+                      <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Pre-stab Rent Schedule</p>
+                    </div>
+                    <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                      {preStabRows.map(({ year, rent, label }) => (
+                        <div key={year} className="px-4 py-3 flex items-center justify-between">
+                          <div>
+                            <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Year {year}</span>
+                            {label && <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{label}</p>}
+                          </div>
+                          <span className="text-sm font-bold text-amber-600 dark:text-amber-400 tabular-nums">
+                            {fmtRent(rent)}/yr
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* ── 4. Pro Forma ── */}
+            {stepComplete && (
               <ProFormaGrid
                 data={proForma}
                 onChange={setProForma}
                 projectionYears={acquisition.projectionYears}
                 showWarnings={isVisited}
               />
-            ) : (
-              <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-700 px-5 py-6 text-center space-y-2">
-                <p className="text-sm text-slate-500 dark:text-slate-400">
-                  To underwrite the deal accurately, enter your In-Place rent above, then use the calculator to set pre-stabilization rent — the Pro Forma will appear here.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setShowProForma(true)}
-                  className="text-xs text-primary-600 dark:text-primary-400 hover:underline font-medium"
-                >
-                  Or enter rent information manually — Show Pro Forma
-                </button>
-              </div>
             )}
-          </>
+
+          </div>
         );
       }
       case 4:
