@@ -78,6 +78,9 @@ export function simulateFromSchedule(
     return Math.max(0, ut.count - scheduledReno - scheduledLeaseUp);
   });
 
+  // Track reno completions separately so inRenovation is independent of lease-up flips
+  const renoCompletedByType = unitTypes.map(() => 0);
+
   const monthly: number[] = [];
   const monthlyByType: number[][] = unitTypes.map(() => []);
 
@@ -86,15 +89,13 @@ export function simulateFromSchedule(
     for (let t = 0; t < unitTypes.length; t++) {
       const ut = unitTypes[t];
       const sched = scheduleByType[t] ?? [];
-      const scheduledTotal = sched.reduce((s, n) => s + n, 0);
-      const staticUnits = Math.max(0, ut.count - scheduledTotal);
 
+      renoCompletedByType[t] += completionsByType[t].get(m) ?? 0;
       stableByType[t] += completionsByType[t].get(m) ?? 0;
       stableByType[t] += leaseUpFlipsByType[t].get(m) ?? 0;
 
       const startedSoFar = sched.slice(0, m).reduce((s, n) => s + n, 0);
-      const doneSoFar = stableByType[t] - staticUnits;
-      const inRenovation = Math.max(0, startedSoFar - doneSoFar);
+      const inRenovation = Math.max(0, startedSoFar - renoCompletedByType[t]);
       const inPlaceUnits = Math.max(0, ut.count - stableByType[t] - inRenovation);
 
       const typeRent = inPlaceUnits * ut.inPlaceRent
@@ -196,12 +197,8 @@ export function RehabRentCalculator({
 
   const isApplied = Object.keys(appliedYears).length > 0;
 
-  // ── Mode ──
-  const [mode, setMode] = useState<'renovate' | 'stabilize' | 'manual'>(() => {
-    const s = initialState?.mode;
-    if (!s || (s as string) === 'calculator' || s === 'stabilize') return 'renovate';
-    return s;
-  });
+  // ── Mode ── (always renovate; manual mode handled by parent)
+  const [mode] = useState<'renovate' | 'stabilize' | 'manual'>('renovate');
 
   // ── Local rents (in-place + target per type) — entered inside the calculator ──
   const [localRents, setLocalRents] = useState<LocalRent[]>(() => {
@@ -387,14 +384,18 @@ export function RehabRentCalculator({
 
   const result = useMemo<SimulationResult | null>(() => {
     if (!hasRentData || !scheduleValid) return null;
+    // Zero out stale reno schedule entries for types with no renovation units
+    const cleanScheduleByType = scheduleByType.map((sched, t) =>
+      unitsToStabilize[t] === 0 ? [] : sched
+    );
     return simulateFromSchedule(
       effectiveUnitTypes,
-      scheduleByType,
+      cleanScheduleByType,
       leaseUpScheduleByType,
       unitTypes.map((_, t) => offlineMonths(t)),
       Math.max(projectionYears, 2)
     );
-  }, [effectiveUnitTypes, scheduleByType, leaseUpScheduleByType, mode, perUnitMonths, projectionYears, hasRentData, scheduleValid]);
+  }, [effectiveUnitTypes, scheduleByType, leaseUpScheduleByType, unitsToStabilize, mode, perUnitMonths, projectionYears, hasRentData, scheduleValid]);
 
   const transitionYears = useMemo(() => {
     if (!result) return [];
@@ -465,104 +466,6 @@ export function RehabRentCalculator({
         </button>
       </div>}
 
-      {/* ── Mode switcher ── */}
-      <div className="px-3.5 pb-3">
-        <div className="flex rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden text-xs font-medium">
-          {(['renovate', 'manual'] as const).map((m, i) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setMode(m)}
-              className={`flex-1 py-2 transition-colors ${i > 0 ? 'border-l border-slate-200 dark:border-slate-700' : ''} ${
-                mode === m
-                  ? 'bg-primary-600 text-white'
-                  : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/40'
-              }`}
-            >
-              {m === 'renovate' ? 'Stabilize' : 'Enter My Numbers'}
-            </button>
-          ))}
-        </div>
-        <p className="mt-1.5 text-[11px] text-slate-400 dark:text-slate-500">
-          {mode === 'renovate' && 'Units go offline during stabilization, then earn target rent.'}
-          {mode === 'manual' && 'Enter your own pre-stab rent and duration directly.'}
-        </p>
-      </div>
-
-      {/* ── Unit type table ── */}
-      <div className="border-t border-slate-200 dark:border-slate-700">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="bg-slate-50 dark:bg-slate-700/40">
-              <th className="px-3 py-2 text-left font-medium text-slate-500 dark:text-slate-400">Unit Type</th>
-              <th className="px-3 py-2 text-right font-medium text-slate-500 dark:text-slate-400">In-Place</th>
-              <th className="px-3 py-2 text-right font-medium text-slate-500 dark:text-slate-400">Target</th>
-              {externalUnitsToStabilize === undefined && (
-                <>
-                  <th className="px-2 py-2 text-right font-medium text-slate-500 dark:text-slate-400">Renovation</th>
-                  <th className="px-2 py-2 text-right font-medium text-slate-500 dark:text-slate-400">Lease-up</th>
-                </>
-              )}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
-            {unitTypes.map((ut, t) => (
-              <tr key={t}>
-                <td className="px-3 py-2 font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">
-                  {ut.label}
-                  <span className="ml-1 font-normal text-slate-400">×{ut.count}</span>
-                </td>
-                <td className="px-2 py-1.5">
-                  <div className="relative">
-                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">$</span>
-                    <input
-                      type="number" min={0} placeholder="0"
-                      className="input text-xs pl-5 pr-1 text-right w-full"
-                      value={localRents[t]?.inPlace === 0 ? '' : (localRents[t]?.inPlace ?? '')}
-                      onChange={e => setLocalRent(t, 'inPlace', Number(e.target.value) || 0)}
-                      aria-label={`In-place rent ${ut.label}`}
-                    />
-                  </div>
-                </td>
-                <td className="px-2 py-1.5">
-                  <div className="relative">
-                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">$</span>
-                    <input
-                      type="number" min={0} placeholder="0"
-                      className="input text-xs pl-5 pr-1 text-right w-full"
-                      value={localRents[t]?.target === 0 ? '' : (localRents[t]?.target ?? '')}
-                      onChange={e => setLocalRent(t, 'target', Number(e.target.value) || 0)}
-                      aria-label={`Target rent ${ut.label}`}
-                    />
-                  </div>
-                </td>
-                {externalUnitsToStabilize === undefined && (
-                  <>
-                    <td className="px-2 py-1.5">
-                      <input
-                        type="number" min={0} max={ut.count} placeholder="0"
-                        className="input text-xs text-right w-full"
-                        value={unitsToStabilize[t] === 0 ? '' : unitsToStabilize[t]}
-                        onChange={e => setTypeUnits(t, Number(e.target.value) || 0)}
-                        aria-label={`Units to renovate ${ut.label}`}
-                      />
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <input
-                        type="number" min={0} max={ut.count} placeholder="0"
-                        className="input text-xs text-right w-full"
-                        value={leaseUpToStabilize[t] === 0 ? '' : leaseUpToStabilize[t]}
-                        onChange={e => setLeaseUpUnits(t, Number(e.target.value) || 0)}
-                        aria-label={`Lease-up units ${ut.label}`}
-                      />
-                    </td>
-                  </>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
 
       {/* ── Months offline (shared, renovate mode only) ── */}
       {mode === 'renovate' && externalOffline === undefined && (
@@ -583,141 +486,16 @@ export function RehabRentCalculator({
         </div>
       )}
 
-      {/* ── Manual entry mode ── */}
-      {mode === 'manual' && (
-        <div className="px-3.5 pb-4 space-y-4 border-t border-slate-200 dark:border-slate-700 pt-4">
-          <div>
-            <label className="text-xs font-medium text-slate-500 dark:text-slate-400 block mb-1">
-              Stabilization duration (months)
-            </label>
-            <input
-              type="number"
-              className="input text-sm"
-              min={1}
-              max={projectionYears * 12}
-              placeholder="e.g. 12"
-              value={manualDuration === 0 ? '' : manualDuration}
-              onChange={e => setManualDuration(Math.min(projectionYears * 12, Math.max(0, Number(e.target.value) || 0)))}
-              aria-label="Manual stabilization duration"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-slate-500 dark:text-slate-400 block">
-              Effective pre-stab rent ($/mo per unit)
-            </label>
-            {effectiveUnitTypes.map((ut, t) => (
-              <div key={t} className="flex items-center gap-3">
-                <span className="text-xs font-medium text-slate-600 dark:text-slate-300 w-20 shrink-0">{ut.label}</span>
-                <div className="flex-1 relative">
-                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">$</span>
-                  <input
-                    type="number"
-                    className="input text-sm pl-6"
-                    min={0}
-                    placeholder={ut.targetRent > 0 ? `target ${ut.targetRent}` : '0'}
-                    value={manualPreStabRents[t] === 0 ? '' : manualPreStabRents[t]}
-                    onChange={e => {
-                      const v = Number(e.target.value) || 0;
-                      setManualPreStabRents(prev => prev.map((r, i) => i === t ? v : r));
-                    }}
-                    aria-label={`Pre-stab rent ${ut.label}`}
-                  />
-                </div>
-                <span className="text-[11px] text-slate-400 dark:text-slate-500 shrink-0">
-                  target ${ut.targetRent}
-                </span>
-              </div>
-            ))}
-          </div>
-
-          {manualDuration > 0 && manualPreStabRents.some(r => r > 0) && (
-            <div className="rounded-lg bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 px-3 py-2.5 space-y-1">
-              <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Pre-stab rent / year</p>
-              {Array.from({ length: Math.ceil(manualDuration / 12) }, (_, yi) => {
-                const y = yi + 1;
-                const stabMonths = Math.min(12, manualDuration - yi * 12);
-                const targetMonths = 12 - stabMonths;
-                const preStabMonthly = effectiveUnitTypes.reduce((s, ut, t) => s + (manualPreStabRents[t] ?? 0) * ut.count, 0);
-                const targetMonthly  = effectiveUnitTypes.reduce((s, ut) => s + ut.targetRent * ut.count, 0);
-                const yearTotal = preStabMonthly * stabMonths + targetMonthly * targetMonths;
-                return (
-                  <div key={y} className="flex justify-between text-xs">
-                    <span className="text-slate-500 dark:text-slate-400">Year {y}</span>
-                    <span className="text-amber-600 dark:text-amber-400 tabular-nums font-medium">{fmt$(yearTotal)}/yr</span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={manualDuration === 0 || manualPreStabRents.every(r => r === 0)}
-              onClick={() => {
-                const transYears = Math.ceil(manualDuration / 12);
-                const preStabMonthly = effectiveUnitTypes.reduce((s, ut, t) => s + (manualPreStabRents[t] ?? 0) * ut.count, 0);
-                const targetMonthly  = effectiveUnitTypes.reduce((s, ut) => s + ut.targetRent * ut.count, 0);
-                const overrides: Record<number, number> = {};
-                for (let y = 1; y <= Math.min(transYears, projectionYears); y++) {
-                  const stabMonthsThisYear = Math.min(12, manualDuration - (y - 1) * 12);
-                  const targetMonthsThisYear = 12 - stabMonthsThisYear;
-                  overrides[y] = preStabMonthly * stabMonthsThisYear + targetMonthly * targetMonthsThisYear;
-                }
-                const firstFull = transYears + 1;
-                if (firstFull <= projectionYears) {
-                  overrides[firstFull] = totalTargetAnnual * Math.pow(1 + grossRentGrowthPct / 100, transYears);
-                }
-                onApply(overrides);
-                onApplyRents?.(localRents);
-                if (onApplyPreStab) onApplyPreStab(manualPreStabRents);
-                setOpen(false);
-              }}
-              className="flex-1 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-40 text-white text-sm font-medium transition-colors"
-            >
-              Apply to Pro Forma
-            </button>
-            <button
-              type="button"
-              onClick={() => { setManualDuration(0); setManualPreStabRents(unitTypes.map(() => 0)); }}
-              className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors"
-            >
-              Clear
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* ── Renovate / Stabilize modes ── */}
       {(mode === 'renovate' || mode === 'stabilize') && (
         <div className="px-3.5 pb-4 space-y-5 border-t border-slate-200 dark:border-slate-700 pt-4">
 
-          {/* ── Step 1: Total duration ── */}
-          {someTypeScheduled && externalDuration === undefined && (
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
-                Step 1 — Total stabilization duration (months)
-              </p>
-              <input
-                type="number"
-                className="input text-sm"
-                min={1}
-                max={projectionYears * 12}
-                placeholder="e.g. 12"
-                value={totalDuration === 0 ? '' : totalDuration}
-                onChange={e => setTotalDuration(Math.min(projectionYears * 12, Number(e.target.value) || 0))}
-                aria-label="Total duration months"
-              />
-            </div>
-          )}
-
-          {/* ── Step 3: Schedule ── */}
-          {someTypeScheduled && totalDuration > 0 && (
+          {/* ── Schedule ── */}
+          {(someTypeScheduled || someLeaseUpScheduled) && totalDuration > 0 && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
-                  Step 2 — Schedule
+                  Schedule
                 </p>
                 <div className="flex items-center gap-3">
                   <button

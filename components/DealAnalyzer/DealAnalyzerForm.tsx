@@ -621,6 +621,20 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
           ? acquisition.unitMix.map(e => e.leaseUpUnits ?? 0)
           : [0];
 
+        const renoScheduleTotals = unitsToRenovate.map((_, t) =>
+          (calcState?.scheduleByType?.[t] ?? []).reduce((s: number, n: number) => s + n, 0)
+        );
+        const luScheduleTotals = leaseUpUnitsArr.map((_, t) =>
+          (calcState?.leaseUpScheduleByType?.[t] ?? []).reduce((s: number, n: number) => s + n, 0)
+        );
+        const someReno = unitsToRenovate.some(u => u > 0);
+        const someLU = leaseUpUnitsArr.some(u => u > 0);
+        const calcScheduleIncomplete = preStabMethod === 'calculator' && (someReno || someLU) && !calcApplied && (
+          stabDuration === 0 ||
+          unitsToRenovate.some((u, t) => u > 0 && renoScheduleTotals[t] !== u) ||
+          leaseUpUnitsArr.some((u, t) => u > 0 && luScheduleTotals[t] !== u)
+        );
+
         const unitTypes = hasMfr
           ? acquisition.unitMix.map(e => ({
               label: `${e.beds}BR/${e.baths}BA`,
@@ -643,14 +657,15 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
           if (ov !== undefined) calcAppliedYears[y] = ov;
         }
 
-        // Pre-stab schedule rows — from yearOverrides (calc) or computed (manual)
+        // Pre-stab schedule rows — only years below stabilized rent
         const fmtRent = (n: number) => `$${Math.round(n).toLocaleString()}`;
-        const preStabRows: { year: number; rent: number; label: string }[] = [];
+        const stabilizedAnnual = proForma.grossRent.stabilized;
+        const preStabRows: { year: number; rent: number }[] = [];
         if (calcApplied) {
           Object.entries(proForma.yearOverrides ?? {})
-            .filter(([, ov]) => ov?.grossRentSystem && typeof ov?.grossRent === 'number')
+            .filter(([, ov]) => ov?.grossRentSystem && typeof ov?.grossRent === 'number' && ov.grossRent < stabilizedAnnual)
             .sort(([a], [b]) => Number(a) - Number(b))
-            .forEach(([yr, ov]) => preStabRows.push({ year: Number(yr), rent: ov!.grossRent!, label: '' }));
+            .forEach(([yr, ov]) => preStabRows.push({ year: Number(yr), rent: ov!.grossRent! }));
         } else if (hasPreStab && stabDuration > 0) {
           const totalPreStabMonthly = hasMfr
             ? acquisition.unitMix.reduce((s, e) => s + e.count * (e.preStabRent || 0), 0)
@@ -661,9 +676,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
           const totalYears = Math.ceil(stabDuration / 12);
           for (let y = 1; y <= totalYears; y++) {
             const preStabMonths = Math.min(12, stabDuration - (y - 1) * 12);
-            const targetMonths = 12 - preStabMonths;
-            const rent = totalPreStabMonthly * preStabMonths + totalTargetMonthly * targetMonths;
-            preStabRows.push({ year: y, rent, label: `${preStabMonths} pre-stab + ${targetMonths} at target` });
+            const rent = totalPreStabMonthly * preStabMonths + totalTargetMonthly * (12 - preStabMonths);
+            if (rent < stabilizedAnnual) preStabRows.push({ year: y, rent });
           }
         }
 
@@ -757,7 +771,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
               <div className={cardClass}>
                 <div className="px-4 py-4">
                   <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-3">
-                    Will any units be renovated to increase rent?
+                    Will any units be renovated or leased up?
                   </p>
                   <div className="grid grid-cols-2 gap-2">
                     {([
@@ -804,6 +818,20 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
               </div>
             )}
 
+            {/* ── 2b. No-reno rent gap notice ── */}
+            {isValueAdd === false && (
+              hasMfr
+                ? acquisition.unitMix.some(e => (e.inPlaceRent || 0) < (e.rentMonthly || 0))
+                : (acquisition.sfrInPlaceRent || 0) < (acquisition.sfrTargetRent || 0)
+            ) && (
+              <div className="px-4 py-3 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40 flex items-start gap-2">
+                <AlertTriangle size={14} className="text-amber-500 mt-0.5 shrink-0" />
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  Current rent is below target. Since no renovation or lease-up is planned, the Pro Forma will use target rent starting Year 1.
+                </p>
+              </div>
+            )}
+
             {/* ── 3. Value-add details ── */}
             {isValueAdd === true && (
               <>
@@ -817,7 +845,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                       <thead>
                         <tr className="border-b border-slate-100 dark:border-slate-700/60">
                           <th className="px-4 py-2.5 text-left text-xs font-medium text-slate-400">Unit Type</th>
-                          <th className="px-3 py-2.5 text-right text-xs font-medium text-slate-400">Target After Reno</th>
                           <th className="px-3 py-2.5 text-right text-xs font-medium text-slate-400">Units to Renovate</th>
                           <th className="px-3 py-2.5 text-right text-xs font-medium text-slate-400">Lease-up</th>
                         </tr>
@@ -827,19 +854,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                           <tr key={entry.id}>
                             <td className="px-4 py-2.5 text-xs font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">
                               {entry.beds}BR/{entry.baths}BA <span className="text-slate-400 font-normal">×{entry.count}</span>
-                            </td>
-                            <td className="px-2 py-2">
-                              <div className="relative">
-                                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">$</span>
-                                <input
-                                  type="number" min={0} placeholder="0"
-                                  className="input text-sm pl-5 text-right w-full"
-                                  value={(entry.rentMonthly || 0) === 0 ? '' : entry.rentMonthly}
-                                  onChange={e => updateAcquisition('unitMix', acquisition.unitMix.map(u =>
-                                    u.id === entry.id ? { ...u, rentMonthly: Number(e.target.value) } : u
-                                  ))}
-                                />
-                              </div>
                             </td>
                             <td className="px-2 py-2">
                               <input
@@ -875,7 +889,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     </table>
                     {isVisited && acquisition.unitMix.some(e =>
                       (e.inPlaceRent || 0) < (e.rentMonthly || 0) &&
-                      ((e.unitsToRenovate ?? 0) + (e.leaseUpUnits ?? 0)) < e.count
+                      (e.unitsToRenovate ?? 0) === 0 &&
+                      (e.leaseUpUnits ?? 0) === 0
                     ) && (
                       <div className="px-4 py-2.5 border-t border-amber-100 dark:border-amber-900/30 bg-amber-50 dark:bg-amber-900/10">
                         <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
@@ -923,20 +938,22 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">mo</span>
                       </div>
                     </div>
-                    <div>
-                      <label className="text-xs font-medium text-slate-500 dark:text-slate-400 block mb-1.5">
-                        Offline per unit
-                      </label>
-                      <div className="relative">
-                        <input
-                          type="number" min={0} max={24} step={0.25} placeholder="e.g. 1.5"
-                          className="input text-sm pr-10"
-                          value={offlinePerUnit === 0 ? '' : offlinePerUnit}
-                          onChange={e => setOfflinePerUnit(Math.min(24, Math.max(0, Number(e.target.value) || 0)))}
-                        />
-                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">mo</span>
+                    {someReno && (
+                      <div>
+                        <label className="text-xs font-medium text-slate-500 dark:text-slate-400 block mb-1.5">
+                          Offline per unit
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="number" min={0} max={24} step={0.25} placeholder="e.g. 1.5"
+                            className="input text-sm pr-10"
+                            value={offlinePerUnit === 0 ? '' : offlinePerUnit}
+                            onChange={e => setOfflinePerUnit(Math.min(24, Math.max(0, Number(e.target.value) || 0)))}
+                          />
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">mo</span>
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 </div>
 
@@ -1093,6 +1110,14 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                         </div>
                       )}
                     </div>
+                    {isVisited && !hasPreStab && (
+                      <div className="px-4 py-2.5 border-t border-amber-100 dark:border-amber-900/30 bg-amber-50 dark:bg-amber-900/10">
+                        <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                          <AlertTriangle size={12} />
+                          Pre-stab rent is required to generate the Pro Forma.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1103,21 +1128,36 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                       <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Pre-stab Rent Schedule</p>
                     </div>
                     <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
-                      {preStabRows.map(({ year, rent, label }) => (
-                        <div key={year} className="px-4 py-3 flex items-center justify-between">
-                          <div>
+                      {(() => {
+                        const totalUnits = hasMfr
+                          ? acquisition.unitMix.reduce((s, e) => s + e.count, 0)
+                          : 1;
+                        return preStabRows.map(({ year, rent }) => (
+                          <div key={year} className="px-4 py-3 flex items-center justify-between">
                             <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Year {year}</span>
-                            {label && <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{label}</p>}
+                            <div className="text-right">
+                              <p className="text-sm font-bold text-amber-600 dark:text-amber-400 tabular-nums">{fmtRent(rent)}/yr</p>
+                              <p className="text-xs text-slate-400 dark:text-slate-500 tabular-nums">
+                                {fmtRent(Math.round(rent / 12))}/mo · {fmtRent(Math.round(rent / 12 / totalUnits))}/unit
+                              </p>
+                            </div>
                           </div>
-                          <span className="text-sm font-bold text-amber-600 dark:text-amber-400 tabular-nums">
-                            {fmtRent(rent)}/yr
-                          </span>
-                        </div>
-                      ))}
+                        ));
+                      })()}
                     </div>
                   </div>
                 )}
               </>
+            )}
+
+            {/* ── 3g. Schedule incomplete notice ── */}
+            {isVisited && calcScheduleIncomplete && (
+              <div className="px-4 py-3 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40 flex items-start gap-2">
+                <AlertTriangle size={14} className="text-amber-500 mt-0.5 shrink-0" />
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  Complete the schedule for all renovation and lease-up units — it's needed to calculate rent for the Pro Forma.
+                </p>
+              </div>
             )}
 
             {/* ── 4. Pro Forma ── */}
