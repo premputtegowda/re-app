@@ -192,6 +192,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const [errors, setErrors] = useState<string[]>([]);
   const [errorStep, setErrorStep] = useState<number | null>(null);
   const [calcOpen, setCalcOpen] = useState(false);
+  const [showProForma, setShowProForma] = useState(false);
   const [calcState, setCalcState] = useState<CalcPersistedState | undefined>(initialDeal?.calcState);
 
   // Form data
@@ -339,7 +340,13 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
       setOperations((prev) => ({ ...prev, grossRentMonthly: totalTarget }));
       setProForma((prev) => {
-        const hasCalcOverrides = Object.values(prev.yearOverrides ?? {}).some(ov => ov?.grossRentSystem === true);
+        const preStabAnnual = totalPreStab * 12;
+        const targetAnnual = allHaveTarget ? totalTarget * 12 : 0;
+        // Only preserve calculator overrides when pre-stab is blank — prevents clearing
+        // the calculator's Year 1 when other fields change. When pre-stab is entered,
+        // always apply it so the ProForma stays in sync with the field.
+        const preserveCalcOverrides = preStabAnnual === 0 &&
+          Object.values(prev.yearOverrides ?? {}).some(ov => ov?.grossRentSystem === true);
         return {
           ...prev,
           grossRent: {
@@ -347,9 +354,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
             ...(allHaveTarget  ? { stabilized: totalTarget * 12 } : { stabilized: 0 }),
             ...(allHaveInPlace ? { t12: totalInPlace * 12 }       : { t12: 0 }),
           },
-          yearOverrides: hasCalcOverrides
+          yearOverrides: preserveCalcOverrides
             ? prev.yearOverrides
-            : applyRentOverrides(prev, totalPreStab * 12, allHaveTarget ? totalTarget * 12 : 0),
+            : applyRentOverrides(prev, preStabAnnual, targetAnnual),
         };
       });
     } else if (acquisition.propertyType === 'sfr') {
@@ -358,7 +365,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       const preStab = acquisition.sfrPreStabRent || 0;
       if (target > 0) setOperations((prev) => ({ ...prev, grossRentMonthly: target }));
       setProForma((prev) => {
-        const hasCalcOverrides = Object.values(prev.yearOverrides ?? {}).some(ov => ov?.grossRentSystem === true);
+        const preStabAnnual = preStab * 12;
+        const preserveCalcOverrides = preStabAnnual === 0 &&
+          Object.values(prev.yearOverrides ?? {}).some(ov => ov?.grossRentSystem === true);
         return {
           ...prev,
           grossRent: {
@@ -366,9 +375,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
             stabilized: target  > 0 ? target  * 12 : prev.grossRent.stabilized,
             t12:        inPlace > 0 ? inPlace * 12 : prev.grossRent.t12,
           },
-          yearOverrides: hasCalcOverrides
+          yearOverrides: preserveCalcOverrides
             ? prev.yearOverrides
-            : applyRentOverrides(prev, preStab * 12, target * 12),
+            : applyRentOverrides(prev, preStabAnnual, target * 12),
         };
       });
     }
@@ -565,8 +574,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       case 3: {
         const hasMfr = acquisition.propertyType === 'mfr' && acquisition.unitMix.length > 0;
 
-        const mfrRentFields = ['inPlaceRent', 'rentMonthly'] as const;
-        const mfrRentLabels = { inPlaceRent: 'In-Place', rentMonthly: 'Target' };
+        const mfrRentFields = ['inPlaceRent', 'rentMonthly', 'preStabRent'] as const;
+        const mfrRentLabels = { inPlaceRent: 'In-Place', rentMonthly: 'Target', preStabRent: 'Pre-Stab' };
 
         const rentSchedule = hasMfr ? (
           <div className="space-y-2">
@@ -589,14 +598,16 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                   <p className="text-xs font-semibold text-slate-600 dark:text-slate-400">
                     {entry.beds}BR/{entry.baths}BA × {entry.count}
                   </p>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     {mfrRentFields.map((field) => {
-                      const warnCell = field === 'rentMonthly' && isVisited && !(entry[field] || 0);
+                      const warnCell = isVisited && !(entry[field] || 0) && (
+                        field === 'rentMonthly' || (field === 'preStabRent' && (entry.rentMonthly || 0) > 0)
+                      );
                       return (
                         <div key={field}>
                           <label className="text-[10px] font-medium text-slate-400 dark:text-slate-500 mb-0.5 flex items-center gap-0.5">
                             {mfrRentLabels[field]}
-                            {field === 'rentMonthly' && isVisited && !(entry[field] || 0) && (
+                            {warnCell && (
                               <AlertTriangle size={10} className="text-amber-500 shrink-0" />
                             )}
                           </label>
@@ -625,11 +636,11 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 const fmt = (n: number) => n === 0 ? '—' : `$${Math.round(n).toLocaleString()}`;
                 return (
                   <div className="px-3 py-2 bg-slate-50 dark:bg-slate-700/30 border-t-2 border-slate-200 dark:border-slate-600 space-y-1.5">
-                    <div className="grid grid-cols-2 gap-2">
-                      {[avgInPlace, avgTarget].map((val, i) => (
+                    <div className="grid grid-cols-3 gap-2">
+                      {[avgInPlace, avgTarget, avgPreStab].map((val, i) => (
                         <div key={i}>
-                          <p className="text-[10px] font-medium text-slate-400 mb-0.5">{['In-Place avg', 'Target avg'][i]}</p>
-                          <p className="text-xs font-semibold tabular-nums text-slate-700 dark:text-slate-300">{fmt(val)}</p>
+                          <p className="text-[10px] font-medium text-slate-400 mb-0.5">{['In-Place avg', 'Target avg', 'Pre-Stab avg'][i]}</p>
+                          <p className={`text-xs font-semibold tabular-nums ${i === 2 ? 'text-blue-600 dark:text-blue-400' : 'text-slate-700 dark:text-slate-300'}`}>{fmt(val)}</p>
                         </div>
                       ))}
                     </div>
@@ -663,7 +674,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                         {entry.beds}BR/{entry.baths}BA × {entry.count}
                       </td>
                       {mfrRentFields.map((field) => {
-                        const warnCell = field === 'rentMonthly' && isVisited && !(entry[field] || 0);
+                        const warnCell = isVisited && !(entry[field] || 0) && (
+                          field === 'rentMonthly' || (field === 'preStabRent' && (entry.rentMonthly || 0) > 0)
+                        );
                         return (
                           <td key={field} className="px-2 py-1.5">
                             <input
@@ -679,9 +692,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                           </td>
                         );
                       })}
-                      <td className="px-3 py-2 text-right text-xs tabular-nums text-blue-600 dark:text-blue-400 font-medium">
-                        {(entry.preStabRent || 0) > 0 ? `$${Math.round(entry.preStabRent || 0).toLocaleString()}` : '—'}
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -709,21 +719,25 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         ) : (
           <div className="space-y-2">
             <p className="label">Rent Schedule ($/mo)</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {([
-                { field: 'sfrInPlaceRent', label: 'In-Place' },
-                { field: 'sfrTargetRent',  label: 'Target'   },
+                { field: 'sfrInPlaceRent',  label: 'In-Place' },
+                { field: 'sfrTargetRent',   label: 'Target'   },
+                { field: 'sfrPreStabRent',  label: 'Pre-Stab' },
               ] as const).map(({ field, label }) => {
-                const warnTarget = field === 'sfrTargetRent' && isVisited && !acquisition.sfrTargetRent;
+                const warnField = isVisited && !acquisition[field] && (
+                  field === 'sfrTargetRent' ||
+                  (field === 'sfrPreStabRent' && !!acquisition.sfrTargetRent)
+                );
                 return (
                   <div key={field}>
                     <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 flex items-center gap-1">
                       {label}
-                      {warnTarget && <AlertTriangle size={12} className="text-amber-500 shrink-0" data-testid="sfr-target-rent-warning" />}
+                      {warnField && <AlertTriangle size={12} className="text-amber-500 shrink-0" data-testid={field === 'sfrTargetRent' ? 'sfr-target-rent-warning' : 'sfr-prestab-rent-warning'} />}
                     </label>
                     <input
                       type="number"
-                      className={`input text-sm ${warnTarget ? 'border-amber-300 focus:ring-amber-400' : ''}`}
+                      className={`input text-sm ${warnField ? 'border-amber-300 focus:ring-amber-400' : ''}`}
                       min={0}
                       placeholder="0"
                       value={(acquisition[field] || 0) === 0 ? '' : acquisition[field]}
@@ -823,7 +837,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
               />
               </div>
             </div>
-            {proForma.grossRent.stabilized > 0 && Object.values(proForma.yearOverrides ?? {}).some(ov => ov?.grossRentSystem) ? (
+            {proForma.grossRent.stabilized > 0 || showProForma ? (
               <ProFormaGrid
                 data={proForma}
                 onChange={setProForma}
@@ -831,8 +845,17 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 showWarnings={isVisited}
               />
             ) : (
-              <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-700 p-6 text-center text-sm text-slate-400 dark:text-slate-500">
-                Use the calculator above to set rent — the Pro Forma will appear here.
+              <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-700 px-5 py-6 text-center space-y-2">
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  To underwrite the deal accurately, enter your In-Place rent above, then use the calculator to set pre-stabilization rent — the Pro Forma will appear here.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowProForma(true)}
+                  className="text-xs text-primary-600 dark:text-primary-400 hover:underline font-medium"
+                >
+                  Or enter rent information manually — Show Pro Forma
+                </button>
               </div>
             )}
           </>
