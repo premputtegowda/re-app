@@ -238,8 +238,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   });
   const [preStabMethod, setPreStabMethod] = useState<'calculator' | 'manual' | null>(() => {
     // Prefer explicitly persisted value
-    if (initialDeal?.calcState?.preStabMethod !== undefined) return initialDeal.calcState.preStabMethod ?? null;
-    if (!initialDeal) return null;
+    if (initialDeal?.calcState?.preStabMethod !== undefined) return initialDeal.calcState.preStabMethod ?? 'calculator';
+    if (!initialDeal) return 'calculator';
     // Fallback: infer from data for deals saved before this field was added
     const isMfr = initialDeal.acquisition.propertyType === 'mfr';
     const hasPreStab = isMfr
@@ -248,13 +248,11 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     const hasCalcOverrides = Object.values(initialDeal.proForma.yearOverrides ?? {}).some(ov => ov?.grossRentSystem);
     if (hasCalcOverrides) return 'calculator';
     if (hasPreStab) return 'manual';
-    return null;
+    return 'calculator';
   });
   const [stabDuration, setStabDuration] = useState(() => initialDeal?.calcState?.totalDuration ?? 12);
   const [offlinePerUnit, setOfflinePerUnit] = useState(() => initialDeal?.calcState?.perUnitMonths?.[0] || 1);
-  const [calcCollapsed, setCalcCollapsed] = useState(() =>
-    Object.values(initialDeal?.proForma?.yearOverrides ?? {}).some(ov => ov?.grossRentSystem) ?? false
-  );
+  const [calcCollapsed, setCalcCollapsed] = useState(true);
 
   // Accordion open states for Operations step
   const [rentOpen, setRentOpen]         = useState(true);
@@ -1071,7 +1069,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     <div className={`grid gap-4 ${someReno ? 'grid-cols-2' : 'grid-cols-1'}`}>
                       <div>
                         <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1">
-                          Duration
+                          Renovation period
                           {isVisited && stabDuration === 0 && <AlertTriangle size={12} className="text-amber-500" />}
                         </label>
                         <div className="relative">
@@ -1086,10 +1084,10 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                       </div>
                       {someReno && (
                         <div>
-                          <label className="text-xs font-medium text-slate-500 dark:text-slate-400 block mb-1.5">Offline per unit</label>
+                          <label className="text-xs font-medium text-slate-500 dark:text-slate-400 block mb-1.5">Reno time per unit</label>
                           <div className="relative">
                             <input
-                              type="number" min={0} max={24} step={0.25} placeholder="e.g. 1.5"
+                              type="number" min={0} max={24} step={0.25} placeholder="e.g. 1"
                               className="input text-sm pr-10 w-full"
                               value={offlinePerUnit === 0 ? '' : offlinePerUnit}
                               onChange={e => setOfflinePerUnit(Math.min(24, Math.max(0, Number(e.target.value) || 0)))}
@@ -1100,68 +1098,44 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                       )}
                     </div>
 
-                    {/* Method toggle */}
-                    <div>
-                      <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2">Pre-stab rent</p>
-                      <div className="flex rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden text-sm font-medium">
-                        {([
-                          { val: 'calculator' as const, label: 'Build a schedule' },
-                          { val: 'manual'     as const, label: 'Enter manually'   },
-                        ]).map((opt, i) => (
-                          <button
-                            key={opt.val}
-                            type="button"
-                            onClick={() => {
-                              setPreStabMethod(opt.val);
-                              if (opt.val === 'calculator') {
-                                // Switching to calculator — clear manual pre-stab values so they
-                                // don't bleed into the ProForma via the rent sync useEffect.
-                                if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map(u => ({ ...u, preStabRent: 0 })));
-                                else updateAcquisition('sfrPreStabRent', 0);
-                              } else {
-                                // Switching to manual — clear calculator year overrides so the
-                                // manual values take effect cleanly.
-                                setProForma(prev => {
-                                  const cleaned: typeof prev.yearOverrides = {};
-                                  for (const [yr, ov] of Object.entries(prev.yearOverrides ?? {})) {
-                                    if (ov && !ov.grossRentSystem) cleaned[Number(yr)] = ov;
-                                  }
-                                  return { ...prev, yearOverrides: cleaned };
-                                });
-                              }
-                            }}
-                            className={`flex-1 py-2.5 transition-colors ${i > 0 ? 'border-l border-slate-200 dark:border-slate-700' : ''} ${
-                              preStabMethod === opt.val
-                                ? 'bg-primary-600 text-white'
-                                : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/40'
-                            }`}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Calculator */}
-                    {preStabMethod === 'calculator' && (
-                      <>
-                        {calcCollapsed ? (
-                          <button
-                            type="button"
-                            onClick={() => setCalcCollapsed(false)}
-                            className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/30 hover:bg-slate-100 dark:hover:bg-slate-700/40 transition-colors -mx-4"
-                            style={{ width: 'calc(100% + 2rem)' }}
-                          >
-                            <div className="flex items-center gap-2">
-                              <Zap size={13} className={calcApplied ? 'text-blue-500' : 'text-slate-400'} />
-                              <span className="text-sm font-medium text-slate-600 dark:text-slate-300">Rent Calculator</span>
-                              {calcApplied && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400">Applied</span>}
-                            </div>
-                            <ChevronRight size={14} className="text-slate-400" />
-                          </button>
-                        ) : (
-                        <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden -mx-4">
-                          <RehabRentCalculator
+                    {/* Rent schedule — collapsed summary by default, expand to edit */}
+                    {calcCollapsed ? (
+                      <button
+                        type="button"
+                        onClick={() => { setCalcCollapsed(false); setPreStabMethod('calculator'); }}
+                        className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border transition-colors ${
+                          calcApplied
+                            ? 'border-blue-200 dark:border-blue-800/60 bg-blue-50/40 dark:bg-blue-900/10 hover:bg-blue-50 dark:hover:bg-blue-900/20'
+                            : calcScheduleIncomplete
+                              ? 'border-amber-200 dark:border-amber-800/40 bg-amber-50/40 dark:bg-amber-900/10 hover:bg-amber-50 dark:hover:bg-amber-900/20'
+                              : 'border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/30 hover:bg-slate-100 dark:hover:bg-slate-700/40'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Zap size={13} className={calcApplied ? 'text-blue-500' : calcScheduleIncomplete ? 'text-amber-500' : 'text-slate-400'} />
+                          <span className="text-sm font-medium text-slate-600 dark:text-slate-300 truncate">
+                            {calcApplied
+                              ? (() => {
+                                  const parts = [];
+                                  if (totalReno > 0) parts.push(`${totalReno} reno`);
+                                  if (totalLU > 0) parts.push(`${totalLU} lease-up`);
+                                  return `${parts.join(' · ')} · ${stabDuration} mo · rent auto-calculated`;
+                                })()
+                              : stabDuration > 0
+                                ? 'Rent schedule auto-filled — edit to customise'
+                                : 'Set renovation period above to auto-calculate rent'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0 ml-2">
+                          {calcApplied && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400">Applied</span>}
+                          {calcScheduleIncomplete && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400">Incomplete</span>}
+                          <span className="text-xs text-slate-400">Edit</span>
+                          <ChevronRight size={14} className="text-slate-400" />
+                        </div>
+                      </button>
+                    ) : (
+                      <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden -mx-4">
+                        <RehabRentCalculator
                             hideHeader={false}
                             unitTypes={unitTypes}
                             projectionYears={acquisition.projectionYears}
@@ -1215,58 +1189,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                             }}
                           />
                         </div>
-                        )}
-                      </>
-                    )}
-
-                    {/* Manual pre-stab inputs */}
-                    {preStabMethod === 'manual' && (
-                      <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-                        <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-700/40 border-b border-slate-100 dark:border-slate-700/60">
-                          <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Pre-stab rent — $/mo per unit</p>
-                        </div>
-                        <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
-                          {hasMfr ? acquisition.unitMix.map(entry => (
-                            <div key={entry.id} className="px-4 py-3 flex items-center justify-between gap-3">
-                              <span className="text-sm font-medium text-slate-600 dark:text-slate-300 shrink-0">
-                                {entry.beds}BR/{entry.baths}BA <span className="text-slate-400 font-normal text-xs">×{entry.count}</span>
-                              </span>
-                              <div className="relative w-32">
-                                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">$</span>
-                                <input
-                                  type="number" min={0} placeholder="0"
-                                  className="input text-sm pl-6 text-right w-full"
-                                  value={(entry.preStabRent || 0) === 0 ? '' : entry.preStabRent}
-                                  onChange={e => updateAcquisition('unitMix', acquisition.unitMix.map(u =>
-                                    u.id === entry.id ? { ...u, preStabRent: Number(e.target.value) } : u
-                                  ))}
-                                />
-                              </div>
-                            </div>
-                          )) : (
-                            <div className="px-4 py-3 flex items-center justify-between gap-3">
-                              <span className="text-sm font-medium text-slate-600 dark:text-slate-300">SFR</span>
-                              <div className="relative w-32">
-                                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">$</span>
-                                <input
-                                  type="number" min={0} placeholder="0"
-                                  className="input text-sm pl-6 text-right w-full"
-                                  value={(acquisition.sfrPreStabRent || 0) === 0 ? '' : acquisition.sfrPreStabRent}
-                                  onChange={e => updateAcquisition('sfrPreStabRent', Number(e.target.value))}
-                                />
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                        {isVisited && !hasPreStab && (
-                          <div className="px-4 py-2.5 border-t border-amber-100 dark:border-amber-900/30 bg-amber-50 dark:bg-amber-900/10">
-                            <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
-                              <AlertTriangle size={12} />
-                              Pre-stab rent is required to generate the Pro Forma.
-                            </p>
-                          </div>
-                        )}
-                      </div>
                     )}
 
                     {/* Schedule incomplete notice */}
@@ -1279,27 +1201,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                       </div>
                     )}
 
-                    {/* Pre-stab Rent Schedule */}
-                    {preStabRows.length > 0 && preStabMethod === 'manual' && (
-                      <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-                        <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-700/40 border-b border-slate-100 dark:border-slate-700/60">
-                          <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Pre-stab rent schedule</p>
-                        </div>
-                        <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
-                          {preStabRows.map(({ year, rent }) => (
-                            <div key={year} className="px-4 py-3 flex items-center justify-between">
-                              <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Year {year}</span>
-                              <div className="text-right">
-                                <p className="text-sm font-bold text-amber-600 dark:text-amber-400 tabular-nums">{fmtRent(rent)}/yr</p>
-                                <p className="text-xs text-slate-400 dark:text-slate-500 tabular-nums">
-                                  {fmtRent(Math.round(rent / 12))}/mo · {fmtRent(Math.round(rent / 12 / totalUnits))}/unit
-                                </p>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
 
                 </div>
               </div>
