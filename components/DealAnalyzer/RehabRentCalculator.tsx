@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { Zap, X, Wand2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Zap, X, Wand2, ChevronDown, ChevronUp, Check } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -229,7 +229,11 @@ export function RehabRentCalculator({
   const [leaseUpToStabilize, setLeaseUpToStabilize] = useState<number[]>(() => initialState?.leaseUpToStabilize ?? unitTypes.map(() => 0));
   const [leaseUpScheduleByType, setLeaseUpScheduleByType] = useState<number[][]>(() => initialState?.leaseUpScheduleByType ?? unitTypes.map(() => []));
   const [openYear, setOpenYear]                 = useState<number | null>(null);
-  const [autoFilled, setAutoFilled]             = useState(false);
+  // Auto-fill by default unless the user has previously saved a manual schedule
+  const [autoFilled, setAutoFilled] = useState(() =>
+    !initialState?.scheduleByType?.some(s => s.some(n => n > 0)) &&
+    !initialState?.leaseUpScheduleByType?.some(s => s.some(n => n > 0))
+  );
 
   // ── Manual mode state ──
   const [manualDuration, setManualDuration]         = useState(() => initialState?.manualDuration ?? 0);
@@ -238,6 +242,10 @@ export function RehabRentCalculator({
   useEffect(() => {
     onStateChange?.({ mode, totalDuration, unitsToStabilize, perUnitMonths, scheduleByType, manualDuration, manualPreStabRents, localRents, leaseUpToStabilize, leaseUpScheduleByType });
   }, [mode, totalDuration, unitsToStabilize, perUnitMonths, scheduleByType, manualDuration, manualPreStabRents, localRents, leaseUpToStabilize, leaseUpScheduleByType]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Skip setAutoFilled(true) on the very first render so a saved manual schedule is preserved
+  const hasMountedRef = useRef(false);
+  useEffect(() => { hasMountedRef.current = true; }, []);
 
   const prevUnitTypesLengthRef = useRef(unitTypes.length);
   useEffect(() => {
@@ -257,21 +265,27 @@ export function RehabRentCalculator({
   useEffect(() => {
     if (externalDuration === undefined) return;
     setTotalDuration(externalDuration);
+    if (hasMountedRef.current) setAutoFilled(true);
   }, [externalDuration]);
 
   useEffect(() => {
     if (externalOffline === undefined) return;
     setPerUnitMonths(unitTypes.map(() => externalOffline));
+    if (hasMountedRef.current) setAutoFilled(true);
   }, [externalOffline, unitTypes.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!externalUnitsToStabilize) return;
     setUnitsToStabilize(externalUnitsToStabilize.map((n, t) => Math.min(n, unitTypes[t]?.count ?? n)));
+    // If user manually edited the schedule, preserve it and let the mismatch warning guide them.
+    // Only re-trigger auto-fill if the schedule was already in auto-fill mode.
+    if (hasMountedRef.current) setAutoFilled(prev => prev ? true : false);
   }, [externalUnitsToStabilize]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!externalLeaseUpToStabilize) return;
     setLeaseUpToStabilize(externalLeaseUpToStabilize.map((n, t) => Math.min(n, unitTypes[t]?.count ?? n)));
+    if (hasMountedRef.current) setAutoFilled(prev => prev ? true : false);
   }, [externalLeaseUpToStabilize]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync rent changes from the form back into localRents (bidirectional sync).
@@ -420,6 +434,32 @@ export function RehabRentCalculator({
 
   const yearGroups = useMemo(() => groupByYear(totalDuration), [totalDuration]);
 
+  // Auto-apply: whenever the simulation result changes, push to ProForma (or clear if invalid)
+  const lastAppliedKeyRef = useRef('');
+  useEffect(() => {
+    if (!scheduleValid || !result) {
+      // Schedule was cleared or became invalid — revert ProForma if we had previously applied
+      if (lastAppliedKeyRef.current !== '') {
+        lastAppliedKeyRef.current = '';
+        onClear();
+      }
+      return;
+    }
+    const overrides: Record<number, number> = {};
+    transitionYears.forEach(y => { overrides[y] = result.yearlyRents[y - 1]; });
+    const stabYear = Math.ceil(result.stabilizationMonth / 12);
+    const firstFullYear = stabYear + 1;
+    if (firstFullYear <= projectionYears) {
+      overrides[firstFullYear] = totalTargetAnnual * Math.pow(1 + grossRentGrowthPct / 100, stabYear);
+    }
+    const key = JSON.stringify(overrides);
+    if (key === lastAppliedKeyRef.current) return;
+    lastAppliedKeyRef.current = key;
+    onApply(overrides);
+    onApplyRents?.(localRents);
+    if (onApplyPreStab) onApplyPreStab(blendedMonthlyByType);
+  }); // eslint-disable-line react-hooks/exhaustive-deps
+
   const clearCalc = () => {
     setTotalDuration(0);
     setUnitsToStabilize(unitTypes.map(() => 0));
@@ -514,7 +554,6 @@ export function RehabRentCalculator({
                       setScheduleByType(unitTypes.map(() => Array(totalDuration).fill(0)));
                       setLeaseUpScheduleByType(unitTypes.map(() => Array(totalDuration).fill(0)));
                       setAutoFilled(false);
-                      onClear();
                     }}
                     className="flex items-center gap-1 text-xs text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 font-medium touch-manipulation"
                     title="Clear schedule"
@@ -633,15 +672,28 @@ export function RehabRentCalculator({
                 );
               })}
 
-              {!scheduleValid && (someTypeScheduled || someLeaseUpScheduled) && totalDuration > 0 &&
-                unitTypes.some((_, t) =>
-                  (unitsToStabilize[t] > 0 && scheduleTotals[t] !== unitsToStabilize[t]) ||
-                  (leaseUpToStabilize[t] > 0 && leaseUpScheduleTotals[t] !== leaseUpToStabilize[t])
-                ) && (
-                <p className="text-[11px] text-amber-500">
-                  Schedule totals must match unit targets before applying.
-                </p>
-              )}
+              {totalDuration > 0 && !scheduleValid && (someTypeScheduled || someLeaseUpScheduled) && (() => {
+                const mismatches: string[] = [];
+                unitTypes.forEach((ut, t) => {
+                  if (unitsToStabilize[t] > 0 && scheduleTotals[t] !== unitsToStabilize[t]) {
+                    mismatches.push(`${ut.label}: ${scheduleTotals[t]} of ${unitsToStabilize[t]} renovation units scheduled`);
+                  }
+                  if (leaseUpToStabilize[t] > 0 && leaseUpScheduleTotals[t] !== leaseUpToStabilize[t]) {
+                    mismatches.push(`${ut.label}: ${leaseUpScheduleTotals[t]} of ${leaseUpToStabilize[t]} lease-up units scheduled`);
+                  }
+                });
+                if (mismatches.length === 0) return null;
+                return (
+                  <div className="rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40 px-3 py-2 space-y-1">
+                    <p className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">
+                      Schedule doesn&apos;t match your plan:
+                    </p>
+                    {mismatches.map((m, i) => (
+                      <p key={i} className="text-[11px] text-amber-600 dark:text-amber-400">• {m}</p>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -740,30 +792,13 @@ export function RehabRentCalculator({
             </div>
           )}
 
-          {/* ── Actions ── */}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={!scheduleValid || !result}
-              onClick={() => {
-                if (!result) return;
-                const overrides: Record<number, number> = {};
-                transitionYears.forEach(y => { overrides[y] = result.yearlyRents[y - 1]; });
-                const stabYear = Math.ceil(result.stabilizationMonth / 12);
-                const firstFullYear = stabYear + 1;
-                if (firstFullYear <= projectionYears) {
-                  overrides[firstFullYear] = totalTargetAnnual * Math.pow(1 + grossRentGrowthPct / 100, stabYear);
-                }
-                onApply(overrides);
-                onApplyRents?.(localRents);
-                if (onApplyPreStab) onApplyPreStab(blendedMonthlyByType);
-                setOpen(false);
-              }}
-              className="flex-1 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-40 text-white text-sm font-medium transition-colors"
-            >
-              Apply to Pro Forma
-            </button>
-          </div>
+          {/* Auto-applied indicator */}
+          {scheduleValid && result && (
+            <div className="flex items-center gap-1.5 px-1 py-1">
+              <Check size={13} className="text-emerald-500 shrink-0" />
+              <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">Pro Forma updated</span>
+            </div>
+          )}
 
         </div>
       )}

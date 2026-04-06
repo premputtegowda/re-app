@@ -46,6 +46,37 @@ const STEP_ICONS: Record<number, React.ReactNode> = {
   4: <TrendingUp size={20} />,
 };
 
+// ── AccordionHeader ────────────────────────────────────────────────────────────
+// Defined at module level so React never sees a new component type between renders.
+
+function AccordionHeader({ num, title, summary, isOpen, onToggle, isComplete }: {
+  num: number; title: string; summary: string;
+  isOpen: boolean; onToggle: () => void; isComplete: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="w-full flex items-center gap-3 px-4 py-3.5 text-left touch-manipulation"
+    >
+      <span className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
+        isComplete
+          ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400'
+          : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+      }`}>
+        {isComplete ? <Check size={12} /> : <span className="text-xs font-bold">{num}</span>}
+      </span>
+      <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex-1">{title}</span>
+      {!isOpen && summary && (
+        <span className="text-xs text-slate-400 dark:text-slate-500 mr-1 truncate max-w-[150px]">{summary}</span>
+      )}
+      {isOpen
+        ? <ChevronUp size={16} className="text-slate-400 shrink-0" />
+        : <ChevronRight size={16} className="text-slate-400 shrink-0" />}
+    </button>
+  );
+}
+
 // ── Defaults ───────────────────────────────────────────────────────────────────
 
 const DEFAULT_ACQUISITION: CoCAcquisition = {
@@ -219,8 +250,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     if (hasPreStab) return 'manual';
     return null;
   });
-  const [stabDuration, setStabDuration] = useState(() => initialDeal?.calcState?.totalDuration ?? 0);
-  const [offlinePerUnit, setOfflinePerUnit] = useState(() => initialDeal?.calcState?.perUnitMonths?.[0] ?? 0);
+  const [stabDuration, setStabDuration] = useState(() => initialDeal?.calcState?.totalDuration ?? 12);
+  const [offlinePerUnit, setOfflinePerUnit] = useState(() => initialDeal?.calcState?.perUnitMonths?.[0] || 1);
   const [calcCollapsed, setCalcCollapsed] = useState(() =>
     Object.values(initialDeal?.proForma?.yearOverrides ?? {}).some(ov => ov?.grossRentSystem) ?? false
   );
@@ -476,6 +507,24 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     }, 1000);
     return () => { if (recalcTimer.current) clearTimeout(recalcTimer.current); };
   }, [acquisition, operations, proForma, refinance]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Stable arrays for calculator props (must be memoized — new refs trigger external effects) ──
+
+  const unitsToRenovateMemo = React.useMemo(
+    () => acquisition.propertyType === 'mfr' && acquisition.unitMix.length > 0
+      ? acquisition.unitMix.map(e => e.unitsToRenovate ?? 0)
+      : [1],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [acquisition.propertyType, acquisition.unitMix.map(e => e.unitsToRenovate ?? 0).join(',')]
+  );
+
+  const leaseUpUnitsArrMemo = React.useMemo(
+    () => acquisition.propertyType === 'mfr' && acquisition.unitMix.length > 0
+      ? acquisition.unitMix.map(e => e.leaseUpUnits ?? 0)
+      : [0],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [acquisition.propertyType, acquisition.unitMix.map(e => e.leaseUpUnits ?? 0).join(',')]
+  );
 
   // ── Field updaters ──
 
@@ -748,32 +797,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
             : `${stabDuration} mo · Manual`
           : '';
 
-        // ── Accordion header renderer ──
-        const AccordionHeader = ({
-          num, title, summary, isOpen, onToggle, isComplete,
-        }: { num: number; title: string; summary: string; isOpen: boolean; onToggle: () => void; isComplete: boolean }) => (
-          <button
-            type="button"
-            onClick={onToggle}
-            className="w-full flex items-center gap-3 px-4 py-3.5 text-left touch-manipulation"
-          >
-            <span className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
-              isComplete
-                ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400'
-                : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
-            }`}>
-              {isComplete ? <Check size={12} /> : <span className="text-xs font-bold">{num}</span>}
-            </span>
-            <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex-1">{title}</span>
-            {!isOpen && summary && (
-              <span className="text-xs text-slate-400 dark:text-slate-500 mr-1 truncate max-w-[150px]">{summary}</span>
-            )}
-            {isOpen
-              ? <ChevronUp size={16} className="text-slate-400 shrink-0" />
-              : <ChevronRight size={16} className="text-slate-400 shrink-0" />}
-          </button>
-        );
-
         return (
           <div className="space-y-3">
 
@@ -823,6 +846,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                                         updateAcquisition('unitMix', acquisition.unitMix.map(u =>
                                           u.id === entry.id ? { ...u, [field]: Number(e.target.value) } : u
                                         ));
+                                      }}
+                                      onBlur={e => {
+                                        // Auto-advance to next section after user finishes typing target rent
                                         if (field === 'rentMonthly' && Number(e.target.value) > 0) {
                                           setRentOpen(false);
                                           setValueAddOpen(true);
@@ -858,6 +884,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                                 value={(acquisition[field] || 0) === 0 ? '' : acquisition[field]}
                                 onChange={e => {
                                   updateAcquisition(field, Number(e.target.value));
+                                }}
+                                onBlur={e => {
                                   if (field === 'sfrTargetRent' && Number(e.target.value) > 0) {
                                     setRentOpen(false);
                                     setValueAddOpen(true);
@@ -1037,17 +1065,19 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                   isOpen={stabOpen} onToggle={() => setStabOpen(o => !o)}
                   isComplete={stepComplete}
                 />
-                {stabOpen && (
-                  <div className="border-t border-slate-100 dark:border-slate-700/60 space-y-4 px-4 py-4">
+                <div className={`border-t border-slate-100 dark:border-slate-700/60 space-y-4 px-4 py-4 ${stabOpen ? '' : 'hidden'}`}>
 
                     {/* Timeline */}
                     <div className={`grid gap-4 ${someReno ? 'grid-cols-2' : 'grid-cols-1'}`}>
                       <div>
-                        <label className="text-xs font-medium text-slate-500 dark:text-slate-400 block mb-1.5">Duration</label>
+                        <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1">
+                          Duration
+                          {isVisited && stabDuration === 0 && <AlertTriangle size={12} className="text-amber-500" />}
+                        </label>
                         <div className="relative">
                           <input
                             type="number" min={1} max={acquisition.projectionYears * 12} placeholder="e.g. 12"
-                            className="input text-sm pr-10 w-full"
+                            className={`input text-sm pr-10 w-full ${isVisited && stabDuration === 0 ? 'border-amber-300 focus:ring-amber-400' : ''}`}
                             value={stabDuration === 0 ? '' : stabDuration}
                             onChange={e => setStabDuration(Math.min(acquisition.projectionYears * 12, Math.max(0, Number(e.target.value) || 0)))}
                           />
@@ -1114,19 +1144,22 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
                     {/* Calculator */}
                     {preStabMethod === 'calculator' && (
-                      calcCollapsed ? (
-                        <button
-                          type="button"
-                          onClick={() => setCalcCollapsed(false)}
-                          className="w-full flex items-center justify-between px-4 py-3 rounded-xl border border-emerald-200 dark:border-emerald-800/40 bg-emerald-50 dark:bg-emerald-900/10"
-                        >
-                          <span className="flex items-center gap-2 text-sm font-medium text-emerald-700 dark:text-emerald-300">
-                            <Check size={15} />
-                            Schedule applied
-                          </span>
-                          <span className="text-xs text-slate-400">tap to edit</span>
-                        </button>
-                      ) : (
+                      <>
+                        {calcCollapsed ? (
+                          <button
+                            type="button"
+                            onClick={() => setCalcCollapsed(false)}
+                            className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/30 hover:bg-slate-100 dark:hover:bg-slate-700/40 transition-colors -mx-4"
+                            style={{ width: 'calc(100% + 2rem)' }}
+                          >
+                            <div className="flex items-center gap-2">
+                              <Zap size={13} className={calcApplied ? 'text-blue-500' : 'text-slate-400'} />
+                              <span className="text-sm font-medium text-slate-600 dark:text-slate-300">Rent Calculator</span>
+                              {calcApplied && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400">Applied</span>}
+                            </div>
+                            <ChevronRight size={14} className="text-slate-400" />
+                          </button>
+                        ) : (
                         <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden -mx-4">
                           <RehabRentCalculator
                             hideHeader={false}
@@ -1136,8 +1169,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                             grossRentGrowthPct={proForma.grossRent.growthPct}
                             externalDuration={stabDuration}
                             externalOffline={offlinePerUnit}
-                            externalUnitsToStabilize={unitsToRenovate}
-                            externalLeaseUpToStabilize={leaseUpUnitsArr}
+                            externalUnitsToStabilize={unitsToRenovateMemo}
+                            externalLeaseUpToStabilize={leaseUpUnitsArrMemo}
                             onOpenChange={v => { if (!v) setCalcCollapsed(true); }}
                             initialState={calcState}
                             onStateChange={setCalcState}
@@ -1163,8 +1196,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                                 });
                                 return { ...prev, yearOverrides: ovs };
                               });
-                              setCalcCollapsed(true);
-                              setStabOpen(false);
                             }}
                             onClear={() => {
                               // Strip grossRent year overrides from ProForma
@@ -1181,11 +1212,11 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                               // Clear preStabRent fields so hasPreStab → false
                               if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map(u => ({ ...u, preStabRent: 0 })));
                               else updateAcquisition('sfrPreStabRent', 0);
-                              setCalcCollapsed(false);
                             }}
                           />
                         </div>
-                      )
+                        )}
+                      </>
                     )}
 
                     {/* Manual pre-stab inputs */}
@@ -1249,7 +1280,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     )}
 
                     {/* Pre-stab Rent Schedule */}
-                    {preStabRows.length > 0 && calcCollapsed && (
+                    {preStabRows.length > 0 && preStabMethod === 'manual' && (
                       <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
                         <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-700/40 border-b border-slate-100 dark:border-slate-700/60">
                           <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Pre-stab rent schedule</p>
@@ -1270,8 +1301,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                       </div>
                     )}
 
-                  </div>
-                )}
+                </div>
               </div>
             )}
 
