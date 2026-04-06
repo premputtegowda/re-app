@@ -846,8 +846,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                                         ));
                                       }}
                                       onBlur={e => {
-                                        // Auto-advance to next section after user finishes typing target rent
-                                        if (field === 'rentMonthly' && Number(e.target.value) > 0) {
+                                        // Auto-advance only if Value-Add hasn't been answered yet
+                                        if (field === 'rentMonthly' && Number(e.target.value) > 0 && isValueAdd === null) {
                                           setRentOpen(false);
                                           setValueAddOpen(true);
                                         }
@@ -884,7 +884,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                                   updateAcquisition(field, Number(e.target.value));
                                 }}
                                 onBlur={e => {
-                                  if (field === 'sfrTargetRent' && Number(e.target.value) > 0) {
+                                  if (field === 'sfrTargetRent' && Number(e.target.value) > 0 && isValueAdd === null) {
                                     setRentOpen(false);
                                     setValueAddOpen(true);
                                   }
