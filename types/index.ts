@@ -380,6 +380,9 @@ export interface CalcPersistedState {
   localRents: CalcLocalRent[];
   leaseUpToStabilize: number[];
   leaseUpScheduleByType: number[][];
+  // Form-level state persisted alongside calc state
+  isValueAdd?: boolean | null;
+  preStabMethod?: 'calculator' | 'manual' | null;
 }
 
 export interface SavedDeal {

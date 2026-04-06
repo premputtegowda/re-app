@@ -193,7 +193,10 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const [errorStep, setErrorStep] = useState<number | null>(null);
   const [calcState, setCalcState] = useState<CalcPersistedState | undefined>(initialDeal?.calcState);
   const [isValueAdd, setIsValueAdd] = useState<boolean | null>(() => {
+    // Prefer explicitly persisted value
+    if (initialDeal?.calcState?.isValueAdd !== undefined) return initialDeal.calcState.isValueAdd ?? null;
     if (!initialDeal) return null;
+    // Fallback: infer from data for deals saved before this field was added
     const isMfr = initialDeal.acquisition.propertyType === 'mfr';
     const hasPreStab = isMfr
       ? initialDeal.acquisition.unitMix.some(e => (e.preStabRent || 0) > 0)
@@ -203,7 +206,10 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     return null;
   });
   const [preStabMethod, setPreStabMethod] = useState<'calculator' | 'manual' | null>(() => {
+    // Prefer explicitly persisted value
+    if (initialDeal?.calcState?.preStabMethod !== undefined) return initialDeal.calcState.preStabMethod ?? null;
     if (!initialDeal) return null;
+    // Fallback: infer from data for deals saved before this field was added
     const isMfr = initialDeal.acquisition.propertyType === 'mfr';
     const hasPreStab = isMfr
       ? initialDeal.acquisition.unitMix.some(e => (e.preStabRent || 0) > 0)
@@ -379,11 +385,10 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
       setOperations((prev) => ({ ...prev, grossRentMonthly: totalTarget }));
       setProForma((prev) => {
-        const preStabAnnual = totalPreStab * 12;
+        // When calculator method is active, never let manual preStabRent fields override
+        // the ProForma — the calculator's onApplyRents owns those year overrides.
+        const preStabAnnual = preStabMethod === 'calculator' ? 0 : totalPreStab * 12;
         const targetAnnual = allHaveTarget ? totalTarget * 12 : 0;
-        // Only preserve calculator overrides when pre-stab is blank — prevents clearing
-        // the calculator's Year 1 when other fields change. When pre-stab is entered,
-        // always apply it so the ProForma stays in sync with the field.
         const preserveCalcOverrides = preStabAnnual === 0 &&
           Object.values(prev.yearOverrides ?? {}).some(ov => ov?.grossRentSystem === true);
         return {
@@ -404,7 +409,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       const preStab = acquisition.sfrPreStabRent || 0;
       if (target > 0) setOperations((prev) => ({ ...prev, grossRentMonthly: target }));
       setProForma((prev) => {
-        const preStabAnnual = preStab * 12;
+        // When calculator method is active, never let manual preStabRent fields override
+        // the ProForma — the calculator's onApplyRents owns those year overrides.
+        const preStabAnnual = preStabMethod === 'calculator' ? 0 : preStab * 12;
         const preserveCalcOverrides = preStabAnnual === 0 &&
           Object.values(prev.yearOverrides ?? {}).some(ov => ov?.grossRentSystem === true);
         return {
@@ -420,7 +427,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         };
       });
     }
-  }, [acquisition.unitMix, acquisition.propertyType, acquisition.sfrTargetRent, acquisition.sfrInPlaceRent, acquisition.sfrPreStabRent]);
+  }, [acquisition.unitMix, acquisition.propertyType, acquisition.sfrTargetRent, acquisition.sfrInPlaceRent, acquisition.sfrPreStabRent, preStabMethod]);
 
   // Auto-set exit method based on property type + unit count:
   //   MFR > 4 units  → 'capRate'
@@ -485,6 +492,25 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const updateRefinance = (field: keyof CoCRefinance, value: number | boolean) =>
     setRefinance((prev) => ({ ...prev, [field]: value }));
 
+  // Enrich calcState with form-level fields before saving so they survive a reload
+  const buildCalcState = (): CalcPersistedState | undefined => {
+    const base = calcState ?? ({} as CalcPersistedState);
+    // Always stamp the form-level fields so they survive a reload even if the
+    // calculator's onStateChange hasn't fired (e.g. user only typed in the
+    // duration/offline inputs without opening the calculator).
+    const unitCount = acquisition.propertyType === 'mfr' ? acquisition.unitMix.length : 1;
+    const perUnitMonths = base.perUnitMonths?.length === unitCount
+      ? base.perUnitMonths.map(() => offlinePerUnit)
+      : Array(unitCount).fill(offlinePerUnit);
+    return {
+      ...base,
+      totalDuration: stabDuration,
+      perUnitMonths,
+      isValueAdd,
+      preStabMethod,
+    } as CalcPersistedState;
+  };
+
   // ── Calculate ──
 
   const handleCalculate = () => {
@@ -505,12 +531,13 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
     if (savedDealId) {
       const name = saveName || defaultSaveName(acquisition);
+      const enriched = buildCalcState();
       updateSavedDeal(savedDealId, name, updatedResults, {
         acquisition, operations, proForma, refinance,
         currentStep: activeStep,
         visitedSteps: Array.from(completedSteps),
         activeType,
-        ...(calcState ? { calcState } : {}),
+        ...(enriched ? { calcState: enriched } : {}),
       }, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined);
     }
 
@@ -553,12 +580,13 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     }
     setSaveError(null);
     const name = saveName.trim() || defaultSaveName(acquisition);
+    const enriched = buildCalcState();
     const currentDraft: DealAnalyzerDraft = {
       acquisition, operations, proForma, refinance,
       currentStep: activeStep,
       visitedSteps: Array.from(completedSteps),
       activeType,
-      ...(calcState ? { calcState } : {}),
+      ...(enriched ? { calcState: enriched } : {}),
     };
 
     if (savedDealId) {
@@ -1053,7 +1081,25 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                           <button
                             key={opt.val}
                             type="button"
-                            onClick={() => setPreStabMethod(opt.val)}
+                            onClick={() => {
+                              setPreStabMethod(opt.val);
+                              if (opt.val === 'calculator') {
+                                // Switching to calculator — clear manual pre-stab values so they
+                                // don't bleed into the ProForma via the rent sync useEffect.
+                                if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map(u => ({ ...u, preStabRent: 0 })));
+                                else updateAcquisition('sfrPreStabRent', 0);
+                              } else {
+                                // Switching to manual — clear calculator year overrides so the
+                                // manual values take effect cleanly.
+                                setProForma(prev => {
+                                  const cleaned: typeof prev.yearOverrides = {};
+                                  for (const [yr, ov] of Object.entries(prev.yearOverrides ?? {})) {
+                                    if (ov && !ov.grossRentSystem) cleaned[Number(yr)] = ov;
+                                  }
+                                  return { ...prev, yearOverrides: cleaned };
+                                });
+                              }
+                            }}
                             className={`flex-1 py-2.5 transition-colors ${i > 0 ? 'border-l border-slate-200 dark:border-slate-700' : ''} ${
                               preStabMethod === opt.val
                                 ? 'bg-primary-600 text-white'
@@ -1121,16 +1167,21 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                               setStabOpen(false);
                             }}
                             onClear={() => {
+                              // Strip grossRent year overrides from ProForma
                               setProForma(prev => {
                                 const ovs = { ...(prev.yearOverrides ?? {}) };
                                 for (let y = 1; y <= acquisition.projectionYears; y++) {
                                   if (ovs[y]) {
-                                    const { grossRent: _r, ...rest } = ovs[y];
+                                    const { grossRent: _r, grossRentSystem: _s, ...rest } = ovs[y];
                                     if (Object.keys(rest).length > 0) ovs[y] = rest; else delete ovs[y];
                                   }
                                 }
                                 return { ...prev, yearOverrides: ovs };
                               });
+                              // Clear preStabRent fields so hasPreStab → false
+                              if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map(u => ({ ...u, preStabRent: 0 })));
+                              else updateAcquisition('sfrPreStabRent', 0);
+                              setCalcCollapsed(false);
                             }}
                           />
                         </div>
@@ -1198,7 +1249,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     )}
 
                     {/* Pre-stab Rent Schedule */}
-                    {preStabRows.length > 0 && (
+                    {preStabRows.length > 0 && calcCollapsed && (
                       <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
                         <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-700/40 border-b border-slate-100 dark:border-slate-700/60">
                           <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Pre-stab rent schedule</p>
@@ -1225,14 +1276,41 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
             )}
 
             {/* ── Pro Forma ── */}
-            {stepComplete && (
-              <ProFormaGrid
-                data={proForma}
-                onChange={setProForma}
-                projectionYears={acquisition.projectionYears}
-                showWarnings={isVisited}
-              />
-            )}
+            {(() => {
+              // When value-add is selected but the stab plan is not yet complete,
+              // show the ProForma using target rent (strip pre-stab year overrides)
+              // and display a notice so the user knows what's happening.
+              const stabIncomplete = isValueAdd === true && !stepComplete;
+              const proFormaData = stabIncomplete
+                ? {
+                    ...proForma,
+                    yearOverrides: Object.fromEntries(
+                      Object.entries(proForma.yearOverrides ?? {})
+                        .map(([yr, ov]) => [yr, ov?.grossRentSystem ? undefined : ov])
+                        .filter(([, ov]) => ov !== undefined)
+                    ) as typeof proForma.yearOverrides,
+                  }
+                : proForma;
+
+              return (
+                <>
+                  {stabIncomplete && (
+                    <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40">
+                      <AlertTriangle size={13} className="text-amber-500 mt-0.5 shrink-0" />
+                      <p className="text-xs text-amber-700 dark:text-amber-400">
+                        Stabilization plan incomplete — Pro Forma will use target rent until the schedule is applied.
+                      </p>
+                    </div>
+                  )}
+                  <ProFormaGrid
+                    data={proFormaData}
+                    onChange={setProForma}
+                    projectionYears={acquisition.projectionYears}
+                    showWarnings={isVisited}
+                  />
+                </>
+              );
+            })()}
 
           </div>
         );

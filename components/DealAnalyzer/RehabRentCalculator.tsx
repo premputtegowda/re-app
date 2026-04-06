@@ -512,7 +512,9 @@ export function RehabRentCalculator({
                     type="button"
                     onClick={() => {
                       setScheduleByType(unitTypes.map(() => Array(totalDuration).fill(0)));
+                      setLeaseUpScheduleByType(unitTypes.map(() => Array(totalDuration).fill(0)));
                       setAutoFilled(false);
+                      onClear();
                     }}
                     className="flex items-center gap-1 text-xs text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 font-medium touch-manipulation"
                     title="Clear schedule"
@@ -760,13 +762,6 @@ export function RehabRentCalculator({
               className="flex-1 py-2 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-40 text-white text-sm font-medium transition-colors"
             >
               Apply to Pro Forma
-            </button>
-            <button
-              type="button"
-              onClick={clearCalc}
-              className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors"
-            >
-              Clear
             </button>
           </div>
 
