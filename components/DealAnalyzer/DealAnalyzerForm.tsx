@@ -1019,17 +1019,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                                 ))}
                               </tbody>
                             </table>
-                            {isVisited && acquisition.unitMix.some(e =>
-                              (e.inPlaceRent || 0) < (e.rentMonthly || 0) &&
-                              (e.unitsToRenovate ?? 0) === 0 && (e.leaseUpUnits ?? 0) === 0
-                            ) && (
-                              <div className="px-4 py-2.5 border-t border-amber-100 dark:border-amber-900/30 bg-amber-50 dark:bg-amber-900/10">
-                                <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
-                                  <AlertTriangle size={12} />
-                                  Some units have current rent below target but aren't assigned to renovation or lease-up.
-                                </p>
-                              </div>
-                            )}
                           </>
                         ) : (
                           <div className="px-4 py-3.5 flex items-center justify-between">
@@ -1099,97 +1088,90 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     </div>
 
                     {/* Rent schedule — collapsed summary by default, expand to edit */}
-                    {calcCollapsed ? (
-                      <button
-                        type="button"
-                        onClick={() => { setCalcCollapsed(false); setPreStabMethod('calculator'); }}
-                        className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border transition-colors ${
-                          calcApplied
-                            ? 'border-blue-200 dark:border-blue-800/60 bg-blue-50/40 dark:bg-blue-900/10 hover:bg-blue-50 dark:hover:bg-blue-900/20'
-                            : calcScheduleIncomplete
-                              ? 'border-amber-200 dark:border-amber-800/40 bg-amber-50/40 dark:bg-amber-900/10 hover:bg-amber-50 dark:hover:bg-amber-900/20'
-                              : 'border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/30 hover:bg-slate-100 dark:hover:bg-slate-700/40'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <Zap size={13} className={calcApplied ? 'text-blue-500' : calcScheduleIncomplete ? 'text-amber-500' : 'text-slate-400'} />
-                          <span className="text-sm font-medium text-slate-600 dark:text-slate-300 truncate">
-                            {calcApplied
-                              ? (() => {
-                                  const parts = [];
-                                  if (totalReno > 0) parts.push(`${totalReno} reno`);
-                                  if (totalLU > 0) parts.push(`${totalLU} lease-up`);
-                                  return `${parts.join(' · ')} · ${stabDuration} mo · rent auto-calculated`;
-                                })()
-                              : stabDuration > 0
-                                ? 'Rent schedule auto-filled — edit to customise'
-                                : 'Set renovation period above to auto-calculate rent'}
-                          </span>
+                    {/* Summary bar — shown when collapsed */}
+                    {calcCollapsed && (
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <Zap size={12} className={`shrink-0 ${calcApplied ? 'text-blue-500' : calcScheduleIncomplete ? 'text-amber-500' : 'text-slate-300 dark:text-slate-600'}`} />
+                          {calcApplied ? (
+                            <span className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                              {[totalReno > 0 && `${totalReno} reno`, totalLU > 0 && `${totalLU} lease-up`].filter(Boolean).join(' · ')}
+                              {' · '}{stabDuration} mo
+                              <span className="text-emerald-600 dark:text-emerald-400 font-medium"> · Pro Forma updated</span>
+                            </span>
+                          ) : calcScheduleIncomplete ? (
+                            <span className="text-xs text-amber-600 dark:text-amber-400">Some unit types need schedule update — edit to fix</span>
+                          ) : stabDuration > 0 ? (
+                            <span className="text-xs text-slate-400 dark:text-slate-500">Schedule auto-filled</span>
+                          ) : (
+                            <span className="text-xs text-slate-400 dark:text-slate-500">Set renovation period to auto-calculate</span>
+                          )}
                         </div>
-                        <div className="flex items-center gap-2 shrink-0 ml-2">
-                          {calcApplied && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400">Applied</span>}
-                          {calcScheduleIncomplete && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400">Incomplete</span>}
-                          <span className="text-xs text-slate-400">Edit</span>
-                          <ChevronRight size={14} className="text-slate-400" />
-                        </div>
-                      </button>
-                    ) : (
-                      <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden -mx-4">
-                        <RehabRentCalculator
-                            hideHeader={false}
-                            unitTypes={unitTypes}
-                            projectionYears={acquisition.projectionYears}
-                            appliedYears={calcAppliedYears}
-                            grossRentGrowthPct={proForma.grossRent.growthPct}
-                            externalDuration={stabDuration}
-                            externalOffline={offlinePerUnit}
-                            externalUnitsToStabilize={unitsToRenovateMemo}
-                            externalLeaseUpToStabilize={leaseUpUnitsArrMemo}
-                            onOpenChange={v => { if (!v) setCalcCollapsed(true); }}
-                            initialState={calcState}
-                            onStateChange={setCalcState}
-                            onApplyRents={rents => {
-                              if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map((u, i) => ({
-                                ...u, inPlaceRent: rents[i]?.inPlace ?? u.inPlaceRent, rentMonthly: rents[i]?.target ?? u.rentMonthly,
-                              })));
-                              else {
-                                updateAcquisition('sfrInPlaceRent', rents[0]?.inPlace ?? acquisition.sfrInPlaceRent);
-                                updateAcquisition('sfrTargetRent',  rents[0]?.target  ?? acquisition.sfrTargetRent);
-                              }
-                            }}
-                            onApplyPreStab={values => {
-                              if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map((u, i) => ({ ...u, preStabRent: Math.round(values[i] ?? 0) })));
-                              else updateAcquisition('sfrPreStabRent', Math.round(values[0] ?? 0));
-                            }}
-                            onApply={overrides => {
-                              setProForma(prev => {
-                                const ovs = { ...(prev.yearOverrides ?? {}) };
-                                Object.entries(overrides).forEach(([yr, rent]) => {
-                                  const y = Number(yr);
-                                  ovs[y] = { ...(ovs[y] ?? {}), grossRent: rent, grossRentSystem: true };
-                                });
-                                return { ...prev, yearOverrides: ovs };
-                              });
-                            }}
-                            onClear={() => {
-                              // Strip grossRent year overrides from ProForma
-                              setProForma(prev => {
-                                const ovs = { ...(prev.yearOverrides ?? {}) };
-                                for (let y = 1; y <= acquisition.projectionYears; y++) {
-                                  if (ovs[y]) {
-                                    const { grossRent: _r, grossRentSystem: _s, ...rest } = ovs[y];
-                                    if (Object.keys(rest).length > 0) ovs[y] = rest; else delete ovs[y];
-                                  }
-                                }
-                                return { ...prev, yearOverrides: ovs };
-                              });
-                              // Clear preStabRent fields so hasPreStab → false
-                              if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map(u => ({ ...u, preStabRent: 0 })));
-                              else updateAcquisition('sfrPreStabRent', 0);
-                            }}
-                          />
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => { setCalcCollapsed(false); setPreStabMethod('calculator'); }}
+                          className="shrink-0 flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 transition-colors touch-manipulation"
+                        >
+                          <Pencil size={11} />
+                          Edit schedule
+                        </button>
+                      </div>
                     )}
+
+                    {/* Calculator — always mounted so auto-fill runs even when collapsed */}
+                    <div className={calcCollapsed ? 'hidden' : 'rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden -mx-4'}>
+                      <RehabRentCalculator
+                          hideHeader={false}
+                          unitTypes={unitTypes}
+                          projectionYears={acquisition.projectionYears}
+                          appliedYears={calcAppliedYears}
+                          grossRentGrowthPct={proForma.grossRent.growthPct}
+                          externalDuration={stabDuration}
+                          externalOffline={offlinePerUnit}
+                          externalUnitsToStabilize={unitsToRenovateMemo}
+                          externalLeaseUpToStabilize={leaseUpUnitsArrMemo}
+                          onOpenChange={v => { if (!v) setCalcCollapsed(true); }}
+                          initialState={calcState}
+                          onStateChange={setCalcState}
+                          onApplyRents={rents => {
+                            if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map((u, i) => ({
+                              ...u, inPlaceRent: rents[i]?.inPlace ?? u.inPlaceRent, rentMonthly: rents[i]?.target ?? u.rentMonthly,
+                            })));
+                            else {
+                              updateAcquisition('sfrInPlaceRent', rents[0]?.inPlace ?? acquisition.sfrInPlaceRent);
+                              updateAcquisition('sfrTargetRent',  rents[0]?.target  ?? acquisition.sfrTargetRent);
+                            }
+                          }}
+                          onApplyPreStab={values => {
+                            if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map((u, i) => ({ ...u, preStabRent: Math.round(values[i] ?? 0) })));
+                            else updateAcquisition('sfrPreStabRent', Math.round(values[0] ?? 0));
+                          }}
+                          onApply={overrides => {
+                            setProForma(prev => {
+                              const ovs = { ...(prev.yearOverrides ?? {}) };
+                              Object.entries(overrides).forEach(([yr, rent]) => {
+                                const y = Number(yr);
+                                ovs[y] = { ...(ovs[y] ?? {}), grossRent: rent, grossRentSystem: true };
+                              });
+                              return { ...prev, yearOverrides: ovs };
+                            });
+                          }}
+                          onClear={() => {
+                            setProForma(prev => {
+                              const ovs = { ...(prev.yearOverrides ?? {}) };
+                              for (let y = 1; y <= acquisition.projectionYears; y++) {
+                                if (ovs[y]) {
+                                  const { grossRent: _r, grossRentSystem: _s, ...rest } = ovs[y];
+                                  if (Object.keys(rest).length > 0) ovs[y] = rest; else delete ovs[y];
+                                }
+                              }
+                              return { ...prev, yearOverrides: ovs };
+                            });
+                            if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map(u => ({ ...u, preStabRent: 0 })));
+                            else updateAcquisition('sfrPreStabRent', 0);
+                          }}
+                        />
+                    </div>
 
                     {/* Schedule incomplete notice */}
                     {isVisited && calcScheduleIncomplete && (

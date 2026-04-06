@@ -229,10 +229,12 @@ export function RehabRentCalculator({
   const [leaseUpToStabilize, setLeaseUpToStabilize] = useState<number[]>(() => initialState?.leaseUpToStabilize ?? unitTypes.map(() => 0));
   const [leaseUpScheduleByType, setLeaseUpScheduleByType] = useState<number[][]>(() => initialState?.leaseUpScheduleByType ?? unitTypes.map(() => []));
   const [openYear, setOpenYear]                 = useState<number | null>(null);
-  // Auto-fill by default unless the user has previously saved a manual schedule
-  const [autoFilled, setAutoFilled] = useState(() =>
-    !initialState?.scheduleByType?.some(s => s.some(n => n > 0)) &&
-    !initialState?.leaseUpScheduleByType?.some(s => s.some(n => n > 0))
+  // Per-type auto-fill tracking: true = auto-fill mode, false = manually edited
+  const [autoFilledByType, setAutoFilledByType] = useState<boolean[]>(() =>
+    unitTypes.map((_, t) =>
+      !initialState?.scheduleByType?.[t]?.some(n => n > 0) &&
+      !initialState?.leaseUpScheduleByType?.[t]?.some(n => n > 0)
+    )
   );
 
   // ── Manual mode state ──
@@ -265,27 +267,23 @@ export function RehabRentCalculator({
   useEffect(() => {
     if (externalDuration === undefined) return;
     setTotalDuration(externalDuration);
-    if (hasMountedRef.current) setAutoFilled(true);
   }, [externalDuration]);
 
   useEffect(() => {
     if (externalOffline === undefined) return;
     setPerUnitMonths(unitTypes.map(() => externalOffline));
-    if (hasMountedRef.current) setAutoFilled(true);
   }, [externalOffline, unitTypes.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!externalUnitsToStabilize) return;
     setUnitsToStabilize(externalUnitsToStabilize.map((n, t) => Math.min(n, unitTypes[t]?.count ?? n)));
-    // If user manually edited the schedule, preserve it and let the mismatch warning guide them.
-    // Only re-trigger auto-fill if the schedule was already in auto-fill mode.
-    if (hasMountedRef.current) setAutoFilled(prev => prev ? true : false);
+    // autoFilledByType is not changed: auto-filled types recalculate via the selective effect;
+    // manually-edited types keep their schedule and the mismatch warning prompts the user.
   }, [externalUnitsToStabilize]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!externalLeaseUpToStabilize) return;
     setLeaseUpToStabilize(externalLeaseUpToStabilize.map((n, t) => Math.min(n, unitTypes[t]?.count ?? n)));
-    if (hasMountedRef.current) setAutoFilled(prev => prev ? true : false);
   }, [externalLeaseUpToStabilize]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync rent changes from the form back into localRents (bidirectional sync).
@@ -355,7 +353,7 @@ export function RehabRentCalculator({
     setLeaseUpToStabilize(prev => { const n = [...prev]; n[t] = Math.min(unitTypes[t].count, Math.max(0, val)); return n; });
 
   const updateCell = (t: number, monthIdx: number, val: number) => {
-    setAutoFilled(false);
+    setAutoFilledByType(prev => prev.map((v, i) => i === t ? false : v));
     setScheduleByType(prev => {
       const next = prev.map(s => [...s]);
       const otherSum = (next[t] ?? []).reduce((s, n, i) => i === monthIdx ? s : s + n, 0);
@@ -366,7 +364,7 @@ export function RehabRentCalculator({
   };
 
   const updateLeaseUpCell = (t: number, monthIdx: number, val: number) => {
-    setAutoFilled(false);
+    setAutoFilledByType(prev => prev.map((v, i) => i === t ? false : v));
     setLeaseUpScheduleByType(prev => {
       const next = prev.map(s => [...s]);
       const otherSum = (next[t] ?? []).reduce((s, n, i) => i === monthIdx ? s : s + n, 0);
@@ -374,6 +372,14 @@ export function RehabRentCalculator({
       next[t][monthIdx] = Math.min(Math.max(0, val), cap);
       return next;
     });
+  };
+
+  const autoFillType = (t: number) => {
+    const renoSched = evenDistribute(unitsToStabilize[t], totalDuration);
+    const luSched   = evenDistribute(leaseUpToStabilize[t], totalDuration);
+    setScheduleByType(prev => prev.map((s, i) => i === t ? renoSched : s));
+    setLeaseUpScheduleByType(prev => prev.map((s, i) => i === t ? luSched : s));
+    setAutoFilledByType(prev => prev.map((v, i) => i === t ? true : v));
   };
 
   const computeAutoFill = (units: number[], dur: number) =>
@@ -386,15 +392,20 @@ export function RehabRentCalculator({
   const autoFillAll = () => {
     setScheduleByType(computeAutoFill(unitsToStabilize, totalDuration));
     setLeaseUpScheduleByType(computeAutoFill(leaseUpToStabilize, totalDuration));
-    setAutoFilled(true);
+    setAutoFilledByType(unitTypes.map(() => true));
   };
 
-  // Re-run auto-fill whenever units, duration, or offline months change — if auto-fill is active
+  // Selectively re-run auto-fill per type when units or duration change
   useEffect(() => {
-    if (!autoFilled) return;
-    setScheduleByType(computeAutoFill(unitsToStabilize, totalDuration));
-    setLeaseUpScheduleByType(computeAutoFill(leaseUpToStabilize, totalDuration));
-  }, [unitsToStabilize, leaseUpToStabilize, totalDuration, perUnitMonths, autoFilled]); // eslint-disable-line react-hooks/exhaustive-deps
+    setScheduleByType(prev => prev.map((sched, t) => {
+      if (!autoFilledByType[t]) return sched;
+      return evenDistribute(unitsToStabilize[t], totalDuration);
+    }));
+    setLeaseUpScheduleByType(prev => prev.map((sched, t) => {
+      if (!autoFilledByType[t]) return sched;
+      return evenDistribute(leaseUpToStabilize[t], totalDuration);
+    }));
+  }, [unitsToStabilize, leaseUpToStabilize, totalDuration, autoFilledByType]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const result = useMemo<SimulationResult | null>(() => {
     if (!hasRentData || !scheduleValid) return null;
@@ -466,7 +477,7 @@ export function RehabRentCalculator({
     setPerUnitMonths(unitTypes.map(() => 0));
     setScheduleByType(unitTypes.map(() => []));
     setOpenYear(null);
-    setAutoFilled(false);
+    setAutoFilledByType(unitTypes.map(() => false));
     setLeaseUpToStabilize(unitTypes.map(() => 0));
     setLeaseUpScheduleByType(unitTypes.map(() => []));
   };
@@ -553,7 +564,7 @@ export function RehabRentCalculator({
                     onClick={() => {
                       setScheduleByType(unitTypes.map(() => Array(totalDuration).fill(0)));
                       setLeaseUpScheduleByType(unitTypes.map(() => Array(totalDuration).fill(0)));
-                      setAutoFilled(false);
+                      setAutoFilledByType(unitTypes.map(() => false));
                     }}
                     className="flex items-center gap-1 text-xs text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 font-medium touch-manipulation"
                     title="Clear schedule"
@@ -567,6 +578,50 @@ export function RehabRentCalculator({
               <p className="text-[11px] text-slate-400 dark:text-slate-500">
                 Enter how many units start each month, or use Auto-fill to distribute evenly.
               </p>
+
+              {/* Per-type status + actions — only for multi-type deals */}
+              {unitTypes.length > 1 && (
+                <div className="rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-700/60 overflow-hidden">
+                  {unitTypes.map((ut, t) => {
+                    const renoTarget = unitsToStabilize[t];
+                    const luTarget   = leaseUpToStabilize[t];
+                    if (renoTarget === 0 && luTarget === 0) return null;
+                    const renoOk = renoTarget === 0 || scheduleTotals[t] === renoTarget;
+                    const luOk   = luTarget   === 0 || leaseUpScheduleTotals[t] === luTarget;
+                    const allOk  = renoOk && luOk;
+                    return (
+                      <div key={t} className="px-3 py-2 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${allOk ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                          <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{ut.label}</span>
+                          <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                            {renoTarget > 0 && <span className={renoOk ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-500'}>R {scheduleTotals[t]}/{renoTarget}</span>}
+                            {renoTarget > 0 && luTarget > 0 && ' · '}
+                            {luTarget > 0 && <span className={luOk ? 'text-blue-600 dark:text-blue-400' : 'text-amber-500'}>L {leaseUpScheduleTotals[t]}/{luTarget}</span>}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {!allOk && (
+                            <button type="button" onClick={() => autoFillType(t)}
+                              className="text-[11px] font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 touch-manipulation">
+                              Auto-fill
+                            </button>
+                          )}
+                          <button type="button"
+                            onClick={() => {
+                              setScheduleByType(prev => prev.map((s, i) => i === t ? Array(totalDuration).fill(0) : s));
+                              setLeaseUpScheduleByType(prev => prev.map((s, i) => i === t ? Array(totalDuration).fill(0) : s));
+                              setAutoFilledByType(prev => prev.map((v, i) => i === t ? false : v));
+                            }}
+                            className="text-[11px] font-medium text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 touch-manipulation">
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
               {yearGroups.map((months, yi) => {
                 const yearTotals = unitTypes.map((_, t) =>
@@ -673,23 +728,46 @@ export function RehabRentCalculator({
               })}
 
               {totalDuration > 0 && !scheduleValid && (someTypeScheduled || someLeaseUpScheduled) && (() => {
-                const mismatches: string[] = [];
+                const staleTypes: { t: number; label: string; detail: string }[] = [];
                 unitTypes.forEach((ut, t) => {
-                  if (unitsToStabilize[t] > 0 && scheduleTotals[t] !== unitsToStabilize[t]) {
-                    mismatches.push(`${ut.label}: ${scheduleTotals[t]} of ${unitsToStabilize[t]} renovation units scheduled`);
-                  }
-                  if (leaseUpToStabilize[t] > 0 && leaseUpScheduleTotals[t] !== leaseUpToStabilize[t]) {
-                    mismatches.push(`${ut.label}: ${leaseUpScheduleTotals[t]} of ${leaseUpToStabilize[t]} lease-up units scheduled`);
-                  }
+                  const renoMismatch = unitsToStabilize[t] > 0 && scheduleTotals[t] !== unitsToStabilize[t];
+                  const luMismatch   = leaseUpToStabilize[t] > 0 && leaseUpScheduleTotals[t] !== leaseUpToStabilize[t];
+                  if (!renoMismatch && !luMismatch) return;
+                  const parts: string[] = [];
+                  if (renoMismatch) parts.push(`${scheduleTotals[t]}/${unitsToStabilize[t]} reno`);
+                  if (luMismatch)   parts.push(`${leaseUpScheduleTotals[t]}/${leaseUpToStabilize[t]} lease-up`);
+                  const isManual = !autoFilledByType[t];
+                  staleTypes.push({ t, label: ut.label, detail: isManual ? `${parts.join(', ')} — you edited this, update needed` : parts.join(', ') });
                 });
-                if (mismatches.length === 0) return null;
+                if (staleTypes.length === 0) return null;
                 return (
-                  <div className="rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40 px-3 py-2 space-y-1">
-                    <p className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">
-                      Schedule doesn&apos;t match your plan:
-                    </p>
-                    {mismatches.map((m, i) => (
-                      <p key={i} className="text-[11px] text-amber-600 dark:text-amber-400">• {m}</p>
+                  <div className="rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40 px-3 py-2 space-y-1.5">
+                    <p className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">Schedule doesn&apos;t match your plan:</p>
+                    {staleTypes.map(({ t, label, detail }) => (
+                      <div key={t} className="flex items-center justify-between gap-2">
+                        <p className="text-[11px] text-amber-600 dark:text-amber-400">• {label}: {detail}</p>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => autoFillType(t)}
+                            className="text-[11px] font-semibold text-primary-600 dark:text-primary-400 hover:text-primary-700 underline touch-manipulation"
+                          >
+                            Auto-fill
+                          </button>
+                          <span className="text-amber-300 dark:text-amber-700">·</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setScheduleByType(prev => prev.map((s, i) => i === t ? Array(totalDuration).fill(0) : s));
+                              setLeaseUpScheduleByType(prev => prev.map((s, i) => i === t ? Array(totalDuration).fill(0) : s));
+                              setAutoFilledByType(prev => prev.map((v, i) => i === t ? false : v));
+                            }}
+                            className="text-[11px] font-semibold text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 underline touch-manipulation"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
                     ))}
                   </div>
                 );
