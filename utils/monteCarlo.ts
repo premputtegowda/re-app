@@ -351,3 +351,84 @@ export async function runSimulation(opts: RunSimulationOptions): Promise<MCResul
     irrMax: validIrrs.length ? Math.max(...validIrrs) : 0,
   };
 }
+
+// ── P80 Max Purchase Price ────────────────────────────────────────────────────
+
+/**
+ * Given the P80 scenario's sampled market conditions (pessimistic but not worst-case),
+ * finds the maximum purchase price at which the deal still achieves the target IRR.
+ *
+ * Uses bisection search — no additional simulation runs needed.
+ *
+ * Returns null if the target is unachievable even at a very low price,
+ * or if sampled values are zeroed (hydrated results without full data).
+ */
+export function findP80MaxPrice(
+  p80sampled: MCRunResult['sampled'],
+  targetIRR: number,
+  acquisition: CoCAcquisition,
+  operations: CoCOperations,
+  proForma: ProFormaData,
+  refinance: CoCRefinance,
+  units: number,
+  avgPreStabPerUnit: number,
+): number | null {
+  // Guard: hydrated results have zeroed sampled values — can't compute meaningfully
+  if (p80sampled.targetRentPerUnit === 0) return null;
+
+  const effectiveUnits = Math.max(1, units);
+  const origStabilizedAnnual = proForma.grossRent.stabilized;
+  if (origStabilizedAnnual === 0) return null;
+
+  const origDefaultPreStabAnnual = avgPreStabPerUnit * effectiveUnits * 12;
+  const { targetRentPerUnit, vacancyPct, rentGrowthPct, exitCapRate, renoOverrunPct, interestRate } = p80sampled;
+
+  const newTargetAnnual = targetRentPerUnit * effectiveUnits * 12;
+  const renoMultiplier  = 1 + renoOverrunPct / 100;
+  const sampledPreStab  = avgPreStabPerUnit > 0
+    ? avgPreStabPerUnit * (targetRentPerUnit / (origStabilizedAnnual / (effectiveUnits * 12)))
+    : targetRentPerUnit * 0.8;
+
+  function irrAtPrice(price: number): number {
+    const scenario: CoCScenario = {
+      id: 'p80-price', name: 'P80 Price', scenarioType: 'base',
+      acquisition: {
+        ...acquisition,
+        purchasePrice: price,
+        interestRate,
+        exitCapRate,
+        hardCostItems: acquisition.hardCostItems.map(item => ({ ...item, amount: item.amount * renoMultiplier })),
+        softCostItems: acquisition.softCostItems.map(item => ({ ...item, amount: item.amount * renoMultiplier })),
+      },
+      operations,
+      proForma: {
+        ...proForma,
+        grossRent:     { ...proForma.grossRent,     stabilized: newTargetAnnual, growthPct: rentGrowthPct },
+        vacancyPct:    { ...proForma.vacancyPct,    stabilized: vacancyPct },
+        creditLossPct: proForma.creditLossPct ?? { t12: 0, stab: null, stabilized: 0 },
+        yearOverrides: scalePreStabOverrides(proForma, newTargetAnnual, origStabilizedAnnual, sampledPreStab, effectiveUnits, origDefaultPreStabAnnual),
+      },
+      refinance,
+      createdAt: '', updatedAt: '',
+    };
+    return projectScenario(scenario).irr ?? -999;
+  }
+
+  // If current price already hits target under P80 conditions — great deal
+  if (irrAtPrice(acquisition.purchasePrice) >= targetIRR) return acquisition.purchasePrice;
+
+  // Floor: 30% of current price — if still can't hit target, it's infeasible
+  const floorPrice = acquisition.purchasePrice * 0.3;
+  if (irrAtPrice(floorPrice) < targetIRR) return null;
+
+  // Bisect between floor and current price to find max price where IRR ≥ target
+  let lo = floorPrice;
+  let hi = acquisition.purchasePrice;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (irrAtPrice(mid) >= targetIRR) lo = mid; else hi = mid;
+    if (hi - lo < 500) break; // converged within $500
+  }
+
+  return Math.round(lo / 1000) * 1000; // round to nearest $1k
+}
