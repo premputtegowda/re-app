@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, useMemo } from 'react';
 import React from 'react';
 import { Play, ChevronDown, ChevronUp, RotateCcw, CheckCircle2 } from 'lucide-react';
 import { formatCurrency, formatPct, formatMultiple } from '@/utils/dealAnalyzerCalc';
-import { runSimulation, computeDefaultRanges, toSavedMCResults, hydrateMCResults, findP80MaxPrice } from '@/utils/monteCarlo';
+import { runSimulation, computeDefaultRanges, toSavedMCResults, hydrateMCResults, findMaxPriceAtConditions } from '@/utils/monteCarlo';
 import type { MCRanges, MCResults, MCRunResult, SavedMCResults } from '@/utils/monteCarlo';
 import type { CoCAcquisition, CoCOperations, CoCRefinance, ProFormaData } from '@/types';
 
@@ -268,67 +268,60 @@ function SensitivitySection({ results }: { results: MCResults }) {
 
 // ── P80 Max Price Card ────────────────────────────────────────────────────────
 
-function P80PriceCard({ maxPrice, targetIRR, currentPrice }: {
-  maxPrice: number | null;
+function MaxPriceCard({ p20MaxPrice, p50MaxPrice, targetIRR, currentPrice }: {
+  p20MaxPrice: number | null;
+  p50MaxPrice: number | null;
   targetIRR: number;
   currentPrice: number;
 }) {
-  const atCurrentPrice = maxPrice === currentPrice;
-  const gap = maxPrice !== null ? currentPrice - maxPrice : null;
+  const rows: Array<{ label: string; sub: string; price: number | null }> = [
+    { label: 'Conservative', sub: 'P20 — if market underperforms', price: p20MaxPrice },
+    { label: 'Median',       sub: 'P50 — average market conditions', price: p50MaxPrice },
+  ];
 
   return (
     <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
       <div className="px-4 py-3 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-700">
         <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
-          Max Price to Hit {targetIRR}% IRR at P80
+          Max Purchase Price to Hit {targetIRR}% IRR
         </p>
         <p className="text-[10px] text-slate-400 mt-0.5">
-          Pessimistic-but-realistic market conditions
+          Current: {formatCurrency(currentPrice)}
         </p>
       </div>
-      <div className="px-4 py-3">
-        {maxPrice === null ? (
-          <div className="flex items-start gap-2">
-            <span className="text-red-500 text-sm mt-0.5">✗</span>
-            <div>
-              <p className="text-sm font-semibold text-red-500 dark:text-red-400">
-                {targetIRR}% IRR not achievable at P80
-              </p>
-              <p className="text-[11px] text-slate-400 mt-0.5">
-                Even at a very low purchase price, pessimistic market conditions prevent hitting this target. Consider a lower IRR target or improving the deal structure.
-              </p>
+      <div className="divide-y divide-slate-100 dark:divide-slate-700">
+        {rows.map(({ label, sub, price }) => {
+          const works = price === currentPrice;
+          const infeasible = price === null;
+          const gap = price !== null ? currentPrice - price : null;
+          return (
+            <div key={label} className="px-4 py-3 flex items-center justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">{label}</p>
+                <p className="text-[10px] text-slate-400">{sub}</p>
+              </div>
+              <div className="text-right shrink-0">
+                {infeasible ? (
+                  <p className="text-xs font-semibold text-red-500 dark:text-red-400">Not achievable</p>
+                ) : works ? (
+                  <div className="flex items-center gap-1 justify-end">
+                    <CheckCircle2 size={12} className="text-secondary-500" />
+                    <p className="text-xs font-semibold text-secondary-600 dark:text-secondary-400">Current price works</p>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-sm font-bold tabular-nums text-slate-900 dark:text-slate-100">
+                      {formatCurrency(price!)}
+                    </p>
+                    <p className="text-[10px] font-medium text-amber-600 dark:text-amber-400 tabular-nums">
+                      ↓ {formatCurrency(gap!)} to negotiate
+                    </p>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-        ) : atCurrentPrice ? (
-          <div className="flex items-start gap-2">
-            <CheckCircle2 size={16} className="text-secondary-500 shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-semibold text-secondary-600 dark:text-secondary-400">
-                Current price works even at P80
-              </p>
-              <p className="text-[11px] text-slate-400 mt-0.5">
-                {formatCurrency(currentPrice)} achieves {targetIRR}%+ IRR even under pessimistic conditions.
-              </p>
-            </div>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-2xl font-bold tabular-nums text-slate-900 dark:text-slate-100">
-                {formatCurrency(maxPrice)}
-              </p>
-              <p className="text-[11px] text-slate-400 mt-0.5">
-                Current: {formatCurrency(currentPrice)}
-              </p>
-            </div>
-            <div className="text-right shrink-0">
-              <p className="text-sm font-bold text-amber-600 dark:text-amber-400 tabular-nums">
-                ↓ {formatCurrency(gap!)} off
-              </p>
-              <p className="text-[10px] text-slate-400 mt-0.5">needed to negotiate</p>
-            </div>
-          </div>
-        )}
+          );
+        })}
       </div>
     </div>
   );
@@ -489,14 +482,13 @@ export function MonteCarloPanel({
   const [targetIRR, setTargetIRR]   = useState(12);
   const [showEditor, setShowEditor] = useState(false);
 
-  const p80MaxPrice = useMemo(() => {
-    if (!results) return null;
-    return findP80MaxPrice(
-      results.p80.sampled,
-      targetIRR,
-      acquisition, operations, proForma, refinance,
-      units, avgPreStabPerUnit,
-    );
+  const { p20MaxPrice, p50MaxPrice } = useMemo(() => {
+    if (!results) return { p20MaxPrice: null, p50MaxPrice: null };
+    const args = [targetIRR, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit] as const;
+    return {
+      p20MaxPrice: findMaxPriceAtConditions(results.p20.sampled, ...args),
+      p50MaxPrice: findMaxPriceAtConditions(results.p50.sampled, ...args),
+    };
   }, [results, targetIRR, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit]);
 
   const run = useCallback(async () => {
@@ -554,8 +546,9 @@ export function MonteCarloPanel({
             targetCoC={targetCoC} onTargetCoCChange={setTargetCoC}
             targetIRR={targetIRR} onTargetIRRChange={setTargetIRR}
           />
-          <P80PriceCard
-            maxPrice={p80MaxPrice}
+          <MaxPriceCard
+            p20MaxPrice={p20MaxPrice}
+            p50MaxPrice={p50MaxPrice}
             targetIRR={targetIRR}
             currentPrice={acquisition.purchasePrice}
           />

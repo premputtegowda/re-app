@@ -355,15 +355,17 @@ export async function runSimulation(opts: RunSimulationOptions): Promise<MCResul
 // ── P80 Max Purchase Price ────────────────────────────────────────────────────
 
 /**
- * Given the P80 scenario's sampled market conditions (pessimistic but not worst-case),
- * finds the maximum purchase price at which the deal still achieves the target IRR.
+ * Given a specific scenario's sampled market conditions, finds the maximum purchase
+ * price at which the deal still achieves the target IRR using bisection search.
  *
- * Uses bisection search — no additional simulation runs needed.
+ * Typical usage:
+ *   - Pass P20 sampled values → conservative max price (things went somewhat badly)
+ *   - Pass P50 sampled values → median max price (average conditions)
  *
  * Returns null if the target is unachievable even at a very low price,
  * or if sampled values are zeroed (hydrated results without full data).
  */
-export function findP80MaxPrice(
+export function findMaxPriceAtConditions(
   p80sampled: MCRunResult['sampled'],
   targetIRR: number,
   acquisition: CoCAcquisition,
