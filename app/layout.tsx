@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import Script from 'next/script';
 import { Inter } from 'next/font/google';
 import './globals.css';
@@ -9,10 +9,16 @@ const inter = Inter({
   display: 'swap',
 });
 
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+};
+
 export const metadata: Metadata = {
   title: 'DealstackRE',
   description: 'Real Estate Professional Status Hours Tracking Application',
-  icons: { icon: '/icon.png' },
+  icons: { icon: '/icon.svg' },
 };
 
 export default function RootLayout({

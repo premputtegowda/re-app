@@ -897,9 +897,25 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
     const isSystem = overrideKey === 'grossRent' && yr1Ov?.grossRentSystem === true;
     const isGrossRent = overrideKey === 'grossRent';
 
+    const chainBrokenHere = mobileYear > 1 && isIncomeChainBroken(overrideKey, mobileYear);
+    const hasOverride = incomeRowHasOverride(overrideKey);
+
     return (
       <div className="px-3 py-3 border-b border-slate-100 dark:border-slate-700">
-        <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">{label}</p>
+        {/* Label row with revert button + chain map */}
+        <div className="flex items-start justify-between mb-2 gap-2">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-300">{label}</p>
+            {renderChainMap(y => isIncomeChainBroken(overrideKey, y))}
+          </div>
+          {hasOverride && (
+            <button type="button" title="Revert row to formula"
+              onClick={() => revertIncomeRow(overrideKey)}
+              className="shrink-0 p-1 rounded text-primary-500 hover:text-primary-700 dark:hover:text-primary-300 touch-manipulation">
+              <RotateCcw size={12} />
+            </button>
+          )}
+        </div>
         <div className="grid grid-cols-2 gap-3">
           {/* T12 */}
           <div>
@@ -908,9 +924,15 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
           </div>
           {/* Year cell */}
           <div>
-            <p className="text-[10px] font-semibold uppercase text-slate-400 mb-1">
-              Yr {mobileYear}{mobileYear === projectionYears ? ' ★' : ''}
-            </p>
+            <div className="flex items-center gap-1 mb-1">
+              <p className="text-[10px] font-semibold uppercase text-slate-400">
+                Yr {mobileYear}{mobileYear === projectionYears ? ' ★' : ''}
+              </p>
+              {chainBrokenHere
+                ? <Unlink size={9} className="text-orange-400 dark:text-orange-500 shrink-0" />
+                : mobileYear > 1 && <Link2 size={9} className="text-slate-300 dark:text-slate-600 shrink-0" />
+              }
+            </div>
             {mobileYear === 1 ? (
               <div className="space-y-1">
                 {isSystem ? (
@@ -922,9 +944,9 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                     format={fmt}
                     onOverride={v => setYearOverride(1, overrideKey, v)}
                     onClearOverride={() => clearYearOverride(1, overrideKey)}
+                    onYearOnly={getDownstreamGrayYears(overrideKey, 1).length > 0 ? v => applyIncomeYearOnly(1, overrideKey, v) : undefined}
                   />
                 ) : (
-                  // Non-grossRent: Year 1 is a direct chain-starting entry
                   <Cell
                     value={typeof yr1Override === 'number' ? yr1Override : 0}
                     onChange={v => v === 0 ? clearYearOverride(1, overrideKey) : setYearOverride(1, overrideKey, v)}
@@ -947,6 +969,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                     growthPct,
                     mobileYear
                   );
+                  const hasDownstream = getDownstreamGrayYears(overrideKey, mobileYear).length > 0;
                   return (
                     <>
                       <YearCell computed={computedVal} override={typeof yrOverride === 'number' ? yrOverride : undefined} format={fmt}
@@ -958,6 +981,8 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                           onChange({ ...data, yearOverrides: updated });
                         }}
                         onClearOverride={() => clearYearOverride(mobileYear, overrideKey)}
+                        onYearOnly={hasDownstream ? v => applyIncomeYearOnly(mobileYear, overrideKey, v) : undefined}
+                        cascadeDelay={(mobileYear - 1) * 50}
                         />
                       {!isPercent && growthRateKey && (
                         <div className="flex items-center gap-0.5">
@@ -983,16 +1008,28 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
     const egi = mobileYear === 1
       ? computeEGI(data.yearOverrides?.[1]?.grossRent ?? data.grossRent.stabilized, data.yearOverrides?.[1]?.otherIncome ?? 0, data.yearOverrides?.[1]?.vacancyPct ?? 0, data.yearOverrides?.[1]?.creditLossPct ?? 0)
       : getEGIForYear(mobileYear);
+    const hasExpOverride = expenseRowHasOverride(expense.id);
+    const expChainBrokenHere = mobileYear > 1 && isExpenseChainBroken(expense.id, mobileYear);
     return (
       <div className="px-3 py-3 border-b border-slate-100 dark:border-slate-700">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <LabelCell value={expense.name} onChange={name => updateExpense(expense.id, { name })} />
-            {showWarnings && !expense.isPercentOfEGI && expense.stabilizedValue === 0 && (
-              <AlertTriangle size={12} className="text-amber-500 shrink-0" />
-            )}
+        <div className="flex items-start justify-between mb-2">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <LabelCell value={expense.name} onChange={name => updateExpense(expense.id, { name })} />
+              {showWarnings && !expense.isPercentOfEGI && expense.stabilizedValue === 0 && (
+                <AlertTriangle size={12} className="text-amber-500 shrink-0" />
+              )}
+            </div>
+            {renderChainMap(y => isExpenseChainBroken(expense.id, y))}
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            {hasExpOverride && (
+              <button type="button" title="Revert row to formula"
+                onClick={() => revertExpenseRow(expense)}
+                className="p-1 rounded text-primary-500 hover:text-primary-700 dark:hover:text-primary-300 touch-manipulation">
+                <RotateCcw size={12} />
+              </button>
+            )}
             {!NON_TOGGLEABLE_EXPENSES.has(expense.name) && (
               <button type="button" onClick={() => toggleExpenseType(expense.id)}
                 className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-slate-400 touch-manipulation">
@@ -1013,9 +1050,15 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
             <Cell value={expense.t12Value} onChange={v => updateExpense(expense.id, { t12Value: v })} format={fmt} />
           </div>
           <div>
-            <p className="text-[10px] font-semibold uppercase text-slate-400 mb-1">
-              Yr {mobileYear}{mobileYear === projectionYears ? ' ★' : ''}
-            </p>
+            <div className="flex items-center gap-1 mb-1">
+              <p className="text-[10px] font-semibold uppercase text-slate-400">
+                Yr {mobileYear}{mobileYear === projectionYears ? ' ★' : ''}
+              </p>
+              {expChainBrokenHere
+                ? <Unlink size={9} className="text-orange-400 dark:text-orange-500 shrink-0" />
+                : mobileYear > 1 && <Link2 size={9} className="text-slate-300 dark:text-slate-600 shrink-0" />
+              }
+            </div>
             {mobileYear === 1 ? (
               <div className="space-y-1">
                 <Cell value={expense.stabilizedValue} onChange={v => updateExpense(expense.id, { stabilizedValue: v })} format={fmt} />
@@ -1034,6 +1077,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                     ? getEffectivePctForYear(expense.id, expense.stabilizedValue, mobileYear)
                     : chainedExpenseValue(expense, mobileYear);
                   const yrGrowth = data.yearOverrides?.[mobileYear]?.expenseGrowthPcts?.[expense.id] ?? expense.growthPct;
+                  const expHasDownstream = mobileYear < projectionYears;
                   return (
                     <>
                       <YearCell computed={computed} override={typeof yrExpOv === 'number' ? yrExpOv : undefined} format={fmt}
@@ -1041,6 +1085,8 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                           setExpenseYearOverride(mobileYear, expense.id, v);
                         }}
                         onClearOverride={() => clearExpenseYearOverride(mobileYear, expense.id)}
+                        onYearOnly={expHasDownstream ? v => applyExpenseYearOnly(mobileYear, expense.id, v) : undefined}
+                        cascadeDelay={(mobileYear - 1) * 50}
                         />
                       {!expense.isPercentOfEGI && (
                         <div className="flex items-center gap-0.5">
