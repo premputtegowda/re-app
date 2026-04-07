@@ -92,10 +92,10 @@ describe('Scenario 2: Mid-Chain Block (Blue at Yr3 = 20 000)', () => {
 
 // ── Scenario 3: Year 1 Block ──────────────────────────────────────────────────
 
-describe('Scenario 3: Year 1 Block (ban icon clicked — yr1Blocked=true, baseline changes to 15 000)', () => {
-  // The Year 1 ban-icon writes yearOverrides[1].otherIncome + yr1Blocked=true.
-  // Even after the master baseline (stabilized) changes, Yr2+ chain from the Yr1 block.
-  const overrides: Overrides = { 1: { otherIncome: 10_000, yr1Blocked: true } };
+describe('Scenario 3: Year 1 Override (Yr1 value stored — baseline changes to 15 000, chain still follows Yr1)', () => {
+  // A stored Yr1 override anchors the chain — same rule as all other years.
+  // Even after the master baseline (stabilized) changes, Yr2+ chain from the Yr1 stored value.
+  const overrides: Overrides = { 1: { otherIncome: 10_000 } };
   const newBaseline = 15_000;
 
   it('Yr1 cell displays the Blue override (10k) — not the new baseline (15k)', () => {
@@ -164,20 +164,14 @@ describe('Scenario 5: Undo Mid-Chain Block — clear the Yr3 override', () => {
 
 // ── Scenario 6: Undo Year 1 Block ────────────────────────────────────────────
 
-describe('Scenario 6: Undo Year 1 Block — clear the Yr1 override', () => {
+describe('Scenario 6: Undo Year 1 Override — clear the Yr1 override', () => {
   // Before: { 1: { otherIncome: 8 000 } }, stabilized = 10 000
   // After:  {}
 
-  it('while blocked (yr1Blocked=true): Yr1 shows 8k (Blue), Yr2 chains from 8k — not baseline (10k)', () => {
-    const blocked: Overrides = { 1: { otherIncome: 8_000, yr1Blocked: true } };
-    expect(displayed(blocked, 10_000, 1)).toBe(8_000);
-    expect(formula(blocked, 10_000, 2)).toBeCloseTo(8_000 * 1.02, 2);
-  });
-
-  it('plain Yr1 override without yr1Blocked: Yr2 still chains from stabilized (10k)', () => {
-    const plainOverride: Overrides = { 1: { otherIncome: 8_000 } }; // no yr1Blocked
-    expect(displayed(plainOverride, 10_000, 1)).toBe(8_000); // Yr1 still shows override
-    expect(formula(plainOverride, 10_000, 2)).toBeCloseTo(10_000 * 1.02, 2); // Yr2 ignores it
+  it('Yr1 shows 8k (Blue), Yr2 chains from 8k — not baseline (10k)', () => {
+    const overrides: Overrides = { 1: { otherIncome: 8_000 } };
+    expect(displayed(overrides, 10_000, 1)).toBe(8_000);
+    expect(formula(overrides, 10_000, 2)).toBeCloseTo(8_000 * 1.02, 2);
   });
 
   it('after unblocking: Yr1 shows baseline (10k), Yr2 chains from 10k', () => {

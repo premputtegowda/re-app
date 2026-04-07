@@ -6,8 +6,8 @@ import type { ProFormaData, ProFormaItem } from '@/types';
  */
 export function makeChainedValue(yearOverrides: ProFormaData['yearOverrides']) {
   return function (
-    overrideField: 'grossRent' | 'otherIncome',
-    growthPctField: 'grossRentGrowthPct' | 'otherIncomeGrowthPct',
+    overrideField: 'grossRent' | 'otherIncome' | 'vacancyPct' | 'creditLossPct',
+    growthPctField: 'grossRentGrowthPct' | 'otherIncomeGrowthPct' | null,
     stabilized: number,
     defaultGrowthPct: number,
     targetYear: number
@@ -18,14 +18,14 @@ export function makeChainedValue(yearOverrides: ProFormaData['yearOverrides']) {
     for (let y = 2; y <= targetYear; y++) {
       const prevOv = yearOverrides?.[y - 1];
       const prev = prevOv?.[overrideField];
-      // Skip pre-stab (system) overrides — gross rent formula always chains from stabilized, not calculator values
+      // Skip pre-stab (system) overrides — calculator-driven values don't anchor the chain
       const isSystem = overrideField === 'grossRent' && prevOv?.grossRentSystem === true;
-      // For non-grossRent Yr1, only rebase the chain when yr1Blocked=true (ban icon clicked).
-      // A plain Yr1 edit is display-only — Yr2+ continue chaining from stabilized.
-      const isUnblockedYr1Override = (y - 1) === 1 && overrideField !== 'grossRent' && !prevOv?.yr1Blocked;
-      if (prev !== undefined && !isSystem && !isUnblockedYr1Override) value = prev;
-      const rateOverride = yearOverrides?.[y]?.[growthPctField];
-      if (rateOverride !== undefined) lastGrowthPct = rateOverride;
+      // Any manually-entered value (any year) anchors the chain — consistent rule, no Year 1 exception
+      if (prev !== undefined && !isSystem) value = prev;
+      if (growthPctField !== null) {
+        const rateOverride = yearOverrides?.[y]?.[growthPctField];
+        if (rateOverride !== undefined) lastGrowthPct = rateOverride;
+      }
       value = value * (1 + lastGrowthPct / 100);
     }
     return value;

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { RotateCcw } from 'lucide-react';
+import { RotateCcw, CheckCircle2 } from 'lucide-react';
 import { Card } from '@/components/UI/Card';
 import { formatCurrency, formatPct, formatMultiple } from '@/utils/dealAnalyzerCalc';
 import {
@@ -162,6 +162,93 @@ function BreakEvenTable({ rows, mode }: { rows: BreakEvenRow[]; mode: 'coc' | 'i
   );
 }
 
+// ── Goal Seek banner ──────────────────────────────────────────────────────────
+
+type GoalMetric = 'irr' | 'coc';
+
+function GoalSeekBanner({ metric, target, onMetricChange, onTargetChange, result }: {
+  metric: GoalMetric;
+  target: number;
+  onMetricChange: (m: GoalMetric) => void;
+  onTargetChange: (v: number) => void;
+  result: CoCResult;
+}) {
+  const current = metric === 'irr' ? (result.irr ?? 0) : result.avgCoCReturn;
+  const met = current >= target;
+  const pct = target > 0 ? Math.min(100, Math.max(0, (current / target) * 100)) : 100;
+  const gap = target - current;
+
+  return (
+    <div className={`rounded-xl p-4 border transition-colors ${
+      met
+        ? 'bg-secondary-50 dark:bg-secondary-900/20 border-secondary-200 dark:border-secondary-800/40'
+        : 'bg-slate-50 dark:bg-slate-700/40 border-slate-200 dark:border-slate-700'
+    }`}>
+      {/* Target selector row */}
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Target</span>
+          <div className="flex items-center bg-white dark:bg-slate-700 rounded-lg border border-slate-200 dark:border-slate-600 p-0.5">
+            {(['irr', 'coc'] as const).map(m => (
+              <button key={m} type="button" onClick={() => onMetricChange(m)}
+                className={`px-2.5 py-0.5 text-xs font-semibold rounded-md transition-all ${
+                  metric === m
+                    ? 'bg-primary-600 text-white shadow-sm'
+                    : 'text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200'
+                }`}>
+                {m === 'irr' ? 'IRR' : 'CoC'}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1">
+            <input type="number" value={target} onChange={e => onTargetChange(Number(e.target.value))}
+              className="input w-14 text-xs text-right tabular-nums py-1 px-2" step={0.5} min={-20} max={50} />
+            <span className="text-xs text-slate-500">%</span>
+          </div>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-[10px] text-slate-400 uppercase tracking-wide">Current</p>
+          <p className={`text-sm font-bold tabular-nums ${met ? 'text-secondary-600 dark:text-secondary-400' : 'text-slate-800 dark:text-slate-200'}`}>
+            {current.toFixed(1)}%
+          </p>
+        </div>
+      </div>
+
+      {/* Progress bar */}
+      <div className="relative h-2.5 rounded-full bg-slate-200 dark:bg-slate-600 overflow-hidden mb-2">
+        <div
+          className={`h-full rounded-full transition-all duration-300 ${
+            met ? 'bg-secondary-500' : pct >= 80 ? 'bg-amber-400' : 'bg-primary-500'
+          }`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+
+      {/* Status row */}
+      <div className="flex items-center justify-between">
+        {met ? (
+          <div className="flex items-center gap-1.5 text-secondary-600 dark:text-secondary-400">
+            <CheckCircle2 size={13} />
+            <span className="text-xs font-semibold">Target met!</span>
+          </div>
+        ) : (
+          <span className="text-[11px] text-slate-400">Adjust sliders below to close the gap</span>
+        )}
+        {!met && (
+          <span className="text-xs font-semibold text-slate-500 tabular-nums">
+            Gap: <span className="text-red-500 dark:text-red-400">{gap.toFixed(1)}%</span>
+          </span>
+        )}
+        {met && (
+          <span className="text-[11px] text-slate-400 tabular-nums">
+            +{(current - target).toFixed(1)}% above target
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Section label ──────────────────────────────────────────────────────────────
 
 function SectionLabel({ label }: { label: string }) {
@@ -177,6 +264,9 @@ function SectionLabel({ label }: { label: string }) {
 
 export function WhatIfPanel({ acquisition, operations, proForma, refinance, baseResult, embedded }: WhatIfPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [panelMode, setPanelMode] = useState<'explore' | 'goalseek'>('explore');
+  const [goalMetric, setGoalMetric] = useState<GoalMetric>('irr');
+  const [goalTarget, setGoalTarget] = useState(12);
   const [breakEvenMode, setBreakEvenMode] = useState<'coc' | 'irr'>('coc');
   const [targetCoCReturn, setTargetCoCReturn] = useState(0);
   const [targetIRR, setTargetIRR] = useState(0);
@@ -327,6 +417,31 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
 
   const innerContent = (
     <div className="space-y-6">
+      {/* Mode toggle */}
+      <div className="flex items-center gap-2">
+        {(['explore', 'goalseek'] as const).map(mode => (
+          <button key={mode} type="button" onClick={() => setPanelMode(mode)}
+            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+              panelMode === mode
+                ? 'bg-primary-600 text-white border-primary-600'
+                : 'border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-400'
+            }`}>
+            {mode === 'explore' ? 'Explore' : '⚡ Goal Seek'}
+          </button>
+        ))}
+      </div>
+
+      {/* Goal Seek banner */}
+      {panelMode === 'goalseek' && (
+        <GoalSeekBanner
+          metric={goalMetric}
+          target={goalTarget}
+          onMetricChange={setGoalMetric}
+          onTargetChange={setGoalTarget}
+          result={whatIfResult}
+        />
+      )}
+
       {/* KPI deltas */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <KPIDelta label="Avg CoC Return" value={formatPct(whatIfResult.avgCoCReturn)}
@@ -402,8 +517,8 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
         </button>
       )}
 
-      {/* Break-even table */}
-      <div className="space-y-3">
+      {/* Break-even table — Explore mode only */}
+      {panelMode === 'explore' && <div className="space-y-3">
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Break-even Analysis</p>
@@ -447,7 +562,7 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
           </div>
         </div>
         <BreakEvenTable rows={breakEvenRows} mode={breakEvenMode} />
-      </div>
+      </div>}
     </div>
   );
 

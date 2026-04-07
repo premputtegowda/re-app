@@ -97,16 +97,11 @@ describe('makeChainedValue', () => {
     expect(result).toBeCloseTo(14000 * 1.03, 2);
   });
 
-  it('non-grossRent Yr1 plain override does NOT rebase Yr2 — must set yr1Blocked to anchor the chain', () => {
-    // A plain Yr1 otherIncome edit is display-only; Yr2 still chains from stabilized
-    const plainOverride = { 1: { otherIncome: 500, grossRentSystem: true } };
+  it('any Yr1 override (non-grossRent) rebases Yr2 — consistent with all other years', () => {
+    // A Yr1 otherIncome edit anchors the chain; Yr2 chains from the Yr1 override value
+    const plainOverride = { 1: { otherIncome: 500 } };
     const chainPlain = makeChainedValue(plainOverride);
-    expect(chainPlain('otherIncome', 'otherIncomeGrowthPct', 1000, 2, 2)).toBeCloseTo(1000 * 1.02, 2);
-
-    // With yr1Blocked=true, Yr2 rebases from the Yr1 override
-    const blockedOverride = { 1: { otherIncome: 500, yr1Blocked: true } };
-    const chainBlocked = makeChainedValue(blockedOverride);
-    expect(chainBlocked('otherIncome', 'otherIncomeGrowthPct', 1000, 2, 2)).toBeCloseTo(500 * 1.02, 2);
+    expect(chainPlain('otherIncome', 'otherIncomeGrowthPct', 1000, 2, 2)).toBeCloseTo(500 * 1.02, 2);
   });
 
   it('per-year growth rates accumulate correctly across system-skipped years', () => {
@@ -120,6 +115,42 @@ describe('makeChainedValue', () => {
     const year2 = 12000 * 1.03;
     const result = chainWithOverride('grossRent', 'grossRentGrowthPct', 12000, 3, 3);
     expect(result).toBeCloseTo(year2 * 1.05, 2);
+  });
+});
+
+describe('makeChainedValue — flat-chain fields (vacancyPct / creditLossPct)', () => {
+  it('vacancyPct: no overrides — all years equal stabilized (flat chain, 0% growth)', () => {
+    const chain = makeChainedValue({});
+    expect(chain('vacancyPct', null, 5, 0, 2)).toBeCloseTo(5, 4);
+    expect(chain('vacancyPct', null, 5, 0, 5)).toBeCloseTo(5, 4);
+  });
+
+  it('vacancyPct: override in Yr2 rebases Yr3+', () => {
+    const overrides = { 2: { vacancyPct: 10 } };
+    const chainWithOverride = makeChainedValue(overrides);
+    expect(chainWithOverride('vacancyPct', null, 5, 0, 3)).toBeCloseTo(10, 4);
+    expect(chainWithOverride('vacancyPct', null, 5, 0, 4)).toBeCloseTo(10, 4);
+  });
+
+  it('vacancyPct: Yr1 override rebases Yr2+', () => {
+    const overrides = { 1: { vacancyPct: 20 } };
+    const chainWithOverride = makeChainedValue(overrides);
+    expect(chainWithOverride('vacancyPct', null, 5, 0, 2)).toBeCloseTo(20, 4);
+    expect(chainWithOverride('vacancyPct', null, 5, 0, 3)).toBeCloseTo(20, 4);
+  });
+
+  it('vacancyPct: mid-chain override; downstream years carry the overridden value', () => {
+    const overrides = { 3: { vacancyPct: 8 } };
+    const chainWithOverride = makeChainedValue(overrides);
+    expect(chainWithOverride('vacancyPct', null, 5, 0, 2)).toBeCloseTo(5, 4);  // before override
+    expect(chainWithOverride('vacancyPct', null, 5, 0, 4)).toBeCloseTo(8, 4);  // after override
+  });
+
+  it('creditLossPct: override in Yr3 rebases Yr4+', () => {
+    const overrides = { 3: { creditLossPct: 2 } };
+    const chainWithOverride = makeChainedValue(overrides);
+    expect(chainWithOverride('creditLossPct', null, 0, 0, 2)).toBeCloseTo(0, 4);
+    expect(chainWithOverride('creditLossPct', null, 0, 0, 4)).toBeCloseTo(2, 4);
   });
 });
 

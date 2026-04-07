@@ -809,91 +809,157 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 <div className="border-t border-slate-100 dark:border-slate-700/60">
                   <p className="px-4 pt-3 text-xs text-slate-400 dark:text-slate-500">Estimate ok if exact figures aren't available</p>
                   {hasMfr ? (
-                    <table className="w-full text-sm mt-1">
-                      <thead>
-                        <tr className="border-b border-slate-100 dark:border-slate-700/60">
-                          <th className="px-4 py-2 text-left text-xs font-medium text-slate-400">Unit Type</th>
-                          <th className="px-3 py-2 text-right text-xs font-medium text-slate-400">Current</th>
-                          <th className="px-3 py-2 text-right text-xs font-medium text-slate-400">
-                            <span className="flex items-center justify-end gap-1">
-                              Target
-                              {isVisited && acquisition.unitMix.some(e => !(e.rentMonthly || 0)) && (
-                                <AlertTriangle size={12} className="text-amber-500" data-testid="mfr-target-rent-warning" />
-                              )}
-                            </span>
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                    <>
+                      {/* Mobile: card-per-unit layout */}
+                      <div className="sm:hidden divide-y divide-slate-100 dark:divide-slate-700/60">
                         {acquisition.unitMix.map(entry => (
-                          <tr key={entry.id}>
-                            <td className="px-4 py-2.5 text-xs font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">
-                              {entry.beds}BR/{entry.baths}BA <span className="text-slate-400 font-normal">×{entry.count}</span>
-                            </td>
-                            {(['inPlaceRent', 'rentMonthly'] as const).map(field => {
-                              const warn = field === 'rentMonthly' && isVisited && !(entry[field] || 0);
-                              return (
-                                <td key={field} className="px-2 py-2">
-                                  <div className="relative">
-                                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">$</span>
-                                    <input
-                                      type="number" min={0} placeholder="0"
-                                      className={`input text-sm pl-5 text-right w-full ${warn ? 'border-amber-300 focus:ring-amber-400' : ''}`}
-                                      value={(entry[field] || 0) === 0 ? '' : entry[field]}
-                                      onChange={e => {
-                                        updateAcquisition('unitMix', acquisition.unitMix.map(u =>
-                                          u.id === entry.id ? { ...u, [field]: Number(e.target.value) } : u
-                                        ));
-                                      }}
-                                      onBlur={e => {
-                                        // Auto-advance only if Value-Add hasn't been answered yet
-                                        if (field === 'rentMonthly' && Number(e.target.value) > 0 && isValueAdd === null) {
-                                          setRentOpen(false);
-                                          setValueAddOpen(true);
-                                        }
-                                      }}
-                                    />
+                          <div key={entry.id} className="px-4 py-3 space-y-2">
+                            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                              {entry.beds}BR/{entry.baths}BA <span className="text-slate-400">×{entry.count}</span>
+                            </p>
+                            <div className="grid grid-cols-2 gap-3">
+                              {([
+                                { field: 'inPlaceRent' as const, label: 'In-Place' },
+                                { field: 'rentMonthly' as const, label: 'Target'   },
+                              ]).map(({ field, label }) => {
+                                const warn = field === 'rentMonthly' && isVisited && !(entry[field] || 0);
+                                return (
+                                  <div key={field}>
+                                    <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 flex items-center gap-1">
+                                      {label}
+                                      {warn && <AlertTriangle size={12} className="text-amber-500" />}
+                                    </label>
+                                    <div className="relative">
+                                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">$</span>
+                                      <input
+                                        type="number" min={0} placeholder="0"
+                                        className={`input text-sm pl-5 text-right w-full ${warn ? 'border-amber-300 focus:ring-amber-400' : ''}`}
+                                        value={(entry[field] || 0) === 0 ? '' : entry[field]}
+                                        onChange={e => {
+                                          updateAcquisition('unitMix', acquisition.unitMix.map(u =>
+                                            u.id === entry.id ? { ...u, [field]: Number(e.target.value) } : u
+                                          ));
+                                        }}
+                                        onBlur={e => {
+                                          if (field === 'rentMonthly' && Number(e.target.value) > 0 && isValueAdd === null) {
+                                            setRentOpen(false);
+                                            setValueAddOpen(true);
+                                          }
+                                        }}
+                                      />
+                                    </div>
                                   </div>
-                                </td>
-                              );
-                            })}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  ) : (
-                    <div className="px-4 py-3 grid grid-cols-2 gap-3">
-                      {([
-                        { field: 'sfrInPlaceRent' as const, label: 'Current' },
-                        { field: 'sfrTargetRent'  as const, label: 'Target'  },
-                      ]).map(({ field, label }) => {
-                        const warn = field === 'sfrTargetRent' && isVisited && !acquisition[field];
-                        return (
-                          <div key={field}>
-                            <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1">
-                              {label}
-                              {warn && <AlertTriangle size={12} className="text-amber-500" data-testid="sfr-target-rent-warning" />}
-                            </label>
-                            <div className="relative">
-                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">$</span>
-                              <input
-                                type="number" min={0} placeholder="0"
-                                className={`input text-sm pl-6 ${warn ? 'border-amber-300 focus:ring-amber-400' : ''}`}
-                                value={(acquisition[field] || 0) === 0 ? '' : acquisition[field]}
-                                onChange={e => {
-                                  updateAcquisition(field, Number(e.target.value));
-                                }}
-                                onBlur={e => {
-                                  if (field === 'sfrTargetRent' && Number(e.target.value) > 0 && isValueAdd === null) {
-                                    setRentOpen(false);
-                                    setValueAddOpen(true);
-                                  }
-                                }}
-                              />
+                                );
+                              })}
                             </div>
+                            {(entry.preStabRent || 0) > 0 && (
+                              <p className="text-xs text-primary-600 dark:text-primary-400">
+                                Pre-Stab: ${entry.preStabRent} <span className="text-slate-400">(calc)</span>
+                              </p>
+                            )}
                           </div>
-                        );
-                      })}
+                        ))}
+                        <div className="px-4 py-2 flex justify-between text-xs text-slate-400">
+                          <span>Avg In-Place: ${acquisition.unitMix.length > 0 ? Math.round(acquisition.unitMix.reduce((s, e) => s + (e.inPlaceRent || 0), 0) / acquisition.unitMix.length) : 0}</span>
+                          <span>Avg Target: ${acquisition.unitMix.length > 0 ? Math.round(acquisition.unitMix.reduce((s, e) => s + (e.rentMonthly || 0), 0) / acquisition.unitMix.length) : 0}</span>
+                        </div>
+                      </div>
+                      {/* Desktop: table layout */}
+                      <div className="hidden sm:block">
+                        <table className="w-full text-sm mt-1">
+                          <thead>
+                            <tr className="border-b border-slate-100 dark:border-slate-700/60">
+                              <th className="px-4 py-2 text-left text-xs font-medium text-slate-400">Unit Type</th>
+                              <th className="px-3 py-2 text-right text-xs font-medium text-slate-400">In-Place</th>
+                              <th className="px-3 py-2 text-right text-xs font-medium text-slate-400">
+                                <span className="flex items-center justify-end gap-1">
+                                  Target
+                                  {isVisited && acquisition.unitMix.some(e => !(e.rentMonthly || 0)) && (
+                                    <AlertTriangle size={12} className="text-amber-500" data-testid="mfr-target-rent-warning" />
+                                  )}
+                                </span>
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                            {acquisition.unitMix.map(entry => (
+                              <tr key={entry.id}>
+                                <td className="px-4 py-2.5 text-xs font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">
+                                  {entry.beds}BR/{entry.baths}BA <span className="text-slate-400 font-normal">×{entry.count}</span>
+                                </td>
+                                {(['inPlaceRent', 'rentMonthly'] as const).map(field => {
+                                  const warn = field === 'rentMonthly' && isVisited && !(entry[field] || 0);
+                                  return (
+                                    <td key={field} className="px-2 py-2">
+                                      <div className="relative">
+                                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">$</span>
+                                        <input
+                                          type="number" min={0} placeholder="0"
+                                          className={`input text-sm pl-5 text-right w-full ${warn ? 'border-amber-300 focus:ring-amber-400' : ''}`}
+                                          value={(entry[field] || 0) === 0 ? '' : entry[field]}
+                                          onChange={e => {
+                                            updateAcquisition('unitMix', acquisition.unitMix.map(u =>
+                                              u.id === entry.id ? { ...u, [field]: Number(e.target.value) } : u
+                                            ));
+                                          }}
+                                          onBlur={e => {
+                                            if (field === 'rentMonthly' && Number(e.target.value) > 0 && isValueAdd === null) {
+                                              setRentOpen(false);
+                                              setValueAddOpen(true);
+                                            }
+                                          }}
+                                        />
+                                      </div>
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="px-4 py-3">
+                      <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">Rent Schedule ($/mo)</p>
+                      {(acquisition.sfrPreStabRent || 0) > 0 && (
+                        <p className="mb-2 text-xs text-primary-600 dark:text-primary-400">
+                          Pre-stab: ${acquisition.sfrPreStabRent} — <span className="text-slate-400">from calculator</span>
+                        </p>
+                      )}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {([
+                          { field: 'sfrInPlaceRent' as const, label: 'In-Place' },
+                          { field: 'sfrTargetRent'  as const, label: 'Target'   },
+                        ]).map(({ field, label }) => {
+                          const warn = field === 'sfrTargetRent' && isVisited && !acquisition[field];
+                          return (
+                            <div key={field}>
+                              <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1">
+                                {label}
+                                {warn && <AlertTriangle size={12} className="text-amber-500" data-testid="sfr-target-rent-warning" />}
+                              </label>
+                              <div className="relative">
+                                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                                <input
+                                  type="number" min={0} placeholder="0"
+                                  className={`input text-sm pl-6 ${warn ? 'border-amber-300 focus:ring-amber-400' : ''}`}
+                                  value={(acquisition[field] || 0) === 0 ? '' : acquisition[field]}
+                                  onChange={e => {
+                                    updateAcquisition(field, Number(e.target.value));
+                                  }}
+                                  onBlur={e => {
+                                    if (field === 'sfrTargetRent' && Number(e.target.value) > 0 && isValueAdd === null) {
+                                      setRentOpen(false);
+                                      setValueAddOpen(true);
+                                    }
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                 </div>
