@@ -252,6 +252,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   });
   const [stabDuration, setStabDuration] = useState(() => initialDeal?.calcState?.totalDuration ?? 12);
   const [offlinePerUnit, setOfflinePerUnit] = useState(() => initialDeal?.calcState?.perUnitMonths?.[0] || 1);
+  const [distributionMethod, setDistributionMethod] = useState<'weighted' | 'custom'>(() =>
+    initialDeal?.calcState?.distributionMethod === 'custom' ? 'custom' : 'weighted'
+  );
   const [calcCollapsed, setCalcCollapsed] = useState(true);
 
   // Accordion open states for Operations step
@@ -1118,6 +1121,59 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                   isOpen={stabOpen} onToggle={() => setStabOpen(o => !o)}
                   isComplete={stepComplete}
                 />
+                {/* Always-visible row — distribution toggle (MFR) or revenue-loss summary (SFR) */}
+                <div className="px-4 py-2 border-t border-slate-100 dark:border-slate-700/60 flex items-center gap-2 flex-wrap">
+                  {hasMfr ? (
+                    <>
+                      <div className="flex items-center rounded-lg border border-slate-200 dark:border-slate-700 p-0.5 bg-slate-100 dark:bg-slate-800/60">
+                        {(['weighted', 'custom'] as const).map(m => (
+                          <button
+                            key={m}
+                            type="button"
+                            onClick={() => setDistributionMethod(m)}
+                            className={`text-[11px] px-2 py-0.5 rounded-md font-medium transition-colors touch-manipulation ${
+                              distributionMethod === m
+                                ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm'
+                                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                            }`}
+                          >
+                            {m === 'weighted' ? 'Weighted' : 'Custom'}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    /* SFR: show offline duration + estimated lost revenue */
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400 shrink-0">
+                        Unit offline: <span className="font-semibold text-slate-700 dark:text-slate-200">{offlinePerUnit} mo</span>
+                      </span>
+                      {acquisition.sfrTargetRent > 0 && offlinePerUnit > 0 && (
+                        <>
+                          <span className="text-slate-200 dark:text-slate-700">·</span>
+                          <span className="text-[11px] text-amber-600 dark:text-amber-400 shrink-0">
+                            Est. lost revenue: <span className="font-semibold">${Math.round(offlinePerUnit * acquisition.sfrTargetRent).toLocaleString()}</span>
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  <div className="ml-auto flex items-center gap-2 shrink-0">
+                    {!stabOpen && stabSummary && (
+                      <span className="text-[11px] text-slate-400 dark:text-slate-500">{stabSummary}</span>
+                    )}
+                    {!stabOpen && (
+                      <button
+                        type="button"
+                        onClick={() => { setStabOpen(true); setCalcCollapsed(false); setPreStabMethod('calculator'); }}
+                        className="flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 transition-colors touch-manipulation"
+                      >
+                        <Pencil size={11} />
+                        Edit schedule
+                      </button>
+                    )}
+                  </div>
+                </div>
                 <div className={`border-t border-slate-100 dark:border-slate-700/60 space-y-4 px-4 py-4 ${stabOpen ? '' : 'hidden'}`}>
 
                     {/* Timeline */}
@@ -1156,31 +1212,34 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     {/* Rent schedule — collapsed summary by default, expand to edit */}
                     {/* Summary bar — shown when collapsed */}
                     {calcCollapsed && (
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <Zap size={12} className={`shrink-0 ${calcApplied ? 'text-blue-500' : calcScheduleIncomplete ? 'text-amber-500' : 'text-slate-300 dark:text-slate-600'}`} />
-                          {calcApplied ? (
-                            <span className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                              {[totalReno > 0 && `${totalReno} reno`, totalLU > 0 && `${totalLU} lease-up`].filter(Boolean).join(' · ')}
-                              {' · '}{stabDuration} mo
-                              <span className="text-emerald-600 dark:text-emerald-400 font-medium"> · Pro Forma updated</span>
-                            </span>
-                          ) : calcScheduleIncomplete ? (
-                            <span className="text-xs text-amber-600 dark:text-amber-400">Some unit types need schedule update — edit to fix</span>
-                          ) : stabDuration > 0 ? (
-                            <span className="text-xs text-slate-400 dark:text-slate-500">Schedule auto-filled</span>
-                          ) : (
-                            <span className="text-xs text-slate-400 dark:text-slate-500">Set renovation period to auto-calculate</span>
-                          )}
+                      <div className="space-y-2">
+                        {/* Status + edit link */}
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <Zap size={12} className={`shrink-0 ${calcApplied ? 'text-blue-500' : calcScheduleIncomplete ? 'text-amber-500' : 'text-slate-300 dark:text-slate-600'}`} />
+                            {calcApplied ? (
+                              <span className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                                {[totalReno > 0 && `${totalReno} reno`, totalLU > 0 && `${totalLU} lease-up`].filter(Boolean).join(' · ')}
+                                {' · '}{stabDuration} mo
+                                <span className="text-emerald-600 dark:text-emerald-400 font-medium"> · Pro Forma updated</span>
+                              </span>
+                            ) : calcScheduleIncomplete ? (
+                              <span className="text-xs text-amber-600 dark:text-amber-400">Some unit types need schedule update — edit to fix</span>
+                            ) : stabDuration > 0 ? (
+                              <span className="text-xs text-slate-400 dark:text-slate-500">Schedule auto-filled</span>
+                            ) : (
+                              <span className="text-xs text-slate-400 dark:text-slate-500">Set renovation period to auto-calculate</span>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => { setCalcCollapsed(false); setPreStabMethod('calculator'); }}
+                            className="shrink-0 flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 transition-colors touch-manipulation"
+                          >
+                            <Pencil size={11} />
+                            Edit schedule
+                          </button>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => { setCalcCollapsed(false); setPreStabMethod('calculator'); }}
-                          className="shrink-0 flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 transition-colors touch-manipulation"
-                        >
-                          <Pencil size={11} />
-                          Edit schedule
-                        </button>
                       </div>
                     )}
 
@@ -1198,7 +1257,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                           externalLeaseUpToStabilize={leaseUpUnitsArrMemo}
                           onOpenChange={v => { if (!v) setCalcCollapsed(true); }}
                           initialState={calcState}
-                          onStateChange={setCalcState}
+                          externalDistributionMethod={distributionMethod}
+                          onStateChange={s => { setCalcState(s); if (s.distributionMethod) setDistributionMethod(s.distributionMethod); }}
                           onApplyRents={rents => {
                             if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map((u, i) => ({
                               ...u, inPlaceRent: rents[i]?.inPlace ?? u.inPlaceRent, rentMonthly: rents[i]?.target ?? u.rentMonthly,

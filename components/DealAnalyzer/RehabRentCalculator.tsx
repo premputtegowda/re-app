@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { Zap, X, Wand2, ChevronDown, ChevronUp, Check } from 'lucide-react';
+import { Zap, X, ChevronDown, ChevronUp, Check } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -142,8 +142,9 @@ function groupByYear(totalMonths: number): number[][] {
   return years;
 }
 
+/** Evenly distribute n units across dur months (used within each phase). */
 function evenDistribute(n: number, dur: number): number[] {
-  if (n === 0 || dur === 0) return Array(dur).fill(0);
+  if (n === 0 || dur === 0) return Array(Math.max(dur, 0)).fill(0);
   const result = Array(dur).fill(0);
   let placed = 0;
   for (let i = 0; i < dur; i++) {
@@ -152,6 +153,49 @@ function evenDistribute(n: number, dur: number): number[] {
     placed = target;
   }
   return result;
+}
+
+/**
+ * Weighted Distribution — S-curve model:
+ *   First 33%  of months → 20% of units  (slow start)
+ *   Middle 33% of months → 50% of units  (peak production)
+ *   Final 33%  of months → 30% of units  (punch list / difficult units)
+ *
+ * Uses cumulative rounding so p1+p2+p3 always equals n exactly,
+ * regardless of unit count. Zero-duration phases roll units forward.
+ */
+function weightedDistribute(n: number, dur: number): number[] {
+  if (n === 0 || dur === 0) return Array(Math.max(dur, 0)).fill(0);
+
+  const p1End = Math.floor(dur / 3);
+  const p2End = Math.floor(dur * 2 / 3);
+  const p1Dur = p1End;
+  const p2Dur = p2End - p1End;
+  const p3Dur = dur - p2End;
+
+  // Cumulative rounding: compute units at each phase boundary so totals always sum to n
+  const cumAfter1 = Math.round(n * 0.20);
+  const cumAfter2 = Math.round(n * 0.70);
+  let p1Units = cumAfter1;
+  let p2Units = Math.max(0, cumAfter2 - cumAfter1);
+  let p3Units = Math.max(0, n - cumAfter2);
+
+  // Roll units forward when a phase has no months
+  if (p1Dur === 0) { p2Units += p1Units; p1Units = 0; }
+  if (p2Dur === 0) { p3Units += p2Units; p2Units = 0; }
+  // Final safety: guarantee sum = n
+  p3Units = n - p1Units - p2Units;
+
+  const result = Array(dur).fill(0);
+  if (p1Dur > 0) { const s = evenDistribute(p1Units, p1Dur); for (let i = 0; i < p1Dur; i++) result[i] = s[i]; }
+  if (p2Dur > 0) { const s = evenDistribute(p2Units, p2Dur); for (let i = 0; i < p2Dur; i++) result[p1End + i] = s[i]; }
+  if (p3Dur > 0) { const s = evenDistribute(p3Units, p3Dur); for (let i = 0; i < p3Dur; i++) result[p2End + i] = s[i]; }
+
+  return result;
+}
+
+function computeScheduleByMethod(units: number[], dur: number): number[][] {
+  return units.map(n => (n === 0 || dur === 0) ? Array(Math.max(dur, 0)).fill(0) : weightedDistribute(n, dur));
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -172,6 +216,7 @@ interface RehabRentCalculatorProps {
   externalOffline?: number;
   externalUnitsToStabilize?: number[];
   externalLeaseUpToStabilize?: number[];
+  externalDistributionMethod?: 'weighted' | 'custom';
   hideHeader?: boolean;
 }
 
@@ -191,6 +236,7 @@ export function RehabRentCalculator({
   externalOffline,
   externalUnitsToStabilize,
   externalLeaseUpToStabilize,
+  externalDistributionMethod,
   hideHeader,
 }: RehabRentCalculatorProps) {
   const setOpen = (v: boolean) => { onOpenChange?.(v); };
@@ -229,21 +275,23 @@ export function RehabRentCalculator({
   const [leaseUpToStabilize, setLeaseUpToStabilize] = useState<number[]>(() => initialState?.leaseUpToStabilize ?? unitTypes.map(() => 0));
   const [leaseUpScheduleByType, setLeaseUpScheduleByType] = useState<number[][]>(() => initialState?.leaseUpScheduleByType ?? unitTypes.map(() => []));
   const [openYear, setOpenYear]                 = useState<number | null>(null);
-  // Per-type auto-fill tracking: true = auto-fill mode, false = manually edited
-  const [autoFilledByType, setAutoFilledByType] = useState<boolean[]>(() =>
-    unitTypes.map((_, t) =>
-      !initialState?.scheduleByType?.[t]?.some(n => n > 0) &&
-      !initialState?.leaseUpScheduleByType?.[t]?.some(n => n > 0)
-    )
-  );
+  type DistributionMethod = 'weighted' | 'custom';
+  const [distributionMethod, setDistributionMethod] = useState<DistributionMethod>(() => {
+    if (initialState?.distributionMethod === 'custom') return 'custom';
+    // Backward compat: if a saved manual schedule exists, default to custom
+    const hasManualSchedule =
+      initialState?.scheduleByType?.some(s => s.some(n => n > 0)) ||
+      initialState?.leaseUpScheduleByType?.some(s => s.some(n => n > 0));
+    return hasManualSchedule ? 'custom' : 'weighted';
+  });
 
   // ── Manual mode state ──
   const [manualDuration, setManualDuration]         = useState(() => initialState?.manualDuration ?? 0);
   const [manualPreStabRents, setManualPreStabRents] = useState<number[]>(() => initialState?.manualPreStabRents ?? unitTypes.map(() => 0));
 
   useEffect(() => {
-    onStateChange?.({ mode, totalDuration, unitsToStabilize, perUnitMonths, scheduleByType, manualDuration, manualPreStabRents, localRents, leaseUpToStabilize, leaseUpScheduleByType });
-  }, [mode, totalDuration, unitsToStabilize, perUnitMonths, scheduleByType, manualDuration, manualPreStabRents, localRents, leaseUpToStabilize, leaseUpScheduleByType]); // eslint-disable-line react-hooks/exhaustive-deps
+    onStateChange?.({ mode, totalDuration, unitsToStabilize, perUnitMonths, scheduleByType, manualDuration, manualPreStabRents, localRents, leaseUpToStabilize, leaseUpScheduleByType, distributionMethod });
+  }, [mode, totalDuration, unitsToStabilize, perUnitMonths, scheduleByType, manualDuration, manualPreStabRents, localRents, leaseUpToStabilize, leaseUpScheduleByType, distributionMethod]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Skip setAutoFilled(true) on the very first render so a saved manual schedule is preserved
   const hasMountedRef = useRef(false);
@@ -262,6 +310,7 @@ export function RehabRentCalculator({
     setLeaseUpToStabilize(unitTypes.map(() => 0));
     setLeaseUpScheduleByType(unitTypes.map(() => []));
     setLocalRents(unitTypes.map(ut => ({ inPlace: ut.inPlaceRent, target: ut.targetRent })));
+    // Keep distributionMethod on unit type change
   }, [unitTypes.length]);
 
   useEffect(() => {
@@ -285,6 +334,11 @@ export function RehabRentCalculator({
     if (!externalLeaseUpToStabilize) return;
     setLeaseUpToStabilize(externalLeaseUpToStabilize.map((n, t) => Math.min(n, unitTypes[t]?.count ?? n)));
   }, [externalLeaseUpToStabilize]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (externalDistributionMethod === undefined) return;
+    setDistributionMethod(externalDistributionMethod);
+  }, [externalDistributionMethod]);
 
   // Sync rent changes from the form back into localRents (bidirectional sync).
   // Echo-back guard: when the calculator pushes rents → form → unitTypes, the values
@@ -353,7 +407,6 @@ export function RehabRentCalculator({
     setLeaseUpToStabilize(prev => { const n = [...prev]; n[t] = Math.min(unitTypes[t].count, Math.max(0, val)); return n; });
 
   const updateCell = (t: number, monthIdx: number, val: number) => {
-    setAutoFilledByType(prev => prev.map((v, i) => i === t ? false : v));
     setScheduleByType(prev => {
       const next = prev.map(s => [...s]);
       const otherSum = (next[t] ?? []).reduce((s, n, i) => i === monthIdx ? s : s + n, 0);
@@ -364,7 +417,6 @@ export function RehabRentCalculator({
   };
 
   const updateLeaseUpCell = (t: number, monthIdx: number, val: number) => {
-    setAutoFilledByType(prev => prev.map((v, i) => i === t ? false : v));
     setLeaseUpScheduleByType(prev => {
       const next = prev.map(s => [...s]);
       const otherSum = (next[t] ?? []).reduce((s, n, i) => i === monthIdx ? s : s + n, 0);
@@ -374,38 +426,13 @@ export function RehabRentCalculator({
     });
   };
 
-  const autoFillType = (t: number) => {
-    const renoSched = evenDistribute(unitsToStabilize[t], totalDuration);
-    const luSched   = evenDistribute(leaseUpToStabilize[t], totalDuration);
-    setScheduleByType(prev => prev.map((s, i) => i === t ? renoSched : s));
-    setLeaseUpScheduleByType(prev => prev.map((s, i) => i === t ? luSched : s));
-    setAutoFilledByType(prev => prev.map((v, i) => i === t ? true : v));
-  };
-
-  const computeAutoFill = (units: number[], dur: number) =>
-    unitTypes.map((_, t) => {
-      const n = units[t];
-      if (n === 0 || dur === 0) return Array(dur).fill(0);
-      return evenDistribute(n, dur);
-    });
-
-  const autoFillAll = () => {
-    setScheduleByType(computeAutoFill(unitsToStabilize, totalDuration));
-    setLeaseUpScheduleByType(computeAutoFill(leaseUpToStabilize, totalDuration));
-    setAutoFilledByType(unitTypes.map(() => true));
-  };
-
-  // Selectively re-run auto-fill per type when units or duration change
+  // Auto-recompute schedule whenever units or duration change (weighted mode only)
   useEffect(() => {
-    setScheduleByType(prev => prev.map((sched, t) => {
-      if (!autoFilledByType[t]) return sched;
-      return evenDistribute(unitsToStabilize[t], totalDuration);
-    }));
-    setLeaseUpScheduleByType(prev => prev.map((sched, t) => {
-      if (!autoFilledByType[t]) return sched;
-      return evenDistribute(leaseUpToStabilize[t], totalDuration);
-    }));
-  }, [unitsToStabilize, leaseUpToStabilize, totalDuration, autoFilledByType]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (distributionMethod === 'custom') return;
+    setScheduleByType(computeScheduleByMethod(unitsToStabilize, totalDuration));
+    setLeaseUpScheduleByType(computeScheduleByMethod(leaseUpToStabilize, totalDuration));
+  }, [distributionMethod, unitsToStabilize, leaseUpToStabilize, totalDuration]); // eslint-disable-line react-hooks/exhaustive-deps
+
 
   const result = useMemo<SimulationResult | null>(() => {
     if (!hasRentData || !scheduleValid) return null;
@@ -477,9 +504,9 @@ export function RehabRentCalculator({
     setPerUnitMonths(unitTypes.map(() => 0));
     setScheduleByType(unitTypes.map(() => []));
     setOpenYear(null);
-    setAutoFilledByType(unitTypes.map(() => false));
     setLeaseUpToStabilize(unitTypes.map(() => 0));
     setLeaseUpScheduleByType(unitTypes.map(() => []));
+    // distributionMethod is intentionally preserved on clear
   };
 
   if (unitTypes.length === 0) return (
@@ -548,35 +575,40 @@ export function RehabRentCalculator({
                 <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
                   Schedule
                 </p>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={autoFillAll}
-                    className="flex items-center gap-1 text-xs text-primary-600 dark:text-primary-400 hover:text-primary-700 font-medium touch-manipulation"
-                    title="Distribute units evenly across months"
-                    aria-label="Auto-fill schedule"
-                  >
-                    <Wand2 size={12} />
-                    Auto-fill
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setScheduleByType(unitTypes.map(() => Array(totalDuration).fill(0)));
-                      setLeaseUpScheduleByType(unitTypes.map(() => Array(totalDuration).fill(0)));
-                      setAutoFilledByType(unitTypes.map(() => false));
-                    }}
-                    className="flex items-center gap-1 text-xs text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 font-medium touch-manipulation"
-                    title="Clear schedule"
-                    aria-label="Clear schedule"
-                  >
-                    <X size={12} />
-                    Clear
-                  </button>
-                </div>
               </div>
+              {/* ── Distribution method toggle ── */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center rounded-lg border border-slate-200 dark:border-slate-700 p-0.5 bg-slate-100 dark:bg-slate-800/60">
+                  {(['weighted', 'custom'] as const).map(m => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setDistributionMethod(m)}
+                      className={`text-[11px] px-2 py-1 rounded-md font-medium transition-colors touch-manipulation ${
+                        distributionMethod === m
+                          ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm'
+                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      {m === 'weighted' ? 'Weighted Distribution' : 'Custom'}
+                    </button>
+                  ))}
+                </div>
+                {distributionMethod === 'custom' && (
+                  <button
+                    type="button"
+                    onClick={() => setDistributionMethod('weighted')}
+                    className="text-[11px] text-primary-600 dark:text-primary-400 hover:underline touch-manipulation"
+                  >
+                    Switch to weighted
+                  </button>
+                )}
+              </div>
+              {/* Method description */}
               <p className="text-[11px] text-slate-400 dark:text-slate-500">
-                Enter how many units start each month, or use Auto-fill to distribute evenly.
+                {distributionMethod === 'weighted'
+                  ? 'First 33% of time → 20% of units (slow start) · Middle 33% → 50% (peak) · Final 33% → 30% (punch list)'
+                  : 'Enter exact units per month below — full control over the renovation pace'}
               </p>
 
               {/* Per-type status + actions — only for multi-type deals */}
@@ -600,23 +632,18 @@ export function RehabRentCalculator({
                             {luTarget > 0 && <span className={luOk ? 'text-blue-600 dark:text-blue-400' : 'text-amber-500'}>L {leaseUpScheduleTotals[t]}/{luTarget}</span>}
                           </span>
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          {!allOk && (
-                            <button type="button" onClick={() => autoFillType(t)}
-                              className="text-[11px] font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 touch-manipulation">
-                              Auto-fill
+                        {distributionMethod === 'custom' && (
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button type="button"
+                              onClick={() => {
+                                setScheduleByType(prev => prev.map((s, i) => i === t ? Array(totalDuration).fill(0) : s));
+                                setLeaseUpScheduleByType(prev => prev.map((s, i) => i === t ? Array(totalDuration).fill(0) : s));
+                              }}
+                              className="text-[11px] font-medium text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 touch-manipulation">
+                              Clear
                             </button>
-                          )}
-                          <button type="button"
-                            onClick={() => {
-                              setScheduleByType(prev => prev.map((s, i) => i === t ? Array(totalDuration).fill(0) : s));
-                              setLeaseUpScheduleByType(prev => prev.map((s, i) => i === t ? Array(totalDuration).fill(0) : s));
-                              setAutoFilledByType(prev => prev.map((v, i) => i === t ? false : v));
-                            }}
-                            className="text-[11px] font-medium text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 touch-manipulation">
-                            Clear
-                          </button>
-                        </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -682,14 +709,16 @@ export function RehabRentCalculator({
                                   <span className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">Reno</span>
                                   {unitTypes.map((ut, t) => {
                                     const val = scheduleByType[t]?.[idx] ?? 0;
+                                    const isReadOnly = distributionMethod !== 'custom';
                                     return (
                                       <input key={t}
                                         type="number"
-                                        className="input text-base px-1 py-1 text-center w-full"
+                                        readOnly={isReadOnly}
+                                        className={`input text-base px-1 py-1 text-center w-full ${isReadOnly ? 'bg-slate-50 dark:bg-slate-800/20 text-slate-400 dark:text-slate-500 cursor-default' : ''}`}
                                         min={0}
                                         placeholder="0"
                                         value={val === 0 ? '' : val}
-                                        onChange={e => updateCell(t, idx, Number(e.target.value) || 0)}
+                                        onChange={e => !isReadOnly && updateCell(t, idx, Number(e.target.value) || 0)}
                                         aria-label={`Mo ${m} Reno ${ut.label}`}
                                       />
                                     );
@@ -705,14 +734,16 @@ export function RehabRentCalculator({
                                   <span className="text-[10px] text-blue-500 dark:text-blue-400 font-medium">L/U</span>
                                   {unitTypes.map((ut, t) => {
                                     const val = leaseUpScheduleByType[t]?.[idx] ?? 0;
+                                    const isReadOnly = distributionMethod !== 'custom';
                                     return (
                                       <input key={t}
                                         type="number"
-                                        className="input text-base px-1 py-1 text-center w-full border-blue-200 dark:border-blue-800/40"
+                                        readOnly={isReadOnly}
+                                        className={`input text-base px-1 py-1 text-center w-full border-blue-200 dark:border-blue-800/40 ${isReadOnly ? 'bg-slate-50 dark:bg-slate-800/20 text-slate-400 dark:text-slate-500 cursor-default' : ''}`}
                                         min={0}
                                         placeholder="0"
                                         value={val === 0 ? '' : val}
-                                        onChange={e => updateLeaseUpCell(t, idx, Number(e.target.value) || 0)}
+                                        onChange={e => !isReadOnly && updateLeaseUpCell(t, idx, Number(e.target.value) || 0)}
                                         aria-label={`Mo ${m} LeaseUp ${ut.label}`}
                                       />
                                     );
@@ -736,8 +767,7 @@ export function RehabRentCalculator({
                   const parts: string[] = [];
                   if (renoMismatch) parts.push(`${scheduleTotals[t]}/${unitsToStabilize[t]} reno`);
                   if (luMismatch)   parts.push(`${leaseUpScheduleTotals[t]}/${leaseUpToStabilize[t]} lease-up`);
-                  const isManual = !autoFilledByType[t];
-                  staleTypes.push({ t, label: ut.label, detail: isManual ? `${parts.join(', ')} — you edited this, update needed` : parts.join(', ') });
+                  staleTypes.push({ t, label: ut.label, detail: distributionMethod === 'custom' ? `${parts.join(', ')} — manual schedule needs update` : parts.join(', ') });
                 });
                 if (staleTypes.length === 0) return null;
                 return (
@@ -746,27 +776,18 @@ export function RehabRentCalculator({
                     {staleTypes.map(({ t, label, detail }) => (
                       <div key={t} className="flex items-center justify-between gap-2">
                         <p className="text-[11px] text-amber-600 dark:text-amber-400">• {label}: {detail}</p>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => autoFillType(t)}
-                            className="text-[11px] font-semibold text-primary-600 dark:text-primary-400 hover:text-primary-700 underline touch-manipulation"
-                          >
-                            Auto-fill
-                          </button>
-                          <span className="text-amber-300 dark:text-amber-700">·</span>
+                        {distributionMethod === 'custom' && (
                           <button
                             type="button"
                             onClick={() => {
                               setScheduleByType(prev => prev.map((s, i) => i === t ? Array(totalDuration).fill(0) : s));
                               setLeaseUpScheduleByType(prev => prev.map((s, i) => i === t ? Array(totalDuration).fill(0) : s));
-                              setAutoFilledByType(prev => prev.map((v, i) => i === t ? false : v));
                             }}
-                            className="text-[11px] font-semibold text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 underline touch-manipulation"
+                            className="text-[11px] font-semibold text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 underline touch-manipulation shrink-0"
                           >
                             Clear
                           </button>
-                        </div>
+                        )}
                       </div>
                     ))}
                   </div>
