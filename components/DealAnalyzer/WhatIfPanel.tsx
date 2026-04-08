@@ -87,10 +87,12 @@ interface BreakEvenRow {
   cocBreakEvenFormatted: string | null;
   cocCushion: string | null;
   cocCushionPct: number | null;
-  cocNA?: boolean; // true when metric is not applicable for CoC
+  cocBeyond?: boolean; // true = deal too strong to break within search range
+  cocNA?: boolean;     // true when metric is not applicable for CoC
   irrBreakEvenFormatted: string | null;
   irrCushion: string | null;
   irrCushionPct: number | null;
+  irrBeyond?: boolean;
   worseDir: 'up' | 'down';
 }
 
@@ -123,6 +125,7 @@ function BreakEvenTable({ rows, mode }: { rows: BreakEvenRow[]; mode: 'coc' | 'i
         <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
           {rows.map(row => {
             const na = mode === 'coc' && !!row.cocNA;
+            const beyond = mode === 'coc' ? !!row.cocBeyond : !!row.irrBeyond;
             const beFormatted = mode === 'coc' ? row.cocBreakEvenFormatted : row.irrBreakEvenFormatted;
             const cushion = mode === 'coc' ? row.cocCushion : row.irrCushion;
             const cushionPct = mode === 'coc' ? row.cocCushionPct : row.irrCushionPct;
@@ -137,6 +140,17 @@ function BreakEvenTable({ rows, mode }: { rows: BreakEvenRow[]; mode: 'coc' | 'i
                     </td>
                     <td />
                   </>
+                ) : beyond ? (
+                  <>
+                    <td className="px-3 py-2.5 text-xs text-right">
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500 italic">beyond range</span>
+                    </td>
+                    <td className="px-3 py-2.5 text-right">
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-secondary-50 dark:bg-secondary-900/20 text-secondary-600 dark:text-secondary-400">
+                        very strong
+                      </span>
+                    </td>
+                  </>
                 ) : (
                   <>
                     <td className="px-3 py-2.5 text-xs text-right tabular-nums font-medium text-slate-800 dark:text-slate-200">
@@ -148,7 +162,7 @@ function BreakEvenTable({ rows, mode }: { rows: BreakEvenRow[]; mode: 'coc' | 'i
                           {row.worseDir === 'up' ? '+' : ''}{cushion}
                         </span>
                       ) : (
-                        <span className="text-[10px] text-slate-300 dark:text-slate-600">no room</span>
+                        <span className="text-[10px] text-red-500 dark:text-red-400 font-semibold">no room</span>
                       )}
                     </td>
                   </>
@@ -333,74 +347,69 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
     const irrMetric = (r: CoCResult) => r.irr ?? -999;
     const target = targetCoCReturn;
 
+    // Helpers that handle the 'beyond' sentinel from findBreakEven
+    const numBE = (be: number | null | 'beyond'): number | null => be === 'beyond' ? null : be;
+    const isBeyond = (be: number | null | 'beyond'): boolean => be === 'beyond';
     const fmt = (be: number | null, format: (v: number) => string) => be !== null ? format(be) : null;
     const fmtRent = (be: number | null) => be !== null ? `$${Math.round(be).toLocaleString()}/mo` : null;
 
     // CoC break-evens
-    const vacBE    = findBreakEven(v => build({ vacancyPct: v }),       overrides.vacancyPct,    95,                       cocMetric, target,    'up');
-    const rentBE   = findBreakEven(v => build({ targetRentPerUnit: v }), 1,                       overrides.targetRentPerUnit, cocMetric, target, 'down');
-    const rateBE   = findBreakEven(v => build({ interestRate: v }),      overrides.interestRate,  30,                       cocMetric, target,    'up');
-    const priceBE  = findBreakEven(v => build({ purchasePrice: v }),     overrides.purchasePrice, overrides.purchasePrice * 3, cocMetric, target, 'up');
-    const capBECoC = findBreakEven(v => build({ exitCapRate: v }),       overrides.exitCapRate,   30,                       cocMetric, target,    'up');
+    const vacBER    = findBreakEven(v => build({ vacancyPct: v }),        overrides.vacancyPct,       95,                          cocMetric, target,    'up');
+    const rentBER   = findBreakEven(v => build({ targetRentPerUnit: v }), 1,                          overrides.targetRentPerUnit,  cocMetric, target,    'down');
+    const rateBER   = findBreakEven(v => build({ interestRate: v }),      overrides.interestRate,     30,                          cocMetric, target,    'up');
+    const capBERCoC = findBreakEven(v => build({ exitCapRate: v }),       overrides.exitCapRate,      30,                          cocMetric, target,    'up');
 
     // IRR break-evens
-    const vacBEIRR   = findBreakEven(v => build({ vacancyPct: v }),       overrides.vacancyPct,    95,                       irrMetric, targetIRR, 'up');
-    const rentBEIRR  = findBreakEven(v => build({ targetRentPerUnit: v }), 1,                       overrides.targetRentPerUnit, irrMetric, targetIRR, 'down');
-    const rateBEIRR  = findBreakEven(v => build({ interestRate: v }),      overrides.interestRate,  30,                       irrMetric, targetIRR, 'up');
-    const priceBEIRR = findBreakEven(v => build({ purchasePrice: v }),     overrides.purchasePrice, overrides.purchasePrice * 3, irrMetric, targetIRR, 'up');
-    const capBEIRR   = findBreakEven(v => build({ exitCapRate: v }),       overrides.exitCapRate,   30,                       irrMetric, targetIRR, 'up');
+    const vacBERIRR   = findBreakEven(v => build({ vacancyPct: v }),        overrides.vacancyPct,       95,                         irrMetric, targetIRR, 'up');
+    const rentBERIRR  = findBreakEven(v => build({ targetRentPerUnit: v }), 1,                          overrides.targetRentPerUnit, irrMetric, targetIRR, 'down');
+    const rateBERIRR  = findBreakEven(v => build({ interestRate: v }),      overrides.interestRate,     30,                         irrMetric, targetIRR, 'up');
+    const capBERIRR   = findBreakEven(v => build({ exitCapRate: v }),       overrides.exitCapRate,      30,                         irrMetric, targetIRR, 'up');
 
-    const cocCushionOf  = (be: number | null, base: number, dir: 'up' | 'down') =>
+    // Strip 'beyond' to get numeric values (null when beyond)
+    const vacBE = numBE(vacBER); const rentBE = numBE(rentBER); const rateBE = numBE(rateBER); const capBECoC = numBE(capBERCoC);
+    const vacBEIRR = numBE(vacBERIRR); const rentBEIRR = numBE(rentBERIRR); const rateBEIRR = numBE(rateBERIRR); const capBEIRR = numBE(capBERIRR);
+
+    const cocCushionOf = (be: number | null, base: number, dir: 'up' | 'down') =>
       be !== null ? (dir === 'up' ? be - base : base - be) : null;
-    const irrCushionOf  = cocCushionOf;
 
     const vacCC  = cocCushionOf(vacBE,   overrides.vacancyPct,       'up');
     const rentCC = cocCushionOf(rentBE,  overrides.targetRentPerUnit, 'down');
     const rateCC = cocCushionOf(rateBE,  overrides.interestRate,      'up');
-    const priceCC= cocCushionOf(priceBE, overrides.purchasePrice,     'up');
     const capCC  = cocCushionOf(capBECoC,overrides.exitCapRate,       'up');
 
-    const vacCI  = irrCushionOf(vacBEIRR,   overrides.vacancyPct,       'up');
-    const rentCI = irrCushionOf(rentBEIRR,  overrides.targetRentPerUnit, 'down');
-    const rateCI = irrCushionOf(rateBEIRR,  overrides.interestRate,      'up');
-    const priceCI= irrCushionOf(priceBEIRR, overrides.purchasePrice,     'up');
-    const capCI  = irrCushionOf(capBEIRR,   overrides.exitCapRate,       'up');
+    const vacCI  = cocCushionOf(vacBEIRR,   overrides.vacancyPct,       'up');
+    const rentCI = cocCushionOf(rentBEIRR,  overrides.targetRentPerUnit, 'down');
+    const rateCI = cocCushionOf(rateBEIRR,  overrides.interestRate,      'up');
+    const capCI  = cocCushionOf(capBEIRR,   overrides.exitCapRate,       'up');
 
     return [
       {
         label: 'Vacancy Rate', assumption: formatPct(overrides.vacancyPct), worseDir: 'up' as const,
-        cocBreakEvenFormatted: fmt(vacBE, formatPct),
+        cocBreakEvenFormatted: fmt(vacBE, formatPct), cocBeyond: isBeyond(vacBER),
         cocCushion: vacCC !== null ? formatPct(vacCC) : null, cocCushionPct: vacCC !== null ? (vacCC / overrides.vacancyPct) * 100 : null,
-        irrBreakEvenFormatted: fmt(vacBEIRR, formatPct),
+        irrBreakEvenFormatted: fmt(vacBEIRR, formatPct), irrBeyond: isBeyond(vacBERIRR),
         irrCushion: vacCI !== null ? formatPct(vacCI) : null, irrCushionPct: vacCI !== null ? (vacCI / overrides.vacancyPct) * 100 : null,
       },
       {
         label: 'Target Rent / unit', assumption: `$${Math.round(overrides.targetRentPerUnit).toLocaleString()}/mo`, worseDir: 'down' as const,
-        cocBreakEvenFormatted: fmtRent(rentBE),
+        cocBreakEvenFormatted: fmtRent(rentBE), cocBeyond: isBeyond(rentBER),
         cocCushion: rentCC !== null ? `$${Math.round(rentCC).toLocaleString()}` : null, cocCushionPct: rentCC !== null ? (rentCC / overrides.targetRentPerUnit) * 100 : null,
-        irrBreakEvenFormatted: fmtRent(rentBEIRR),
+        irrBreakEvenFormatted: fmtRent(rentBEIRR), irrBeyond: isBeyond(rentBERIRR),
         irrCushion: rentCI !== null ? `$${Math.round(rentCI).toLocaleString()}` : null, irrCushionPct: rentCI !== null ? (rentCI / overrides.targetRentPerUnit) * 100 : null,
       },
       {
         label: 'Interest Rate', assumption: formatPct(overrides.interestRate), worseDir: 'up' as const,
-        cocBreakEvenFormatted: fmt(rateBE, formatPct),
+        cocBreakEvenFormatted: fmt(rateBE, formatPct), cocBeyond: isBeyond(rateBER),
         cocCushion: rateCC !== null ? formatPct(rateCC) : null, cocCushionPct: rateCC !== null ? (rateCC / overrides.interestRate) * 100 : null,
-        irrBreakEvenFormatted: fmt(rateBEIRR, formatPct),
+        irrBreakEvenFormatted: fmt(rateBEIRR, formatPct), irrBeyond: isBeyond(rateBERIRR),
         irrCushion: rateCI !== null ? formatPct(rateCI) : null, irrCushionPct: rateCI !== null ? (rateCI / overrides.interestRate) * 100 : null,
-      },
-      {
-        label: 'Purchase Price', assumption: formatCurrency(overrides.purchasePrice), worseDir: 'up' as const,
-        cocBreakEvenFormatted: fmt(priceBE, formatCurrency),
-        cocCushion: priceCC !== null ? formatCurrency(priceCC) : null, cocCushionPct: priceCC !== null ? (priceCC / overrides.purchasePrice) * 100 : null,
-        irrBreakEvenFormatted: fmt(priceBEIRR, formatCurrency),
-        irrCushion: priceCI !== null ? formatCurrency(priceCI) : null, irrCushionPct: priceCI !== null ? (priceCI / overrides.purchasePrice) * 100 : null,
       },
       {
         label: 'Exit Cap Rate', assumption: formatPct(overrides.exitCapRate), worseDir: 'up' as const,
         cocNA: true,
-        cocBreakEvenFormatted: fmt(capBECoC, formatPct),
+        cocBreakEvenFormatted: fmt(capBECoC, formatPct), cocBeyond: isBeyond(capBERCoC),
         cocCushion: capCC !== null ? formatPct(capCC) : null, cocCushionPct: capCC !== null ? (capCC / overrides.exitCapRate) * 100 : null,
-        irrBreakEvenFormatted: fmt(capBEIRR, formatPct),
+        irrBreakEvenFormatted: fmt(capBEIRR, formatPct), irrBeyond: isBeyond(capBERIRR),
         irrCushion: capCI !== null ? formatPct(capCI) : null, irrCushionPct: capCI !== null ? (capCI / overrides.exitCapRate) * 100 : null,
       },
     ];
@@ -416,47 +425,54 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
   const annOf = (perUnit: number) => `× ${effectiveUnits} unit${effectiveUnits !== 1 ? 's' : ''} = ${formatCurrency(perUnit * effectiveUnits * 12)}/yr`;
 
   const innerContent = (
-    <div className="space-y-6">
-      {/* Mode toggle */}
-      <div className="flex items-center gap-2">
-        {(['explore', 'goalseek'] as const).map(mode => (
-          <button key={mode} type="button" onClick={() => setPanelMode(mode)}
-            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
-              panelMode === mode
-                ? 'bg-primary-600 text-white border-primary-600'
-                : 'border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-400'
-            }`}>
-            {mode === 'explore' ? 'Explore' : '⚡ Goal Seek'}
-          </button>
-        ))}
+    <div className="flex flex-col gap-0">
+      {/* ── Top: mode toggle + KPI deltas (always visible) ── */}
+      <div className="space-y-4 pb-4 border-b border-slate-100 dark:border-slate-700">
+        {/* Mode toggle */}
+        <div className="flex items-center gap-2">
+          {(['explore', 'goalseek'] as const).map(mode => (
+            <button key={mode} type="button" onClick={() => setPanelMode(mode)}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                panelMode === mode
+                  ? 'bg-primary-600 text-white border-primary-600'
+                  : 'border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:border-primary-400'
+              }`}>
+              {mode === 'explore' ? 'Explore' : '⚡ Goal Seek'}
+            </button>
+          ))}
+        </div>
+
+        {/* Goal Seek banner */}
+        {panelMode === 'goalseek' && (
+          <GoalSeekBanner
+            metric={goalMetric}
+            target={goalTarget}
+            onMetricChange={setGoalMetric}
+            onTargetChange={setGoalTarget}
+            result={whatIfResult}
+          />
+        )}
+
+        {/* KPI deltas — always visible above the scrollable slider area */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <KPIDelta label="Avg CoC Return" value={formatPct(whatIfResult.avgCoCReturn)}
+            delta={whatIfResult.avgCoCReturn - baseResult.avgCoCReturn}
+            deltaFormatted={formatPct(Math.abs(whatIfResult.avgCoCReturn - baseResult.avgCoCReturn))} />
+          <KPIDelta label="IRR" value={whatIfResult.irr !== null ? formatPct(whatIfResult.irr) : '—'}
+            delta={(whatIfResult.irr ?? 0) - (baseResult.irr ?? 0)}
+            deltaFormatted={formatPct(Math.abs((whatIfResult.irr ?? 0) - (baseResult.irr ?? 0)))} />
+          <KPIDelta label="Equity Multiple" value={formatMultiple(whatIfResult.equityMultiple)}
+            delta={whatIfResult.equityMultiple - baseResult.equityMultiple}
+            deltaFormatted={`${Math.abs(whatIfResult.equityMultiple - baseResult.equityMultiple).toFixed(2)}x`} />
+          <KPIDelta label="Total Cash Flow" value={formatCurrency(whatIfResult.totalCashFlow)}
+            delta={whatIfResult.totalCashFlow - baseResult.totalCashFlow}
+            deltaFormatted={formatCurrency(Math.abs(whatIfResult.totalCashFlow - baseResult.totalCashFlow))} />
+        </div>
       </div>
 
-      {/* Goal Seek banner */}
-      {panelMode === 'goalseek' && (
-        <GoalSeekBanner
-          metric={goalMetric}
-          target={goalTarget}
-          onMetricChange={setGoalMetric}
-          onTargetChange={setGoalTarget}
-          result={whatIfResult}
-        />
-      )}
-
-      {/* KPI deltas */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <KPIDelta label="Avg CoC Return" value={formatPct(whatIfResult.avgCoCReturn)}
-          delta={whatIfResult.avgCoCReturn - baseResult.avgCoCReturn}
-          deltaFormatted={formatPct(Math.abs(whatIfResult.avgCoCReturn - baseResult.avgCoCReturn))} />
-        <KPIDelta label="IRR" value={whatIfResult.irr !== null ? formatPct(whatIfResult.irr) : '—'}
-          delta={(whatIfResult.irr ?? 0) - (baseResult.irr ?? 0)}
-          deltaFormatted={formatPct(Math.abs((whatIfResult.irr ?? 0) - (baseResult.irr ?? 0)))} />
-        <KPIDelta label="Equity Multiple" value={formatMultiple(whatIfResult.equityMultiple)}
-          delta={whatIfResult.equityMultiple - baseResult.equityMultiple}
-          deltaFormatted={`${Math.abs(whatIfResult.equityMultiple - baseResult.equityMultiple).toFixed(2)}x`} />
-        <KPIDelta label="Total Cash Flow" value={formatCurrency(whatIfResult.totalCashFlow)}
-          delta={whatIfResult.totalCashFlow - baseResult.totalCashFlow}
-          deltaFormatted={formatCurrency(Math.abs(whatIfResult.totalCashFlow - baseResult.totalCashFlow))} />
-      </div>
+      {/* ── Bottom: sliders + break-even in its own scroll area ── */}
+      {/* px-1 prevents slider thumbs / focus rings from being clipped by the overflow container */}
+      <div className="overflow-y-auto max-h-[60vh] pt-5 space-y-6 px-1 -mx-1">
 
       {/* Sliders */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-5">
@@ -563,6 +579,7 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
         </div>
         <BreakEvenTable rows={breakEvenRows} mode={breakEvenMode} />
       </div>}
+      </div>{/* end scrollable area */}
     </div>
   );
 

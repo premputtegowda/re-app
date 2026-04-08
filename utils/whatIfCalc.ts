@@ -126,6 +126,11 @@ export function buildWhatIfResult(ov: WhatIfOverrides, deps: BuildDeps): CoCResu
 /**
  * Binary-search the break-even value for a single variable.
  * worseDir: 'up' = higher value hurts metric; 'down' = lower value hurts metric.
+ *
+ * Returns:
+ *   number   — the break-even value found within [searchMin, searchMax]
+ *   null     — already below target at current value (deal is already failing)
+ *   'beyond' — deal is so strong it never hits target within the search range
  */
 export function findBreakEven(
   buildFn: (v: number) => CoCResult,
@@ -134,16 +139,16 @@ export function findBreakEven(
   metric: (r: CoCResult) => number,
   targetValue: number,
   worseDir: 'up' | 'down',
-): number | null {
+): number | null | 'beyond' {
   const atMin = metric(buildFn(searchMin));
   const atMax = metric(buildFn(searchMax));
 
   if (worseDir === 'up') {
-    if (atMin <= targetValue) return null; // already below target at minimum — no cushion
-    if (atMax > targetValue) return null;  // never reaches target in range
+    if (atMin <= targetValue) return null;    // already failing at current value
+    if (atMax > targetValue) return 'beyond'; // still beating target even at worst case
   } else {
     if (atMax <= targetValue) return null;
-    if (atMin > targetValue) return null;
+    if (atMin > targetValue) return 'beyond';
   }
 
   let lo = searchMin, hi = searchMax;

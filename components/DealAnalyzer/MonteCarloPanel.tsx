@@ -266,7 +266,7 @@ function SensitivitySection({ results }: { results: MCResults }) {
   );
 }
 
-// ── P80 Max Price Card ────────────────────────────────────────────────────────
+// ── Max Price Card ────────────────────────────────────────────────────────────
 
 function MaxPriceCard({ p20MaxPrice, p50MaxPrice, targetIRR, currentPrice }: {
   p20MaxPrice: number | null;
@@ -275,8 +275,8 @@ function MaxPriceCard({ p20MaxPrice, p50MaxPrice, targetIRR, currentPrice }: {
   currentPrice: number;
 }) {
   const rows: Array<{ label: string; sub: string; price: number | null }> = [
-    { label: 'Conservative', sub: 'P20 — if market underperforms', price: p20MaxPrice },
-    { label: 'Median',       sub: 'P50 — average market conditions', price: p50MaxPrice },
+    { label: 'Recommended',  sub: 'Median market conditions',   price: p50MaxPrice },
+    { label: 'Conservative', sub: 'If market underperforms',    price: p20MaxPrice },
   ];
 
   return (
@@ -291,7 +291,7 @@ function MaxPriceCard({ p20MaxPrice, p50MaxPrice, targetIRR, currentPrice }: {
       </div>
       <div className="divide-y divide-slate-100 dark:divide-slate-700">
         {rows.map(({ label, sub, price }) => {
-          const works = price === currentPrice;
+          const works = price !== null && price >= currentPrice;
           const infeasible = price === null;
           const gap = price !== null ? currentPrice - price : null;
           return (
@@ -313,9 +313,11 @@ function MaxPriceCard({ p20MaxPrice, p50MaxPrice, targetIRR, currentPrice }: {
                     <p className="text-sm font-bold tabular-nums text-slate-900 dark:text-slate-100">
                       {formatCurrency(price!)}
                     </p>
-                    <p className="text-[10px] font-medium text-amber-600 dark:text-amber-400 tabular-nums">
-                      ↓ {formatCurrency(gap!)} to negotiate
-                    </p>
+                    {gap !== null && gap > 0 && (
+                      <p className="text-[10px] font-medium text-amber-600 dark:text-amber-400 tabular-nums">
+                        ↓ {formatCurrency(gap)} to negotiate
+                      </p>
+                    )}
                   </>
                 )}
               </div>
