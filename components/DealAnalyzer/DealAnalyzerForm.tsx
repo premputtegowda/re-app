@@ -327,6 +327,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   // Save state
   const [savedDealId, setSavedDealId] = useState<string | null>(initialDeal?.id ?? null);
   const [saveName, setSaveName] = useState(initialDeal?.name ?? '');
+  const [editingTitle, setEditingTitle] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showExitWarning, setShowExitWarning] = useState(false);
 
@@ -485,9 +486,16 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     setProForma(defaultProForma(acquisition.propertyType));
   }, [acquisition.propertyType]);
 
-  // Auto-fill save name when address changes
+  // Auto-fill save name when address changes — only if user hasn't set a custom name
+  const prevAddressRef = useRef(initialDeal?.acquisition?.propertyAddress ?? '');
   useEffect(() => {
-    if (!saveName) setSaveName(defaultSaveName(acquisition));
+    const prev = prevAddressRef.current;
+    const next = acquisition.propertyAddress;
+    prevAddressRef.current = next;
+    // Only sync when there is an actual address value, and the user hasn't customised the title
+    if (next && (!saveName || saveName === prev)) {
+      setSaveName(next);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [acquisition.propertyAddress]);
 
@@ -1448,9 +1456,29 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
         {/* Header: title + always-visible Cancel / Next / Save */}
         <div className="flex items-center justify-between gap-4">
-          <h1 className="text-lg font-semibold text-slate-900 dark:text-white truncate">
-            {acquisition.propertyAddress.trim() || 'New Analysis'}
-          </h1>
+          {editingTitle ? (
+            <input
+              autoFocus
+              type="text"
+              value={saveName}
+              onChange={e => setSaveName(e.target.value)}
+              onBlur={() => { if (!saveName.trim()) setSaveName(defaultSaveName(acquisition)); setEditingTitle(false); }}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') { if (!saveName.trim()) setSaveName(defaultSaveName(acquisition)); setEditingTitle(false); } }}
+              className="flex-1 text-lg font-semibold bg-transparent border-b-2 border-primary-500 outline-none text-slate-900 dark:text-white min-w-0"
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => { if (!saveName) setSaveName(acquisition.propertyAddress.trim() || defaultSaveName(acquisition)); setEditingTitle(true); }}
+              className="group flex items-center gap-1.5 min-w-0 text-left"
+              title="Click to rename"
+            >
+              <h1 className="text-lg font-semibold text-slate-900 dark:text-white truncate">
+                {saveName || acquisition.propertyAddress.trim() || 'New Analysis'}
+              </h1>
+              <Pencil size={13} className="shrink-0 text-slate-300 dark:text-slate-600 group-hover:text-primary-500 transition-colors" />
+            </button>
+          )}
 
           <div className="flex items-center gap-2 shrink-0">
             {saveError && (
