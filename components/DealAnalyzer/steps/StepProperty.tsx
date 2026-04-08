@@ -1,7 +1,7 @@
 'use client';
 
 import { Home, Building2, Plus, Trash2, AlertTriangle } from 'lucide-react';
-import { Input } from '@/components/UI/Input';
+import { AddressAutocomplete } from '@/components/UI/AddressAutocomplete';
 import type { CoCAcquisition, CoCUnitMixEntry } from '@/types';
 
 const newUnitEntry = (): CoCUnitMixEntry => ({
@@ -42,13 +42,9 @@ export function StepProperty({ data, onChange, showWarnings = false }: StepPrope
   return (
     <div className="space-y-5">
       {/* Address */}
-      <Input
-        label="Property Address"
-        type="text"
-        fullWidth
-        placeholder="e.g. 123 Main St, Austin TX 78701"
+      <AddressAutocomplete
         value={data.propertyAddress}
-        onChange={(e) => onChange('propertyAddress', e.target.value)}
+        onChange={(val) => onChange('propertyAddress', val)}
       />
 
       {/* Property type — icon buttons */}
