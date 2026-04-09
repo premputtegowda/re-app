@@ -472,12 +472,8 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
 
   const clearYearOverride = useCallback((year: number, field: 'grossRent' | 'otherIncome' | 'vacancyPct' | 'creditLossPct') => {
     const prev = data.yearOverrides ?? {};
-    if (year === 1) {
-      // Year 1 is the chain anchor — retain its value as-is.
-      return;
-    }
-    // Year 2+: remove this year's override so it chains from Year N-1.
-    // Propagation naturally stops at the next blocked year — we don't touch it.
+    // Remove this year's override. Year N chains from Year N-1 (or stabilized for Year 1).
+    // Propagation naturally flows forward until it hits the next blocked year.
     const e = { ...(prev[year] ?? {}) };
     delete e[field];
     if (field === 'grossRent') delete e.grossRentSystem;
@@ -493,12 +489,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
 
   const clearExpenseYearOverride = useCallback((year: number, expenseId: string) => {
     const prev = data.yearOverrides ?? {};
-    if (year === 1) {
-      // Year 1 is the chain anchor — retain its value as-is.
-      return;
-    }
-    // Year 2+: remove this year's override so it chains from Year N-1.
-    // Propagation naturally stops at the next blocked year — we don't touch it.
+    // Remove this year's override. Propagation flows forward until the next blocked year.
     const ye = { ...(prev[year] ?? {}) };
     const expenses = { ...(ye.expenses ?? {}) };
     delete expenses[expenseId];
