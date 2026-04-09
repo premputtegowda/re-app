@@ -15,6 +15,8 @@ export interface WhatIfOverrides {
   exitCapRate: number;
   purchasePrice: number;
   projectionYears: number;
+  refiRate: number;
+  refiYear: number;
 }
 
 export interface BuildDeps {
@@ -115,7 +117,9 @@ export function buildWhatIfResult(ov: WhatIfOverrides, deps: BuildDeps): CoCResu
       expenses: modifiedExpenses,
       yearOverrides: scaledYearOverrides,
     },
-    refinance,
+    refinance: refinance.enabled
+      ? { ...refinance, newInterestRate: ov.refiRate, refiYear: Math.round(ov.refiYear) }
+      : refinance,
     createdAt: '',
     updatedAt: '',
   };

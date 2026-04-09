@@ -27,6 +27,7 @@ export interface MCRanges {
   exitCapRate:       MCRange;
   renoOverrunPct:    MCRange; // 0 = base cost, 30 = 30% overrun
   interestRate:      MCRange;
+  refiRate:          MCRange; // refinance interest rate — only meaningful when refinance.enabled
 }
 
 export interface MCRunResult {
@@ -41,6 +42,7 @@ export interface MCRunResult {
     exitCapRate:       number;
     renoOverrunPct:    number;
     interestRate:      number;
+    refiRate:          number;
   };
 }
 
@@ -58,7 +60,7 @@ export interface MCHistogramBucket {
 export interface MCResults {
   n:                    number;
   sorted:               MCRunResult[]; // by IRR ascending
-  p10: MCRunResult; p20: MCRunResult; p50: MCRunResult; p80: MCRunResult; p90: MCRunResult;
+  p10: MCRunResult; p20: MCRunResult; p30: MCRunResult; p50: MCRunResult; p70: MCRunResult; p80: MCRunResult; p90: MCRunResult;
   probPositiveCashFlow: number; // % of runs avgCoCReturn > 0
   sensitivity:          MCSensitivity[];
   irrBuckets:           MCHistogramBucket[];
@@ -80,7 +82,7 @@ export function hydrateMCResults(saved: SavedMCResults): MCResults {
   // Reconstruct a minimal `sorted` from compactRuns (only irr/avgCoCReturn needed for prob filters)
   const sorted = saved.compactRuns.map(({ irr, coc }) => ({
     irr, avgCoCReturn: coc, equityMultiple: 0, totalCashFlow: 0,
-    sampled: { targetRentPerUnit: 0, vacancyPct: 0, rentGrowthPct: 0, exitCapRate: 0, renoOverrunPct: 0, interestRate: 0 },
+    sampled: { targetRentPerUnit: 0, vacancyPct: 0, rentGrowthPct: 0, exitCapRate: 0, renoOverrunPct: 0, interestRate: 0, refiRate: 0 },
   }));
   return { ...saved, sorted };
 }
@@ -99,6 +101,7 @@ export function computeDefaultRanges(
   proForma: ProFormaData,
   avgTargetRentPerUnit: number,
   units: number,
+  refinance?: CoCRefinance,
 ): MCRanges {
   const effectiveUnits = Math.max(1, units);
   // Derive per-unit rent from proForma.stabilized so MC base exactly matches the calculator
@@ -110,14 +113,16 @@ export function computeDefaultRanges(
   const growth = proForma.grossRent.growthPct   ?? 3;
   const cap    = acquisition.exitCapRate         ?? 6;
   const rate   = acquisition.interestRate        ?? 7;
+  const refi   = refinance?.enabled ? (refinance.newInterestRate ?? rate) : rate;
 
   return {
-    targetRentPerUnit: { min: rent * 0.85,        mode: rent,   max: rent * 1.10 },
-    vacancyPct:        { min: Math.max(0, vac - 2), mode: vac,    max: vac + 8 },
-    rentGrowthPct:     { min: growth - 1,           mode: growth, max: growth + 2 },
-    exitCapRate:       { min: cap - 0.5,            mode: cap,    max: cap + 1.5 },
-    renoOverrunPct:    { min: 0,                    mode: 0,      max: 30 },
-    interestRate:      { min: rate - 0.5,           mode: rate,   max: rate + 2.0 },
+    targetRentPerUnit: { min: rent * 0.85,          mode: rent,   max: rent * 1.10 },
+    vacancyPct:        { min: Math.max(0, vac - 2),  mode: vac,    max: vac + 8 },
+    rentGrowthPct:     { min: growth - 1,             mode: growth, max: growth + 2 },
+    exitCapRate:       { min: cap - 0.5,              mode: cap,    max: cap + 1.5 },
+    renoOverrunPct:    { min: 0,                      mode: 0,      max: 30 },
+    interestRate:      { min: rate - 0.5,             mode: rate,   max: rate + 2.0 },
+    refiRate:          { min: refi - 0.5,             mode: refi,   max: refi + 2.0 },
   };
 }
 
@@ -211,6 +216,7 @@ function runOnce(
   const cap      = sampleTriangular(ranges.exitCapRate.min,       ranges.exitCapRate.mode,       ranges.exitCapRate.max);
   const renoOver = sampleTriangular(ranges.renoOverrunPct.min,    ranges.renoOverrunPct.mode,    ranges.renoOverrunPct.max);
   const rate     = sampleTriangular(ranges.interestRate.min,      ranges.interestRate.mode,      ranges.interestRate.max);
+  const refiRate = sampleTriangular(ranges.refiRate.min,          ranges.refiRate.mode,          ranges.refiRate.max);
 
   // When every sampled value equals its mode, use the original data objects directly.
   // This guarantees bit-identical cash flows to the base case — no reconstruction drift.
@@ -220,7 +226,8 @@ function runOnce(
     growth   === ranges.rentGrowthPct.mode     &&
     cap      === ranges.exitCapRate.mode       &&
     renoOver === ranges.renoOverrunPct.mode    &&
-    rate     === ranges.interestRate.mode;
+    rate     === ranges.interestRate.mode      &&
+    refiRate === ranges.refiRate.mode;
 
   const baseScenario: CoCScenario = {
     id: 'mc', name: 'MC', scenarioType: 'base',
@@ -234,7 +241,7 @@ function runOnce(
       irr: r.irr ?? -999, avgCoCReturn: r.avgCoCReturn,
       equityMultiple: r.equityMultiple, totalCashFlow: r.totalCashFlow,
       sampled: { targetRentPerUnit: rent, vacancyPct: vac, rentGrowthPct: growth,
-                 exitCapRate: cap, renoOverrunPct: renoOver, interestRate: rate },
+                 exitCapRate: cap, renoOverrunPct: renoOver, interestRate: rate, refiRate },
     };
   }
 
@@ -264,7 +271,9 @@ function runOnce(
       creditLossPct: proForma.creditLossPct ?? { t12: 0, stab: null, stabilized: 0 },
       yearOverrides: scalePreStabOverrides(proForma, newTargetAnnual, origStabilizedAnnual, sampledPreStab, Math.max(1, units), origDefaultPreStabAnnual),
     },
-    refinance,
+    refinance: refinance.enabled
+      ? { ...refinance, newInterestRate: refiRate }
+      : refinance,
     createdAt: '', updatedAt: '',
   };
 
@@ -274,7 +283,7 @@ function runOnce(
     avgCoCReturn:   r.avgCoCReturn,
     equityMultiple: r.equityMultiple,
     totalCashFlow:  r.totalCashFlow,
-    sampled: { targetRentPerUnit: rent, vacancyPct: vac, rentGrowthPct: growth, exitCapRate: cap, renoOverrunPct: renoOver, interestRate: rate },
+    sampled: { targetRentPerUnit: rent, vacancyPct: vac, rentGrowthPct: growth, exitCapRate: cap, renoOverrunPct: renoOver, interestRate: rate, refiRate },
   };
 }
 
@@ -325,6 +334,7 @@ export async function runSimulation(opts: RunSimulationOptions): Promise<MCResul
     ['exitCapRate',       'Exit Cap Rate'],
     ['renoOverrunPct',    'Renovation Cost'],
     ['interestRate',      'Interest Rate'],
+    ['refiRate',          'Refi Rate'],
   ];
   const sensitivity: MCSensitivity[] = SENSITIVITY_KEYS
     .map(([key, label]) => ({
@@ -341,7 +351,9 @@ export async function runSimulation(opts: RunSimulationOptions): Promise<MCResul
     sorted,
     p10: percentileItem(sorted, 10),
     p20: percentileItem(sorted, 20),
+    p30: percentileItem(sorted, 30),
     p50: percentileItem(sorted, 50),
+    p70: percentileItem(sorted, 70),
     p80: percentileItem(sorted, 80),
     p90: percentileItem(sorted, 90),
     probPositiveCashFlow: all.filter(r => r.avgCoCReturn > 0).length / n,

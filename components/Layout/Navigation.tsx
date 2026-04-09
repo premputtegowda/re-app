@@ -1,20 +1,78 @@
 'use client';
 
 import { useRouter, usePathname } from 'next/navigation';
-import { LayoutDashboard, List, PlusCircle, Settings, ShieldCheck, Tag, Folder } from 'lucide-react';
+import { LayoutDashboard, List, PlusCircle, Settings, ShieldCheck, Tag, Folder, TrendingUp, FilePlus } from 'lucide-react';
 import { useAuthStore } from '@/lib/authStore';
-
-const REPS_ROUTES = ['/dashboard', '/entry', '/list', '/settings', '/admin'];
 
 export function Navigation() {
   const router = useRouter();
   const pathname = usePathname();
   const isAdmin = useAuthStore((s) => s.user?.is_admin ?? false);
 
-  // Don't show sidebar navigation on Deal Analyzer pages
   const isDealAnalyzer = pathname.startsWith('/deal-analyzer');
-  if (isDealAnalyzer) return null;
 
+  // ── Deal Analyzer nav ──────────────────────────────────────────────────────
+  if (isDealAnalyzer) {
+    const dealNavItems = [
+      { href: '/deal-analyzer',          label: 'Portfolio', icon: TrendingUp },
+      { href: '/deal-analyzer/new',      label: 'New Analysis', icon: FilePlus },
+      { href: '/deal-analyzer/settings', label: 'Settings', icon: Settings },
+    ];
+
+    return (
+      <>
+        {/* Desktop sidebar */}
+        <nav className="hidden lg:block bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 w-64 fixed left-0 top-16 bottom-0 overflow-y-auto">
+          <div className="p-4 space-y-1">
+            {dealNavItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = pathname === item.href;
+              return (
+                <button
+                  key={item.href}
+                  onClick={() => router.push(item.href)}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                    isActive
+                      ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400 font-medium'
+                      : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  <Icon size={20} />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </nav>
+
+        {/* Mobile bottom tab bar */}
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 z-40">
+          <div className="flex">
+            {dealNavItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = pathname === item.href;
+              return (
+                <button
+                  key={item.href}
+                  onClick={() => router.push(item.href)}
+                  className={`flex-1 flex flex-col items-center justify-center py-2 gap-1 transition-colors ${
+                    isActive
+                      ? 'text-primary-600 dark:text-primary-400'
+                      : 'text-slate-500 dark:text-slate-400'
+                  }`}
+                >
+                  <Icon size={22} />
+                  <span className="text-xs font-medium">{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </nav>
+      </>
+    );
+  }
+
+  // ── REPS nav ───────────────────────────────────────────────────────────────
   const navItems = [
     { href: '/dashboard', label: 'Home', icon: LayoutDashboard },
     { href: '/entry', label: 'Add', icon: PlusCircle },
@@ -31,7 +89,6 @@ export function Navigation() {
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href;
-
             return (
               <button
                 key={item.href}
@@ -79,7 +136,6 @@ export function Navigation() {
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href;
-
             return (
               <button
                 key={item.href}

@@ -318,6 +318,8 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
     exitCapRate: acquisition.exitCapRate || 6,
     purchasePrice: acquisition.purchasePrice,
     projectionYears: acquisition.projectionYears || 10,
+    refiRate: refinance.enabled ? (refinance.newInterestRate || acquisition.interestRate) : acquisition.interestRate,
+    refiYear: refinance.enabled ? (refinance.refiYear || 3) : 3,
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), []); // intentionally fixed at mount — what-if is a snapshot tool
 
@@ -358,16 +360,24 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
     const rentBER   = findBreakEven(v => build({ targetRentPerUnit: v }), 1,                          overrides.targetRentPerUnit,  cocMetric, target,    'down');
     const rateBER   = findBreakEven(v => build({ interestRate: v }),      overrides.interestRate,     30,                          cocMetric, target,    'up');
     const capBERCoC = findBreakEven(v => build({ exitCapRate: v }),       overrides.exitCapRate,      30,                          cocMetric, target,    'up');
+    const refiBERCoC = refinance.enabled
+      ? findBreakEven(v => build({ refiRate: v }), overrides.refiRate, 30, cocMetric, target, 'up')
+      : null;
 
     // IRR break-evens
     const vacBERIRR   = findBreakEven(v => build({ vacancyPct: v }),        overrides.vacancyPct,       95,                         irrMetric, targetIRR, 'up');
     const rentBERIRR  = findBreakEven(v => build({ targetRentPerUnit: v }), 1,                          overrides.targetRentPerUnit, irrMetric, targetIRR, 'down');
     const rateBERIRR  = findBreakEven(v => build({ interestRate: v }),      overrides.interestRate,     30,                         irrMetric, targetIRR, 'up');
     const capBERIRR   = findBreakEven(v => build({ exitCapRate: v }),       overrides.exitCapRate,      30,                         irrMetric, targetIRR, 'up');
+    const refiBERIRR  = refinance.enabled
+      ? findBreakEven(v => build({ refiRate: v }), overrides.refiRate, 30, irrMetric, targetIRR, 'up')
+      : null;
 
     // Strip 'beyond' to get numeric values (null when beyond)
     const vacBE = numBE(vacBER); const rentBE = numBE(rentBER); const rateBE = numBE(rateBER); const capBECoC = numBE(capBERCoC);
     const vacBEIRR = numBE(vacBERIRR); const rentBEIRR = numBE(rentBERIRR); const rateBEIRR = numBE(rateBERIRR); const capBEIRR = numBE(capBERIRR);
+    const refiBECoC = refiBERCoC !== null ? numBE(refiBERCoC) : null;
+    const refiBEIRR = refiBERIRR !== null ? numBE(refiBERIRR) : null;
 
     const cocCushionOf = (be: number | null, base: number, dir: 'up' | 'down') =>
       be !== null ? (dir === 'up' ? be - base : base - be) : null;
@@ -376,13 +386,15 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
     const rentCC = cocCushionOf(rentBE,  overrides.targetRentPerUnit, 'down');
     const rateCC = cocCushionOf(rateBE,  overrides.interestRate,      'up');
     const capCC  = cocCushionOf(capBECoC,overrides.exitCapRate,       'up');
+    const refiCC = cocCushionOf(refiBECoC, overrides.refiRate,        'up');
 
     const vacCI  = cocCushionOf(vacBEIRR,   overrides.vacancyPct,       'up');
     const rentCI = cocCushionOf(rentBEIRR,  overrides.targetRentPerUnit, 'down');
     const rateCI = cocCushionOf(rateBEIRR,  overrides.interestRate,      'up');
     const capCI  = cocCushionOf(capBEIRR,   overrides.exitCapRate,       'up');
+    const refiCI = cocCushionOf(refiBEIRR,  overrides.refiRate,          'up');
 
-    return [
+    const rows: BreakEvenRow[] = [
       {
         label: 'Vacancy Rate', assumption: formatPct(overrides.vacancyPct), worseDir: 'up' as const,
         cocBreakEvenFormatted: fmt(vacBE, formatPct), cocBeyond: isBeyond(vacBER),
@@ -413,6 +425,22 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
         irrCushion: capCI !== null ? formatPct(capCI) : null, irrCushionPct: capCI !== null ? (capCI / overrides.exitCapRate) * 100 : null,
       },
     ];
+
+    if (refinance.enabled) {
+      rows.push({
+        label: 'Refi Rate', assumption: formatPct(overrides.refiRate), worseDir: 'up' as const,
+        cocBreakEvenFormatted: refiBECoC !== null ? fmt(refiBECoC, formatPct) : null,
+        cocBeyond: refiBERCoC !== null ? isBeyond(refiBERCoC) : false,
+        cocCushion: refiCC !== null ? formatPct(refiCC) : null,
+        cocCushionPct: refiCC !== null ? (refiCC / overrides.refiRate) * 100 : null,
+        irrBreakEvenFormatted: refiBEIRR !== null ? fmt(refiBEIRR, formatPct) : null,
+        irrBeyond: refiBERIRR !== null ? isBeyond(refiBERIRR) : false,
+        irrCushion: refiCI !== null ? formatPct(refiCI) : null,
+        irrCushionPct: refiCI !== null ? (refiCI / overrides.refiRate) * 100 : null,
+      });
+    }
+
+    return rows;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overrides, targetCoCReturn, targetIRR, acquisition, operations, proForma, refinance]);
 
@@ -523,6 +551,17 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
           value={overrides.projectionYears} min={1} max={20} step={1}
           displayValue={`${Math.round(overrides.projectionYears)} yr${overrides.projectionYears !== 1 ? 's' : ''}`}
           onChange={set('projectionYears')} isChanged={isChanged('projectionYears')} />
+        {refinance.enabled && <>
+          <SectionLabel label="Refinance" />
+          <Slider label="Refi Interest Rate" sublabel="Rate on the new loan after refinance"
+            value={overrides.refiRate} min={2} max={15} step={0.125}
+            displayValue={formatPct(overrides.refiRate)}
+            onChange={set('refiRate')} isChanged={isChanged('refiRate')} />
+          <Slider label="Refi Year" sublabel="Year in which refinance occurs"
+            value={overrides.refiYear} min={1} max={Math.round(overrides.projectionYears)} step={1}
+            displayValue={`Year ${Math.round(overrides.refiYear)}`}
+            onChange={set('refiYear')} isChanged={isChanged('refiYear')} />
+        </>}
       </div>
 
       {anyChanged && (

@@ -7,6 +7,7 @@ import { formatCurrency, formatPct, formatMultiple } from '@/utils/dealAnalyzerC
 import { runSimulation, computeDefaultRanges, toSavedMCResults, hydrateMCResults, findMaxPriceAtConditions } from '@/utils/monteCarlo';
 import type { MCRanges, MCResults, MCRunResult, SavedMCResults } from '@/utils/monteCarlo';
 import type { CoCAcquisition, CoCOperations, CoCRefinance, ProFormaData } from '@/types';
+import { useDealSettingsStore, CONFIDENCE_OPTIONS, BEAR_OPTIONS, BULL_OPTIONS } from '@/lib/dealSettingsStore';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -167,10 +168,14 @@ function VerdictCard({ results, targetCoC, onTargetCoCChange, targetIRR, onTarge
 }
 
 function ScenarioColumns({ results }: { results: MCResults }) {
+  const { bearPercentile, bullPercentile } = useDealSettingsStore();
+  const bearOption = BEAR_OPTIONS.find(o => o.percentile === bearPercentile) ?? BEAR_OPTIONS[1];
+  const bullOption = BULL_OPTIONS.find(o => o.percentile === bullPercentile) ?? BULL_OPTIONS[1];
+
   const scenarios: Array<{ label: string; sub: string; data: MCRunResult; headerColor: string; badgeColor: string }> = [
     {
-      label: 'Bear Case', sub: 'P20 — worse than 80% of runs',
-      data: results.p20,
+      label: 'Bear Case', sub: bearOption.label,
+      data: results[bearPercentile],
       headerColor: 'text-red-500 dark:text-red-400',
       badgeColor: 'bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400',
     },
@@ -181,8 +186,8 @@ function ScenarioColumns({ results }: { results: MCResults }) {
       badgeColor: 'bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400',
     },
     {
-      label: 'Bull Case', sub: 'P80 — better than 80% of runs',
-      data: results.p80,
+      label: 'Bull Case', sub: bullOption.label,
+      data: results[bullPercentile],
       headerColor: 'text-secondary-600 dark:text-secondary-400',
       badgeColor: 'bg-secondary-50 dark:bg-secondary-900/20 text-secondary-600 dark:text-secondary-400',
     },
@@ -268,15 +273,16 @@ function SensitivitySection({ results }: { results: MCResults }) {
 
 // ── Max Price Card ────────────────────────────────────────────────────────────
 
-function MaxPriceCard({ p20MaxPrice, p50MaxPrice, targetIRR, currentPrice }: {
-  p20MaxPrice: number | null;
-  p50MaxPrice: number | null;
+function MaxPriceCard({ recommendedMaxPrice, conservativeMaxPrice, targetIRR, currentPrice, confidenceLevel }: {
+  recommendedMaxPrice: number | null;
+  conservativeMaxPrice: number | null;
   targetIRR: number;
   currentPrice: number;
+  confidenceLevel: number;
 }) {
   const rows: Array<{ label: string; sub: string; price: number | null }> = [
-    { label: 'Recommended',  sub: 'Median market conditions',   price: p50MaxPrice },
-    { label: 'Conservative', sub: 'If market underperforms',    price: p20MaxPrice },
+    { label: 'Recommended',  sub: 'Median market conditions (P50)',              price: recommendedMaxPrice },
+    { label: 'Conservative', sub: `${confidenceLevel}% confidence — if market underperforms`, price: conservativeMaxPrice },
   ];
 
   return (
@@ -329,11 +335,12 @@ function MaxPriceCard({ p20MaxPrice, p50MaxPrice, targetIRR, currentPrice }: {
   );
 }
 
-function RangeEditor({ ranges, defaults, onChange, onReset }: {
-  ranges:   MCRanges;
-  defaults: MCRanges;
-  onChange: (r: MCRanges) => void;
-  onReset:  () => void;
+function RangeEditor({ ranges, defaults, onChange, onReset, showRefiRate }: {
+  ranges:       MCRanges;
+  defaults:     MCRanges;
+  onChange:     (r: MCRanges) => void;
+  onReset:      () => void;
+  showRefiRate: boolean;
 }) {
   // Local string state for each (key, side) so typing isn't blocked mid-edit
   const [draft, setDraft] = useState<Partial<Record<string, string>>>({});
@@ -345,6 +352,7 @@ function RangeEditor({ ranges, defaults, onChange, onReset }: {
     { key: 'exitCapRate',       label: 'Exit Cap Rate (%)',     step: 0.25,  decimals: 2, higherIsWorse: true  },
     { key: 'renoOverrunPct',    label: 'Reno Overrun Max (%)',  step: 5,     decimals: 0, higherIsWorse: true  },
     { key: 'interestRate',      label: 'Interest Rate (%)',     step: 0.125, decimals: 3, higherIsWorse: true  },
+    ...(showRefiRate ? [{ key: 'refiRate' as keyof MCRanges, label: 'Refi Rate (%)', step: 0.125, decimals: 3, higherIsWorse: true }] : []),
   ];
 
   const changed = (Object.keys(ranges) as (keyof MCRanges)[]).some(
@@ -455,7 +463,7 @@ export function MonteCarloPanel({
   savedResults, onResultsChange,
 }: MonteCarloPanelProps) {
   const defaults = useMemo(
-    () => computeDefaultRanges(acquisition, proForma, avgTargetRentPerUnit, units),
+    () => computeDefaultRanges(acquisition, proForma, avgTargetRentPerUnit, units, refinance),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
@@ -484,14 +492,18 @@ export function MonteCarloPanel({
   const [targetIRR, setTargetIRR]   = useState(12);
   const [showEditor, setShowEditor] = useState(false);
 
-  const { p20MaxPrice, p50MaxPrice } = useMemo(() => {
-    if (!results) return { p20MaxPrice: null, p50MaxPrice: null };
+  const recommendedPriceConfidence = useDealSettingsStore(s => s.recommendedPriceConfidence);
+  const confidenceOption = CONFIDENCE_OPTIONS.find(o => o.value === recommendedPriceConfidence) ?? CONFIDENCE_OPTIONS[1];
+
+  const { recommendedMaxPrice, conservativeMaxPrice } = useMemo(() => {
+    if (!results) return { recommendedMaxPrice: null, conservativeMaxPrice: null };
     const args = [targetIRR, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit] as const;
+    const conservativeResult = results[confidenceOption.percentile as keyof typeof results] as MCRunResult | undefined;
     return {
-      p20MaxPrice: findMaxPriceAtConditions(results.p20.sampled, ...args),
-      p50MaxPrice: findMaxPriceAtConditions(results.p50.sampled, ...args),
+      recommendedMaxPrice: findMaxPriceAtConditions(results.p50.sampled, ...args),
+      conservativeMaxPrice: conservativeResult ? findMaxPriceAtConditions(conservativeResult.sampled, ...args) : null,
     };
-  }, [results, targetIRR, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit]);
+  }, [results, targetIRR, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit, confidenceOption]);
 
   const run = useCallback(async () => {
     setRunning(true);
@@ -549,10 +561,11 @@ export function MonteCarloPanel({
             targetIRR={targetIRR} onTargetIRRChange={setTargetIRR}
           />
           <MaxPriceCard
-            p20MaxPrice={p20MaxPrice}
-            p50MaxPrice={p50MaxPrice}
+            recommendedMaxPrice={recommendedMaxPrice}
+            conservativeMaxPrice={conservativeMaxPrice}
             targetIRR={targetIRR}
             currentPrice={acquisition.purchasePrice}
+            confidenceLevel={recommendedPriceConfidence}
           />
           <ScenarioColumns results={results} />
           <SensitivitySection results={results} />
@@ -575,6 +588,7 @@ export function MonteCarloPanel({
           defaults={defaults}
           onChange={handleRangesChange}
           onReset={() => handleRangesChange(defaults)}
+          showRefiRate={refinance.enabled}
         />
       )}
     </div>

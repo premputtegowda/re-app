@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Trash2, TrendingUp, ChevronRight, PenLine, FileText, ArrowUpDown, X, GitCompare } from 'lucide-react';
+import { Plus, Trash2, TrendingUp, ChevronRight, PenLine, Home, Building2, ArrowUpDown, X, GitCompare, Percent, SlidersHorizontal } from 'lucide-react';
 import { Button } from '@/components/UI/Button';
 import { PageHeader } from '@/components/UI/PageHeader';
 import { useDealAnalyzerStore } from '@/lib/dealAnalyzerStore';
@@ -19,11 +19,12 @@ function getBestResult(deal: SavedDeal): CoCResult | null {
 
 function getVerdict(result: CoCResult | null): { label: string; score: number; color: string; badge: string } {
   if (!result) return { label: 'Draft', score: -1, color: 'text-slate-400', badge: 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400' };
+  // Score weights IRR (60%) and CoC (40%) — industry standard thresholds
   const score = (result.irr ?? 0) * 0.6 + result.avgCoCReturn * 0.4;
-  if (score >= 15) return { label: 'Strong',   score, color: 'text-secondary-600 dark:text-secondary-400', badge: 'bg-secondary-100 dark:bg-secondary-900/40 text-secondary-700 dark:text-secondary-300' };
-  if (score >= 8)  return { label: 'Solid',    score, color: 'text-primary-600 dark:text-primary-400',     badge: 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300' };
-  if (score >= 4)  return { label: 'Marginal', score, color: 'text-amber-600 dark:text-amber-400',         badge: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300' };
-  return                   { label: 'Weak',    score, color: 'text-red-600 dark:text-red-400',             badge: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300' };
+  if (score >= 17) return { label: 'Exceptional', score, color: 'text-secondary-600 dark:text-secondary-400', badge: 'bg-secondary-100 dark:bg-secondary-900/40 text-secondary-700 dark:text-secondary-300' };
+  if (score >= 12) return { label: 'Strong',      score, color: 'text-primary-600 dark:text-primary-400',     badge: 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300' };
+  if (score >= 7)  return { label: 'Solid',       score, color: 'text-amber-600 dark:text-amber-400',         badge: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300' };
+  return                   { label: 'Weak',        score, color: 'text-red-600 dark:text-red-400',             badge: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300' };
 }
 
 function formatRelativeDate(iso: string): string {
@@ -41,15 +42,16 @@ function PortfolioSummary({ deals }: { deals: SavedDeal[] }) {
   if (analyses.length === 0) return null;
 
   const results = analyses.map(d => getBestResult(d)!);
-  const totalInvested = results.reduce((s, r) => s + r.totalInvested, 0);
-  const avgIRR = results.filter(r => r.irr !== null).reduce((s, r) => s + (r.irr ?? 0), 0) / (results.filter(r => r.irr !== null).length || 1);
-  const avgCoC = results.reduce((s, r) => s + r.avgCoCReturn, 0) / results.length;
+  const strongCount = analyses.filter(d => ['Exceptional', 'Strong'].includes(getVerdict(getBestResult(d)).label)).length;
+  const irrValues = results.map(r => r.irr).filter((v): v is number => v !== null);
+  const bestIRR = irrValues.length > 0 ? Math.max(...irrValues) : null;
+  const bestCoC = results.length > 0 ? Math.max(...results.map(r => r.avgCoCReturn)) : null;
 
   const stats = [
     { label: 'Deals Analyzed', value: analyses.length.toString() },
-    { label: 'Total Invested', value: formatCurrency(totalInvested) },
-    { label: 'Avg IRR', value: formatPct(avgIRR) },
-    { label: 'Avg CoC', value: formatPct(avgCoC) },
+    { label: 'Exceptional / Strong', value: `${strongCount} of ${analyses.length}` },
+    { label: 'Best IRR', value: bestIRR !== null ? formatPct(bestIRR) : '—' },
+    { label: 'Best CoC', value: bestCoC !== null ? formatPct(bestCoC) : '—' },
   ];
 
   return (
@@ -79,6 +81,7 @@ function DealCard({ deal, selected, compareMode, onLoad, onDelete, onToggleSelec
   const [confirmDelete, setConfirmDelete] = useState(false);
   const result = getBestResult(deal);
   const verdict = getVerdict(result);
+  const acq = deal.acquisition;
   const isDraft = !result;
 
   const handleDelete = (e: React.MouseEvent) => {
@@ -92,10 +95,15 @@ function DealCard({ deal, selected, compareMode, onLoad, onDelete, onToggleSelec
     else onLoad();
   };
 
+  const PropertyIcon = acq.propertyType === 'sfr' ? Home : Building2;
+  const unitLabel = acq.propertyType === 'sfr'
+    ? [acq.sfrBeds && `${acq.sfrBeds}bd`, acq.sfrBaths && `${acq.sfrBaths}ba`].filter(Boolean).join('/')
+    : acq.units > 0 ? `${acq.units} units` : '';
+
   return (
     <div
       onClick={handleClick}
-      className={`relative rounded-xl border-2 bg-white dark:bg-slate-800 transition-all cursor-pointer group ${
+      className={`relative rounded-xl border-2 bg-white dark:bg-slate-800 transition-all cursor-pointer group overflow-hidden ${
         selected
           ? 'border-primary-500 shadow-md shadow-primary-100 dark:shadow-primary-900/20'
           : 'border-slate-200 dark:border-slate-700 hover:border-primary-300 dark:hover:border-primary-600 hover:shadow-md'
@@ -103,78 +111,104 @@ function DealCard({ deal, selected, compareMode, onLoad, onDelete, onToggleSelec
     >
       {/* Compare checkbox */}
       {compareMode && (
-        <div className={`absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${
+        <div className={`absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center z-10 transition-all ${
           selected ? 'bg-primary-500 border-primary-500' : 'border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800'
         }`}>
           {selected && <span className="text-white text-[10px] font-bold">✓</span>}
         </div>
       )}
 
-      <div className="p-4">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-2 mb-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-              isDraft ? 'bg-amber-50 dark:bg-amber-900/20' : 'bg-primary-50 dark:bg-primary-900/20'
-            }`}>
-              {isDraft
-                ? <PenLine size={14} className="text-amber-500" />
-                : <FileText size={14} className="text-primary-600 dark:text-primary-400" />}
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-slate-900 dark:text-white truncate group-hover:text-primary-700 dark:group-hover:text-primary-300 transition-colors">
-                {deal.name}
-              </p>
-              {deal.acquisition.propertyAddress?.trim() && deal.acquisition.propertyAddress.trim() !== deal.name && (
-                <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate">{deal.acquisition.propertyAddress}</p>
-              )}
-            </div>
-          </div>
-
-          {/* Verdict badge */}
-          <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${verdict.badge}`}>
-            {verdict.label}
-          </span>
+      {/* ── Header ── */}
+      <div className="px-4 pt-4 pb-3 flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-sm font-bold text-slate-900 dark:text-white truncate group-hover:text-primary-700 dark:group-hover:text-primary-300 transition-colors">
+            {deal.name}
+          </p>
+          {acq.propertyAddress?.trim() && acq.propertyAddress.trim() !== deal.name && (
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate mt-0.5">{acq.propertyAddress}</p>
+          )}
         </div>
+        <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full ${verdict.badge}`}>
+          {isDraft ? 'Draft' : verdict.label}
+        </span>
+      </div>
 
-        {/* KPI grid */}
-        {result ? (
-          <div className="grid grid-cols-2 gap-2 mb-3">
-            {[
-              { label: 'IRR',      value: result.irr !== null ? formatPct(result.irr) : '—' },
-              { label: 'Avg CoC',  value: formatPct(result.avgCoCReturn) },
-              { label: 'Eq. Mult', value: formatMultiple(result.equityMultiple) },
-              { label: 'Invested', value: formatCurrency(result.totalInvested) },
-            ].map(({ label, value }) => (
-              <div key={label} className="bg-slate-50 dark:bg-slate-700/40 rounded-lg px-3 py-2">
-                <p className="text-[10px] text-slate-400 dark:text-slate-500">{label}</p>
-                <p className="text-sm font-bold text-slate-800 dark:text-slate-200 tabular-nums">{value}</p>
-              </div>
-            ))}
+      {/* ── Acquisition snapshot ── */}
+      <div className="mx-4 rounded-xl border border-slate-100 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-700/20 p-3 mb-3">
+        <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-1.5">Acquisition</p>
+        <div className="flex items-end justify-between gap-2">
+          <div>
+            <p className="text-xl font-black text-slate-900 dark:text-white tabular-nums leading-tight">
+              {acq.purchasePrice > 0 ? formatCurrency(acq.purchasePrice) : '—'}
+            </p>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Purchase Price</p>
           </div>
-        ) : (
-          <p className="text-xs text-slate-400 mb-3">No results yet — open to calculate</p>
-        )}
-
-        {/* Footer */}
-        <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-700">
-          <span className="text-[11px] text-slate-400">{formatRelativeDate(deal.savedAt)}</span>
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={handleDelete}
-              className={`p-1.5 rounded-lg transition-all ${
-                confirmDelete
-                  ? 'bg-red-100 dark:bg-red-900/30 text-red-500'
-                  : 'text-slate-300 dark:text-slate-600 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 opacity-0 group-hover:opacity-100'
-              }`}
-            >
-              <Trash2 size={13} />
-            </button>
-            {!compareMode && (
-              <ChevronRight size={15} className="text-slate-300 dark:text-slate-600 group-hover:text-primary-400 transition-colors" />
+          {acq.downPaymentPct > 0 && (
+            <div className="text-right">
+              <p className="text-base font-bold text-primary-600 dark:text-primary-400 tabular-nums">{acq.downPaymentPct}%</p>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500">Down</p>
+            </div>
+          )}
+        </div>
+        {(acq.interestRate > 0 || acq.loanTermYears > 0) && (
+          <div className="flex items-center gap-3 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
+            {acq.interestRate > 0 && (
+              <div className="flex items-center gap-1">
+                <Percent size={10} className="text-slate-400" />
+                <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">{acq.interestRate}% Rate</span>
+              </div>
+            )}
+            {acq.loanTermYears > 0 && (
+              <span className="text-xs text-slate-400 dark:text-slate-500">{acq.loanTermYears} yr term</span>
             )}
           </div>
+        )}
+      </div>
+
+      {/* ── Returns strip ── */}
+      {result ? (
+        <div className="mx-4 grid grid-cols-4 gap-1.5 mb-3">
+          {[
+            { label: 'IRR',     value: result.irr !== null ? formatPct(result.irr) : '—' },
+            { label: 'CoC',     value: formatPct(result.avgCoCReturn) },
+            { label: 'EM',      value: formatMultiple(result.equityMultiple) },
+            { label: 'Cash Flow', value: formatCurrency(result.totalCashFlow) },
+          ].map(({ label, value }) => (
+            <div key={label} className="bg-slate-50 dark:bg-slate-700/40 rounded-lg px-2 py-1.5 text-center">
+              <p className="text-[9px] text-slate-400 dark:text-slate-500 leading-none mb-0.5">{label}</p>
+              <p className="text-xs font-bold text-slate-800 dark:text-slate-200 tabular-nums leading-tight">{value}</p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-slate-400 dark:text-slate-500 mx-4 mb-3 italic">Open to run analysis</p>
+      )}
+
+      {/* ── Footer ── */}
+      <div className="px-4 pb-3 flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <PropertyIcon size={12} className="text-slate-400 shrink-0" />
+          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+            {acq.propertyType?.toUpperCase()}{unitLabel ? ` · ${unitLabel}` : ''}
+          </span>
+          <span className="text-slate-200 dark:text-slate-600">·</span>
+          <span className="text-[11px] text-slate-400">{formatRelativeDate(deal.savedAt)}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={handleDelete}
+            className={`p-1.5 rounded-lg transition-all ${
+              confirmDelete
+                ? 'bg-red-100 dark:bg-red-900/30 text-red-500'
+                : 'text-slate-300 dark:text-slate-600 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 opacity-0 group-hover:opacity-100'
+            }`}
+          >
+            <Trash2 size={13} />
+          </button>
+          {!compareMode && (
+            <ChevronRight size={15} className="text-slate-300 dark:text-slate-600 group-hover:text-primary-400 transition-colors" />
+          )}
         </div>
       </div>
     </div>
@@ -243,6 +277,249 @@ function ComparePanel({ deals, onClose, onOpen }: { deals: SavedDeal[]; onClose:
   );
 }
 
+// ── Filters ───────────────────────────────────────────────────────────────────
+
+type Operator = '>=' | '<=' | '=' | 'between';
+
+interface NumFilter { op: Operator; value: string; value2: string }
+
+interface Filters {
+  search:       string;
+  propertyType: 'sfr' | 'mfr' | '';
+  units:        NumFilter;
+  irr:          NumFilter;
+  coc:          NumFilter;
+  price:        NumFilter;
+  state:        string;
+  city:         string;
+}
+
+const DEFAULT_NUM: NumFilter = { op: '>=', value: '', value2: '' };
+
+const DEFAULT_FILTERS: Filters = {
+  search: '',
+  propertyType: '',
+  units: { ...DEFAULT_NUM, op: '>=' },
+  irr:   { ...DEFAULT_NUM },
+  coc:   { ...DEFAULT_NUM },
+  price: { ...DEFAULT_NUM, op: '<=' },
+  state: '',
+  city:  '',
+};
+
+function parseAddress(address: string): { city: string; state: string } {
+  // Handles "123 Main St, Austin, TX 78701" or "123 Main St, Austin TX 78701"
+  const parts = address.split(',').map(s => s.trim());
+  const last = parts[parts.length - 1] ?? '';
+  const stateMatch = last.match(/\b([A-Z]{2})\b/);
+  const state = stateMatch?.[1] ?? '';
+  const city = parts.length >= 3 ? parts[parts.length - 2] : parts.length === 2 ? parts[0] : '';
+  return { city: city.replace(/\d+/g, '').trim(), state };
+}
+
+function applyFilters(deals: SavedDeal[], filters: Filters): SavedDeal[] {
+  return deals.filter(deal => {
+    const result = getBestResult(deal);
+    const acq = deal.acquisition;
+
+    if (filters.search) {
+      const q = filters.search.toLowerCase();
+      if (!deal.name.toLowerCase().includes(q) && !(acq.propertyAddress ?? '').toLowerCase().includes(q)) return false;
+    }
+
+    if (filters.propertyType && acq.propertyType !== filters.propertyType) return false;
+
+    const check = (val: number | null, f: NumFilter) => {
+      if (!f.value) return true;
+      if (val === null) return false;
+      const n = parseFloat(f.value);
+      if (isNaN(n)) return true;
+      if (f.op === 'between') {
+        const n2 = parseFloat(f.value2);
+        return isNaN(n2) ? val >= n : val >= n && val <= n2;
+      }
+      if (f.op === '>=') return val >= n;
+      if (f.op === '<=') return val <= n;
+      return Math.abs(val - n) < 0.01;
+    };
+
+    if (!check(result?.irr ?? null, filters.irr)) return false;
+    if (!check(result?.avgCoCReturn ?? null, filters.coc)) return false;
+    if (!check(acq.purchasePrice || null, filters.price)) return false;
+
+    const unitCount = acq.propertyType === 'mfr' ? acq.units : null;
+    if (!check(unitCount, filters.units)) return false;
+
+    if (filters.state || filters.city) {
+      const { city, state } = parseAddress(acq.propertyAddress ?? '');
+      if (filters.state && !state.toLowerCase().includes(filters.state.toLowerCase())) return false;
+      if (filters.city  && !city.toLowerCase().includes(filters.city.toLowerCase()))  return false;
+    }
+
+    return true;
+  });
+}
+
+function NumFilterInput({ label, filterKey, filters, onChange }: {
+  label: string;
+  filterKey: 'irr' | 'coc' | 'price' | 'units';
+  filters: Filters;
+  onChange: (f: Filters) => void;
+}) {
+  const f = filters[filterKey] as NumFilter;
+  const isBetween = f.op === 'between';
+  const ops: Operator[] = filterKey === 'units' ? ['>=', '<=', '=', 'between'] : ['>=', '<=', '='];
+  const placeholder = filterKey === 'price' ? 'e.g. 500000' : filterKey === 'units' ? 'e.g. 10' : 'e.g. 15';
+
+  const set = (field: keyof NumFilter, val: string) =>
+    onChange({ ...filters, [filterKey]: { ...f, [field]: val } });
+
+  return (
+    <div>
+      <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5">{label}</p>
+      <div className="flex gap-1.5">
+        <select value={f.op} onChange={e => set('op', e.target.value)}
+          className="text-xs bg-slate-100 dark:bg-slate-700 border-none rounded-lg px-2 py-1.5 text-slate-600 dark:text-slate-300 font-semibold cursor-pointer outline-none shrink-0">
+          {ops.map(op => <option key={op} value={op}>{op === 'between' ? 'between' : op}</option>)}
+        </select>
+        <input type="number" placeholder={placeholder} min={0}
+          value={f.value}
+          onChange={e => set('value', e.target.value)}
+          className="input text-sm flex-1 min-w-0" />
+        {isBetween && (
+          <>
+            <span className="text-xs text-slate-400 self-center shrink-0">–</span>
+            <input type="number" placeholder={placeholder} min={0}
+              value={f.value2}
+              onChange={e => set('value2', e.target.value)}
+              className="input text-sm flex-1 min-w-0" />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FilterBar({ filters, onChange, onClear, activeCount, totalCount, filteredCount }: {
+  filters: Filters;
+  onChange: (f: Filters) => void;
+  onClear: () => void;
+  activeCount: number;
+  totalCount: number;
+  filteredCount: number;
+}) {
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const advancedCount = activeCount - (filters.search ? 1 : 0);
+  const showUnits = filters.propertyType === 'mfr' || filters.propertyType === '';
+
+  return (
+    <div className="space-y-3">
+      {/* Search row — always visible */}
+      <div className="flex gap-2">
+        <div className="flex-1 relative">
+          <SlidersHorizontal size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Search by name, address…"
+            value={filters.search}
+            onChange={e => onChange({ ...filters, search: e.target.value })}
+            className="input pl-9 w-full text-sm"
+          />
+          {filters.search && (
+            <button type="button" onClick={() => onChange({ ...filters, search: '' })}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+              <X size={14} />
+            </button>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowAdvanced(o => !o)}
+          className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-sm font-medium transition-all shrink-0 ${
+            advancedCount > 0
+              ? 'bg-primary-600 text-white border-primary-600'
+              : 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-primary-400 hover:text-primary-600'
+          }`}
+        >
+          <SlidersHorizontal size={15} />
+          Filters
+          {advancedCount > 0 && (
+            <span className="bg-white/30 text-white text-xs px-1.5 py-0.5 rounded-full font-bold">{advancedCount}</span>
+          )}
+        </button>
+      </div>
+
+      {/* Advanced panel */}
+      {showAdvanced && (
+        <div className="p-4 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Filters</h3>
+            {advancedCount > 0 && (
+              <button type="button" onClick={onClear}
+                className="flex items-center gap-1 text-sm text-primary-600 dark:text-primary-400 hover:text-primary-700">
+                <X size={14} /> Clear all
+              </button>
+            )}
+          </div>
+
+          {/* Deal type chips */}
+          <div>
+            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5">Deal Type</p>
+            <div className="flex gap-2">
+              {([{ value: '', label: 'All' }, { value: 'sfr', label: 'SFR' }, { value: 'mfr', label: 'MFR' }] as const).map(opt => (
+                <button key={opt.value} type="button"
+                  onClick={() => onChange({ ...filters, propertyType: opt.value, units: DEFAULT_NUM })}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                    filters.propertyType === opt.value
+                      ? 'bg-primary-600 text-white'
+                      : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
+                  }`}>
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Returns & price */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <NumFilterInput label="IRR (%)"          filterKey="irr"   filters={filters} onChange={onChange} />
+            <NumFilterInput label="CoC Return (%)"   filterKey="coc"   filters={filters} onChange={onChange} />
+            <NumFilterInput label="Purchase Price ($)" filterKey="price" filters={filters} onChange={onChange} />
+          </div>
+
+          {/* Units — only for MFR or All */}
+          {showUnits && (
+            <NumFilterInput label="Units (MFR)" filterKey="units" filters={filters} onChange={onChange} />
+          )}
+
+          {/* Location */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5">City</p>
+              <input type="text" placeholder="e.g. Austin"
+                value={filters.city}
+                onChange={e => onChange({ ...filters, city: e.target.value })}
+                className="input text-sm w-full" />
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5">State</p>
+              <input type="text" placeholder="e.g. TX" maxLength={2}
+                value={filters.state}
+                onChange={e => onChange({ ...filters, state: e.target.value.toUpperCase() })}
+                className="input text-sm w-full" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Results count */}
+      <p className="text-sm text-slate-600 dark:text-slate-400">
+        Showing {filteredCount} {filteredCount === 1 ? 'deal' : 'deals'}{activeCount > 0 ? ` of ${totalCount}` : ''}
+      </p>
+    </div>
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export function DealAnalyzerDashboard() {
@@ -250,21 +527,29 @@ export function DealAnalyzerDashboard() {
   const { savedDeals, deleteSavedDeal } = useDealAnalyzerStore();
   const [sortKey, setSortKey] = useState<SortKey>('date');
   const [compareIds, setCompareIds] = useState<string[]>([]);
+  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const compareMode = compareIds.length > 0 || false;
+
+  const activeFilterCount = [
+    filters.search, filters.propertyType, filters.units.value,
+    filters.irr.value, filters.coc.value, filters.price.value,
+    filters.state, filters.city,
+  ].filter(Boolean).length;
 
   const analyses = savedDeals.filter(d => getBestResult(d));
   const drafts   = savedDeals.filter(d => !getBestResult(d));
 
   const sortedAnalyses = useMemo(() => {
-    return [...analyses].sort((a, b) => {
+    const filtered = applyFilters(analyses, filters);
+    return filtered.sort((a, b) => {
       const ra = getBestResult(a)!, rb = getBestResult(b)!;
       if (sortKey === 'irr')     return (rb.irr ?? -999) - (ra.irr ?? -999);
       if (sortKey === 'coc')     return rb.avgCoCReturn - ra.avgCoCReturn;
       if (sortKey === 'verdict') return getVerdict(rb).score - getVerdict(ra).score;
       if (sortKey === 'price')   return b.acquisition.purchasePrice - a.acquisition.purchasePrice;
-      return new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime(); // date
+      return new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime();
     });
-  }, [analyses, sortKey]);
+  }, [analyses, filters, sortKey]);
 
   const toggleCompare = (id: string) => {
     setCompareIds(prev =>
@@ -295,42 +580,55 @@ export function DealAnalyzerDashboard() {
             {/* Portfolio summary */}
             <PortfolioSummary deals={savedDeals} />
 
+            {/* Search + filters */}
+            {analyses.length > 0 && (
+              <FilterBar
+                filters={filters}
+                onChange={setFilters}
+                onClear={() => setFilters(DEFAULT_FILTERS)}
+                activeCount={activeFilterCount}
+                totalCount={analyses.length}
+                filteredCount={sortedAnalyses.length}
+              />
+            )}
+
             {/* Analyses */}
             {analyses.length > 0 && (
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-                    Analyses · {analyses.length}
-                  </h2>
-                  <div className="flex items-center gap-2">
-                    {/* Compare toggle */}
-                    <button
-                      type="button"
-                      onClick={() => setCompareIds([])}
-                      className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-all ${
-                        compareMode
-                          ? 'bg-primary-600 text-white border-primary-600'
-                          : 'border-slate-200 dark:border-slate-700 text-slate-500 hover:border-primary-400 hover:text-primary-600'
-                      }`}
-                    >
-                      <GitCompare size={13} />
-                      {compareMode ? `${compareIds.length} selected` : 'Compare'}
-                    </button>
-
-                    {/* Sort */}
-                    <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                      <ArrowUpDown size={12} />
-                      <select
-                        value={sortKey}
-                        onChange={e => setSortKey(e.target.value as SortKey)}
-                        className="text-xs bg-transparent text-slate-600 dark:text-slate-400 border-none outline-none cursor-pointer"
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                      Analyses · {sortedAnalyses.length}{activeFilterCount > 0 ? ` of ${analyses.length}` : ''}
+                    </h2>
+                    <div className="flex items-center gap-2">
+                      {/* Compare toggle */}
+                      <button
+                        type="button"
+                        onClick={() => setCompareIds([])}
+                        className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-all ${
+                          compareMode
+                            ? 'bg-primary-600 text-white border-primary-600'
+                            : 'border-slate-200 dark:border-slate-700 text-slate-500 hover:border-primary-400 hover:text-primary-600'
+                        }`}
                       >
-                        <option value="date">Date</option>
-                        <option value="irr">IRR</option>
-                        <option value="coc">CoC</option>
-                        <option value="verdict">Verdict</option>
-                        <option value="price">Price</option>
-                      </select>
+                        <GitCompare size={13} />
+                        {compareMode ? `${compareIds.length} selected` : 'Compare'}
+                      </button>
+                      {/* Sort */}
+                      <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                        <ArrowUpDown size={12} />
+                        <select
+                          value={sortKey}
+                          onChange={e => setSortKey(e.target.value as SortKey)}
+                          className="text-xs bg-transparent text-slate-600 dark:text-slate-400 border-none outline-none cursor-pointer"
+                        >
+                          <option value="date">Date</option>
+                          <option value="irr">IRR</option>
+                          <option value="coc">CoC</option>
+                          <option value="verdict">Verdict</option>
+                          <option value="price">Price</option>
+                        </select>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -341,7 +639,7 @@ export function DealAnalyzerDashboard() {
                   </p>
                 )}
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3">
                   {sortedAnalyses.map(deal => (
                     <DealCard
                       key={deal.id}
@@ -363,7 +661,7 @@ export function DealAnalyzerDashboard() {
                 <h2 className="text-xs font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
                   Drafts · {drafts.length}
                 </h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3">
                   {drafts.map(deal => (
                     <DealCard
                       key={deal.id}
