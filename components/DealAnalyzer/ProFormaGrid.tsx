@@ -472,30 +472,17 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
 
   const clearYearOverride = useCallback((year: number, field: 'grossRent' | 'otherIncome' | 'vacancyPct' | 'creditLossPct') => {
     const prev = data.yearOverrides ?? {};
-    const updated: NonNullable<ProFormaData['yearOverrides']> = { ...prev };
-
     if (year === 1) {
-      // Year 1 is the chain anchor — retain its value as-is. Only unpin Year 2
-      // so it re-chains from Year 1 instead of being stuck at the old auto-pin.
-    } else {
-      // Year 2+: delete this year's override so it chains from the previous year.
-      const e = { ...(prev[year] ?? {}) };
-      delete e[field];
-      if (field === 'grossRent') delete e.grossRentSystem;
-      updated[year] = e;
+      // Year 1 is the chain anchor — retain its value as-is.
+      return;
     }
-
-    // Clear the next year's auto-pin (set by applyIncomeYearOnly) so it re-chains from this year.
-    const nextYear = year + 1;
-    if (nextYear <= projectionYears && prev[nextYear]?.[field] !== undefined) {
-      const nextE = { ...(prev[nextYear] ?? {}) };
-      delete nextE[field];
-      if (field === 'grossRent') delete nextE.grossRentSystem;
-      updated[nextYear] = nextE;
-    }
-
-    onChange({ ...data, yearOverrides: updated });
-  }, [data, onChange, projectionYears]);
+    // Year 2+: remove this year's override so it chains from Year N-1.
+    // Propagation naturally stops at the next blocked year — we don't touch it.
+    const e = { ...(prev[year] ?? {}) };
+    delete e[field];
+    if (field === 'grossRent') delete e.grossRentSystem;
+    onChange({ ...data, yearOverrides: { ...prev, [year]: e } });
+  }, [data, onChange]);
 
   const setExpenseYearOverride = useCallback((year: number, expenseId: string, value: number) => {
     const prev = data.yearOverrides ?? {};
@@ -506,29 +493,17 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
 
   const clearExpenseYearOverride = useCallback((year: number, expenseId: string) => {
     const prev = data.yearOverrides ?? {};
-    const updated: NonNullable<ProFormaData['yearOverrides']> = { ...prev };
-
     if (year === 1) {
-      // Year 1 is the chain anchor — retain its value. Only unpin Year 2.
-    } else {
-      // Year 2+: delete the override so it chains from the previous year.
-      const ye = { ...(prev[year] ?? {}) };
-      const expenses = { ...(ye.expenses ?? {}) };
-      delete expenses[expenseId];
-      updated[year] = { ...ye, expenses };
+      // Year 1 is the chain anchor — retain its value as-is.
+      return;
     }
-
-    // Clear the next year's auto-pin so it re-chains from this year.
-    const nextYear = year + 1;
-    if (nextYear <= projectionYears && prev[nextYear]?.expenses?.[expenseId] !== undefined) {
-      const nextYe = { ...(prev[nextYear] ?? {}) };
-      const nextExp = { ...(nextYe.expenses ?? {}) };
-      delete nextExp[expenseId];
-      updated[nextYear] = { ...nextYe, expenses: nextExp };
-    }
-
-    onChange({ ...data, yearOverrides: updated });
-  }, [data, onChange, projectionYears]);
+    // Year 2+: remove this year's override so it chains from Year N-1.
+    // Propagation naturally stops at the next blocked year — we don't touch it.
+    const ye = { ...(prev[year] ?? {}) };
+    const expenses = { ...(ye.expenses ?? {}) };
+    delete expenses[expenseId];
+    onChange({ ...data, yearOverrides: { ...prev, [year]: { ...ye, expenses } } });
+  }, [data, onChange]);
 
   const setYearGrowthPct = useCallback((year: number, field: 'grossRentGrowthPct' | 'otherIncomeGrowthPct', value: number) => {
     const prev = data.yearOverrides ?? {};
