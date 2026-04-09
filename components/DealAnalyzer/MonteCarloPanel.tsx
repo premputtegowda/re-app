@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, useMemo } from 'react';
 import React from 'react';
 import { Play, ChevronDown, ChevronUp, RotateCcw, CheckCircle2 } from 'lucide-react';
 import { formatCurrency, formatPct, formatMultiple } from '@/utils/dealAnalyzerCalc';
-import { runSimulation, computeDefaultRanges, toSavedMCResults, hydrateMCResults, findMaxPriceAtConditions } from '@/utils/monteCarlo';
+import { runSimulation, computeDefaultRanges, toSavedMCResults, hydrateMCResults, findMaxPriceAtConditions, computeDeterministicPrices } from '@/utils/monteCarlo';
 import type { MCRanges, MCResults, MCRunResult, SavedMCResults } from '@/utils/monteCarlo';
 import type { CoCAcquisition, CoCOperations, CoCRefinance, ProFormaData } from '@/types';
 import { useDealSettingsStore, CONFIDENCE_OPTIONS, BEAR_OPTIONS, BULL_OPTIONS } from '@/lib/dealSettingsStore';
@@ -172,10 +172,14 @@ function ScenarioColumns({ results }: { results: MCResults }) {
   const bearOption = BEAR_OPTIONS.find(o => o.percentile === bearPercentile) ?? BEAR_OPTIONS[1];
   const bullOption = BULL_OPTIONS.find(o => o.percentile === bullPercentile) ?? BULL_OPTIONS[1];
 
+  // Fallback chain for saved results that pre-date p30/p70 being added
+  const bearData = results[bearPercentile] ?? results.p20 ?? results.p10 ?? results.p50;
+  const bullData = results[bullPercentile] ?? results.p80 ?? results.p90 ?? results.p50;
+
   const scenarios: Array<{ label: string; sub: string; data: MCRunResult; headerColor: string; badgeColor: string }> = [
     {
       label: 'Bear Case', sub: bearOption.label,
-      data: results[bearPercentile],
+      data: bearData,
       headerColor: 'text-red-500 dark:text-red-400',
       badgeColor: 'bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400',
     },
@@ -187,11 +191,11 @@ function ScenarioColumns({ results }: { results: MCResults }) {
     },
     {
       label: 'Bull Case', sub: bullOption.label,
-      data: results[bullPercentile],
+      data: bullData,
       headerColor: 'text-secondary-600 dark:text-secondary-400',
       badgeColor: 'bg-secondary-50 dark:bg-secondary-900/20 text-secondary-600 dark:text-secondary-400',
     },
-  ];
+  ].filter(s => s.data != null);
 
   return (
     <div>
@@ -381,8 +385,10 @@ function RangeEditor({ ranges, defaults, onChange, onReset, showRefiRate }: {
 
       <div className="space-y-2">
         {fields.map(({ key, label, step, decimals, higherIsWorse }) => {
-          const r = ranges[key];
           const d = defaults[key];
+          // Fall back to defaults for ranges missing from older saved data (e.g. refiRate)
+          if (!d) return null;
+          const r = ranges[key] ?? d;
           const fmt = (v: number) => parseFloat(v.toFixed(decimals)).toString();
           // For higherIsWorse: pessimistic = max, optimistic = min
           const pessField = higherIsWorse ? 'max' : 'min';
@@ -497,13 +503,10 @@ export function MonteCarloPanel({
 
   const { recommendedMaxPrice, conservativeMaxPrice } = useMemo(() => {
     if (!results) return { recommendedMaxPrice: null, conservativeMaxPrice: null };
-    const args = [targetIRR, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit] as const;
-    const conservativeResult = results[confidenceOption.percentile as keyof typeof results] as MCRunResult | undefined;
-    return {
-      recommendedMaxPrice: findMaxPriceAtConditions(results.p50.sampled, ...args),
-      conservativeMaxPrice: conservativeResult ? findMaxPriceAtConditions(conservativeResult.sampled, ...args) : null,
-    };
-  }, [results, targetIRR, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit, confidenceOption]);
+    return computeDeterministicPrices(
+      ranges, targetIRR, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit,
+    );
+  }, [ranges, targetIRR, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit]);
 
   const run = useCallback(async () => {
     setRunning(true);
@@ -522,7 +525,10 @@ export function MonteCarloPanel({
         onProgress: setProgress,
       });
       setResults(r);
-      onResultsChange?.(toSavedMCResults(r));
+      const { recommendedMaxPrice, conservativeMaxPrice } = computeDeterministicPrices(
+        ranges, 12, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit,
+      );
+      onResultsChange?.(toSavedMCResults(r, recommendedMaxPrice, conservativeMaxPrice));
     } finally {
       setRunning(false);
     }

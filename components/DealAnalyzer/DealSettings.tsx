@@ -87,7 +87,7 @@ export function DealSettings() {
       <OptionGroup
         title="Conservative Max Price Confidence"
         description="How confident you want to be when sizing the conservative max purchase price."
-        options={CONFIDENCE_OPTIONS.map(o => ({ ...o, percentile: o.percentile }))}
+        options={CONFIDENCE_OPTIONS.map(o => ({ percentile: o.percentile, label: o.label, sub: o.sub }))}
         value={CONFIDENCE_OPTIONS.find(o => o.value === recommendedPriceConfidence)?.percentile ?? 'p20'}
         onChange={(percentile) => {
           const opt = CONFIDENCE_OPTIONS.find(o => o.percentile === percentile);

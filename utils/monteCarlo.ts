@@ -12,6 +12,17 @@ function sampleTriangular(min: number, mode: number, max: number): number {
   return max - Math.sqrt((1 - u) * (max - min) * (max - mode));
 }
 
+/**
+ * Analytical p-th quantile of a triangular distribution.
+ * Deterministic — no randomness, same answer every call.
+ */
+function triangularQuantile(min: number, mode: number, max: number, p: number): number {
+  if (max <= min) return mode;
+  const F = (mode - min) / (max - min);
+  if (p <= F) return min + Math.sqrt(p * (max - min) * (mode - min));
+  return max - Math.sqrt((1 - p) * (max - min) * (max - mode));
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface MCRange {
@@ -71,20 +82,32 @@ export interface MCResults {
 /** Serialisable subset of MCResults — replaces the large `sorted` array with compact per-run data. */
 export interface SavedMCResults extends Omit<MCResults, 'sorted'> {
   compactRuns: Array<{ irr: number; coc: number }>;
+  /** Max purchase price at P50 (median) conditions — recommended target. Null = not achievable. */
+  recommendedMaxPrice?: number | null;
+  /** Max purchase price at P20 (conservative, ~80% confidence) conditions. Null = not achievable. */
+  conservativeMaxPrice?: number | null;
 }
 
-export function toSavedMCResults(r: MCResults): SavedMCResults {
+export function toSavedMCResults(
+  r: MCResults,
+  recommendedMaxPrice?: number | null,
+  conservativeMaxPrice?: number | null,
+): SavedMCResults {
   const { sorted, ...rest } = r;
-  return { ...rest, compactRuns: sorted.map(run => ({ irr: run.irr, coc: run.avgCoCReturn })) };
+  return { ...rest, compactRuns: sorted.map(run => ({ irr: run.irr, coc: run.avgCoCReturn })), recommendedMaxPrice, conservativeMaxPrice };
 }
 
 export function hydrateMCResults(saved: SavedMCResults): MCResults {
   // Reconstruct a minimal `sorted` from compactRuns (only irr/avgCoCReturn needed for prob filters)
-  const sorted = saved.compactRuns.map(({ irr, coc }) => ({
+  // Guard: pre-compactRuns saved data (old format) won't have this array
+  const sorted = (saved.compactRuns ?? []).map(({ irr, coc }) => ({
     irr, avgCoCReturn: coc, equityMultiple: 0, totalCashFlow: 0,
     sampled: { targetRentPerUnit: 0, vacancyPct: 0, rentGrowthPct: 0, exitCapRate: 0, renoOverrunPct: 0, interestRate: 0, refiRate: 0 },
   }));
-  return { ...saved, sorted };
+  // Back-fill p30/p70 for results saved before those percentiles were added
+  const p30 = (saved as MCResults).p30 ?? (saved as MCResults).p20 ?? (saved as MCResults).p50;
+  const p70 = (saved as MCResults).p70 ?? (saved as MCResults).p80 ?? (saved as MCResults).p50;
+  return { ...saved, sorted, p30, p70 };
 }
 
 // ── Default ranges ────────────────────────────────────────────────────────────
@@ -216,7 +239,9 @@ function runOnce(
   const cap      = sampleTriangular(ranges.exitCapRate.min,       ranges.exitCapRate.mode,       ranges.exitCapRate.max);
   const renoOver = sampleTriangular(ranges.renoOverrunPct.min,    ranges.renoOverrunPct.mode,    ranges.renoOverrunPct.max);
   const rate     = sampleTriangular(ranges.interestRate.min,      ranges.interestRate.mode,      ranges.interestRate.max);
-  const refiRate = sampleTriangular(ranges.refiRate.min,          ranges.refiRate.mode,          ranges.refiRate.max);
+  // ranges.refiRate may be absent in ranges saved before this field was added
+  const refiRateRange = ranges.refiRate ?? { min: rate, mode: rate, max: rate };
+  const refiRate = sampleTriangular(refiRateRange.min, refiRateRange.mode, refiRateRange.max);
 
   // When every sampled value equals its mode, use the original data objects directly.
   // This guarantees bit-identical cash flows to the base case — no reconstruction drift.
@@ -227,7 +252,7 @@ function runOnce(
     cap      === ranges.exitCapRate.mode       &&
     renoOver === ranges.renoOverrunPct.mode    &&
     rate     === ranges.interestRate.mode      &&
-    refiRate === ranges.refiRate.mode;
+    refiRate === refiRateRange.mode;
 
   const baseScenario: CoCScenario = {
     id: 'mc', name: 'MC', scenarioType: 'base',
@@ -445,4 +470,54 @@ export function findMaxPriceAtConditions(
   }
 
   return Math.round(lo / 1000) * 1000; // round to nearest $1k
+}
+
+/**
+ * Deterministic max purchase price bounds — no randomness, same answer every call.
+ *
+ * Recommended  = max price at mode (base case) inputs.
+ * Conservative = max price at analytically-derived pessimistic inputs:
+ *   - Variables where higher hurts (vacancy, cap rate, rates): P80 quantile
+ *   - Variables where lower hurts (rent, rent growth):         P20 quantile
+ *
+ * Both prices are stable across simulation runs.
+ */
+export function computeDeterministicPrices(
+  ranges: MCRanges,
+  targetIRR: number,
+  acquisition: CoCAcquisition,
+  operations: CoCOperations,
+  proForma: ProFormaData,
+  refinance: CoCRefinance,
+  units: number,
+  avgPreStabPerUnit: number,
+): { recommendedMaxPrice: number | null; conservativeMaxPrice: number | null } {
+  const refiRange = ranges.refiRate ?? { min: ranges.interestRate.mode, mode: ranges.interestRate.mode, max: ranges.interestRate.mode };
+
+  const modeSampled: MCRunResult['sampled'] = {
+    targetRentPerUnit: ranges.targetRentPerUnit.mode,
+    vacancyPct:        ranges.vacancyPct.mode,
+    rentGrowthPct:     ranges.rentGrowthPct.mode,
+    exitCapRate:       ranges.exitCapRate.mode,
+    renoOverrunPct:    ranges.renoOverrunPct.mode,
+    interestRate:      ranges.interestRate.mode,
+    refiRate:          refiRange.mode,
+  };
+
+  // Pessimistic: worse-than-base values at ~80th percentile of the bad tail
+  const conservativeSampled: MCRunResult['sampled'] = {
+    targetRentPerUnit: triangularQuantile(ranges.targetRentPerUnit.min, ranges.targetRentPerUnit.mode, ranges.targetRentPerUnit.max, 0.20),
+    vacancyPct:        triangularQuantile(ranges.vacancyPct.min,        ranges.vacancyPct.mode,        ranges.vacancyPct.max,        0.80),
+    rentGrowthPct:     triangularQuantile(ranges.rentGrowthPct.min,     ranges.rentGrowthPct.mode,     ranges.rentGrowthPct.max,     0.20),
+    exitCapRate:       triangularQuantile(ranges.exitCapRate.min,       ranges.exitCapRate.mode,       ranges.exitCapRate.max,       0.80),
+    renoOverrunPct:    triangularQuantile(ranges.renoOverrunPct.min,    ranges.renoOverrunPct.mode,    ranges.renoOverrunPct.max,    0.80),
+    interestRate:      triangularQuantile(ranges.interestRate.min,      ranges.interestRate.mode,      ranges.interestRate.max,      0.80),
+    refiRate:          triangularQuantile(refiRange.min,                refiRange.mode,                refiRange.max,                0.80),
+  };
+
+  const args = [acquisition, operations, proForma, refinance, units, avgPreStabPerUnit] as const;
+  return {
+    recommendedMaxPrice:  findMaxPriceAtConditions(modeSampled,        targetIRR, ...args),
+    conservativeMaxPrice: findMaxPriceAtConditions(conservativeSampled, targetIRR, ...args),
+  };
 }

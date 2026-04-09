@@ -14,7 +14,7 @@ export function Navigation() {
   // ── Deal Analyzer nav ──────────────────────────────────────────────────────
   if (isDealAnalyzer) {
     const dealNavItems = [
-      { href: '/deal-analyzer',          label: 'Portfolio', icon: TrendingUp },
+      { href: '/deal-analyzer',          label: 'Dashboard', icon: TrendingUp },
       { href: '/deal-analyzer/new',      label: 'New Analysis', icon: FilePlus },
       { href: '/deal-analyzer/settings', label: 'Settings', icon: Settings },
     ];

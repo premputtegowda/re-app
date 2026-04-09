@@ -11,7 +11,7 @@ interface LayoutProps {
 
 export function Layout({ children }: LayoutProps) {
   const pathname = usePathname();
-  const hasSidebar = !pathname.startsWith('/deal-analyzer');
+  const hasSidebar = true;
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900">

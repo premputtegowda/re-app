@@ -95,6 +95,7 @@ function makeP50Sampled(): MCRunResult['sampled'] {
     exitCapRate: 6,
     renoOverrunPct: 0,
     interestRate: 7,
+    refiRate: 7,
   };
 }
 
@@ -107,6 +108,7 @@ function makeP20Sampled(): MCRunResult['sampled'] {
     exitCapRate: 7.5,
     renoOverrunPct: 15,
     interestRate: 8,
+    refiRate: 8,
   };
 }
 
@@ -119,6 +121,7 @@ function makeZeroedSampled(): MCRunResult['sampled'] {
     exitCapRate: 0,
     renoOverrunPct: 0,
     interestRate: 0,
+    refiRate: 0,
   };
 }
 

@@ -2,12 +2,14 @@
 
 import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Trash2, TrendingUp, ChevronRight, PenLine, Home, Building2, ArrowUpDown, X, GitCompare, Percent, SlidersHorizontal } from 'lucide-react';
+import { Plus, Trash2, TrendingUp, ChevronRight, PenLine, Home, Building2, ArrowUpDown, X, GitCompare, SlidersHorizontal, BarChart2, Coins, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/UI/Button';
 import { PageHeader } from '@/components/UI/PageHeader';
 import { useDealAnalyzerStore } from '@/lib/dealAnalyzerStore';
 import { formatCurrency, formatPct, formatMultiple } from '@/utils/dealAnalyzerCalc';
+import { computeDeterministicPrices } from '@/utils/monteCarlo';
 import type { SavedDeal, CoCResult, CoCScenarioType } from '@/types';
+import type { SavedMCResults, MCRanges } from '@/utils/monteCarlo';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -42,20 +44,22 @@ function PortfolioSummary({ deals }: { deals: SavedDeal[] }) {
   if (analyses.length === 0) return null;
 
   const results = analyses.map(d => getBestResult(d)!);
-  const strongCount = analyses.filter(d => ['Exceptional', 'Strong'].includes(getVerdict(getBestResult(d)).label)).length;
+  const exceptionalCount = analyses.filter(d => getVerdict(getBestResult(d)).label === 'Exceptional').length;
+  const strongCount = analyses.filter(d => getVerdict(getBestResult(d)).label === 'Strong').length;
   const irrValues = results.map(r => r.irr).filter((v): v is number => v !== null);
   const bestIRR = irrValues.length > 0 ? Math.max(...irrValues) : null;
   const bestCoC = results.length > 0 ? Math.max(...results.map(r => r.avgCoCReturn)) : null;
 
   const stats = [
     { label: 'Deals Analyzed', value: analyses.length.toString() },
-    { label: 'Exceptional / Strong', value: `${strongCount} of ${analyses.length}` },
+    { label: 'Exceptional', value: exceptionalCount.toString() },
+    { label: 'Strong', value: strongCount.toString() },
     { label: 'Best IRR', value: bestIRR !== null ? formatPct(bestIRR) : '—' },
     { label: 'Best CoC', value: bestCoC !== null ? formatPct(bestCoC) : '—' },
   ];
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
       {stats.map(({ label, value }) => (
         <div key={label} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-3">
           <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">{label}</p>
@@ -83,6 +87,22 @@ function DealCard({ deal, selected, compareMode, onLoad, onDelete, onToggleSelec
   const verdict = getVerdict(result);
   const acq = deal.acquisition;
   const isDraft = !result;
+  const mcResults = deal.mcResults as SavedMCResults | undefined;
+  // Use stored deterministic prices if available; otherwise compute from saved ranges
+  const { recommendedMaxPrice, conservativeMaxPrice } = useMemo(() => {
+    if (!mcResults) return { recommendedMaxPrice: null, conservativeMaxPrice: null };
+    if (mcResults.recommendedMaxPrice !== undefined && mcResults.conservativeMaxPrice !== undefined) {
+      return { recommendedMaxPrice: mcResults.recommendedMaxPrice, conservativeMaxPrice: mcResults.conservativeMaxPrice };
+    }
+    // Fallback: compute from saved ranges (deals run before deterministic prices were stored)
+    const savedRanges = deal.mcRanges as unknown as MCRanges | undefined;
+    if (!savedRanges?.targetRentPerUnit) return { recommendedMaxPrice: mcResults.recommendedMaxPrice ?? null, conservativeMaxPrice: null };
+    return computeDeterministicPrices(
+      savedRanges, 12,
+      deal.acquisition, deal.operations, deal.proForma, deal.refinance,
+      deal.acquisition.units || 1, 0,
+    );
+  }, [mcResults, deal.mcRanges, deal.acquisition, deal.operations, deal.proForma, deal.refinance]);
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -99,6 +119,13 @@ function DealCard({ deal, selected, compareMode, onLoad, onDelete, onToggleSelec
   const unitLabel = acq.propertyType === 'sfr'
     ? [acq.sfrBeds && `${acq.sfrBeds}bd`, acq.sfrBaths && `${acq.sfrBaths}ba`].filter(Boolean).join('/')
     : acq.units > 0 ? `${acq.units} units` : '';
+
+  const metrics = result ? [
+    { icon: TrendingUp, label: 'IRR',  value: result.irr !== null ? formatPct(result.irr) : '—' },
+    { icon: BarChart2,  label: 'CoC',  value: formatPct(result.avgCoCReturn) },
+    { icon: Coins,      label: 'EM',   value: formatMultiple(result.equityMultiple) },
+    { icon: ArrowRight, label: 'CF',   value: formatCurrency(result.totalCashFlow) },
+  ] : [];
 
   return (
     <div
@@ -118,98 +145,106 @@ function DealCard({ deal, selected, compareMode, onLoad, onDelete, onToggleSelec
         </div>
       )}
 
-      {/* ── Header ── */}
-      <div className="px-4 pt-4 pb-3 flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-sm font-bold text-slate-900 dark:text-white truncate group-hover:text-primary-700 dark:group-hover:text-primary-300 transition-colors">
-            {deal.name}
-          </p>
-          {acq.propertyAddress?.trim() && acq.propertyAddress.trim() !== deal.name && (
-            <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate mt-0.5">{acq.propertyAddress}</p>
-          )}
-        </div>
-        <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full ${verdict.badge}`}>
-          {isDraft ? 'Draft' : verdict.label}
-        </span>
-      </div>
+      <div className="px-4 pt-3.5 pb-3 space-y-3">
 
-      {/* ── Acquisition snapshot ── */}
-      <div className="mx-4 rounded-xl border border-slate-100 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-700/20 p-3 mb-3">
-        <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-1.5">Acquisition</p>
-        <div className="flex items-end justify-between gap-2">
-          <div>
-            <p className="text-xl font-black text-slate-900 dark:text-white tabular-nums leading-tight">
-              {acq.purchasePrice > 0 ? formatCurrency(acq.purchasePrice) : '—'}
+        {/* ── Row 1: Name + address + verdict ── */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-base font-bold text-slate-900 dark:text-white truncate group-hover:text-primary-700 dark:group-hover:text-primary-300 transition-colors leading-tight">
+              {deal.name}
             </p>
-            <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Purchase Price</p>
+            {acq.propertyAddress?.trim() && acq.propertyAddress.trim() !== deal.name && (
+              <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate mt-0.5">{acq.propertyAddress}</p>
+            )}
           </div>
-          {acq.downPaymentPct > 0 && (
-            <div className="text-right">
-              <p className="text-base font-bold text-primary-600 dark:text-primary-400 tabular-nums">{acq.downPaymentPct}%</p>
-              <p className="text-[10px] text-slate-400 dark:text-slate-500">Down</p>
+          <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full ${verdict.badge}`}>
+            {isDraft ? 'Draft' : verdict.label}
+          </span>
+        </div>
+
+        {/* ── Row 2: Price + financing + metric pills ── */}
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Price block */}
+          <div className="flex items-baseline gap-2 shrink-0">
+            <span className="text-xl font-black text-slate-900 dark:text-white tabular-nums">
+              {acq.purchasePrice > 0 ? formatCurrency(acq.purchasePrice) : '—'}
+            </span>
+            <div className="text-[11px] text-slate-400 dark:text-slate-500 leading-tight">
+              {acq.downPaymentPct > 0 && <span>{acq.downPaymentPct}% down</span>}
+              {acq.interestRate > 0 && acq.loanTermYears > 0 && (
+                <span className="block">{acq.interestRate}% · {acq.loanTermYears}yr</span>
+              )}
+            </div>
+          </div>
+
+          {/* Metric pills */}
+          {metrics.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {metrics.map(({ icon: Icon, label, value }) => (
+                <div key={label} className="flex items-center gap-1 px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-700/60 border border-slate-200 dark:border-slate-600">
+                  <Icon size={10} className="text-slate-400 shrink-0" />
+                  <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">{label}</span>
+                  <span className="text-[11px] font-bold text-slate-800 dark:text-slate-200 tabular-nums">{value}</span>
+                </div>
+              ))}
             </div>
           )}
+          {!result && (
+            <span className="text-xs text-slate-400 italic">Open to run analysis</span>
+          )}
         </div>
-        {(acq.interestRate > 0 || acq.loanTermYears > 0) && (
-          <div className="flex items-center gap-3 mt-2 pt-2 border-t border-slate-100 dark:border-slate-700/60">
-            {acq.interestRate > 0 && (
-              <div className="flex items-center gap-1">
-                <Percent size={10} className="text-slate-400" />
-                <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">{acq.interestRate}% Rate</span>
+
+        {/* ── Row 3: Price range bar ── */}
+        {(conservativeMaxPrice !== null || recommendedMaxPrice !== null) && (
+          <div className="space-y-1.5">
+            {/* Gradient bar */}
+            <div className="h-2 rounded-full" style={{ background: 'linear-gradient(to right, #22c55e, #f59e0b)' }} />
+            {/* Labels */}
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-[9px] font-bold text-secondary-600 dark:text-secondary-400 uppercase tracking-wide leading-none">Ideal Entry</p>
+                <p className="text-xs font-bold text-secondary-700 dark:text-secondary-300 tabular-nums mt-0.5">
+                  {conservativeMaxPrice !== null ? formatCurrency(conservativeMaxPrice) : '—'}
+                </p>
               </div>
-            )}
-            {acq.loanTermYears > 0 && (
-              <span className="text-xs text-slate-400 dark:text-slate-500">{acq.loanTermYears} yr term</span>
-            )}
+              <div className="text-right">
+                <p className="text-[9px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wide leading-none">Recommended Max</p>
+                <p className="text-xs font-bold text-amber-700 dark:text-amber-300 tabular-nums mt-0.5">
+                  {recommendedMaxPrice !== null ? formatCurrency(recommendedMaxPrice) : '—'}
+                </p>
+              </div>
+            </div>
           </div>
         )}
-      </div>
 
-      {/* ── Returns strip ── */}
-      {result ? (
-        <div className="mx-4 grid grid-cols-4 gap-1.5 mb-3">
-          {[
-            { label: 'IRR',     value: result.irr !== null ? formatPct(result.irr) : '—' },
-            { label: 'CoC',     value: formatPct(result.avgCoCReturn) },
-            { label: 'EM',      value: formatMultiple(result.equityMultiple) },
-            { label: 'Cash Flow', value: formatCurrency(result.totalCashFlow) },
-          ].map(({ label, value }) => (
-            <div key={label} className="bg-slate-50 dark:bg-slate-700/40 rounded-lg px-2 py-1.5 text-center">
-              <p className="text-[9px] text-slate-400 dark:text-slate-500 leading-none mb-0.5">{label}</p>
-              <p className="text-xs font-bold text-slate-800 dark:text-slate-200 tabular-nums leading-tight">{value}</p>
-            </div>
-          ))}
+        {/* ── Row 4: Footer ── */}
+        <div className="flex items-center justify-between pt-0.5 border-t border-slate-100 dark:border-slate-700/60">
+          <div className="flex items-center gap-1.5">
+            <PropertyIcon size={11} className="text-slate-400 shrink-0" />
+            <span className="text-[10px] text-slate-500 dark:text-slate-400">
+              {acq.propertyType?.toUpperCase()}{unitLabel ? ` · ${unitLabel}` : ''}
+            </span>
+            <span className="text-slate-200 dark:text-slate-600 text-xs">·</span>
+            <span className="text-[10px] text-slate-400">{formatRelativeDate(deal.savedAt)}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={handleDelete}
+              className={`p-1.5 rounded-lg transition-all ${
+                confirmDelete
+                  ? 'bg-red-100 dark:bg-red-900/30 text-red-500'
+                  : 'text-slate-300 dark:text-slate-600 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 opacity-0 group-hover:opacity-100'
+              }`}
+            >
+              <Trash2 size={12} />
+            </button>
+            {!compareMode && (
+              <ArrowRight size={15} className="text-slate-300 dark:text-slate-600 group-hover:text-primary-400 transition-colors" />
+            )}
+          </div>
         </div>
-      ) : (
-        <p className="text-xs text-slate-400 dark:text-slate-500 mx-4 mb-3 italic">Open to run analysis</p>
-      )}
 
-      {/* ── Footer ── */}
-      <div className="px-4 pb-3 flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <PropertyIcon size={12} className="text-slate-400 shrink-0" />
-          <span className="text-[11px] text-slate-500 dark:text-slate-400">
-            {acq.propertyType?.toUpperCase()}{unitLabel ? ` · ${unitLabel}` : ''}
-          </span>
-          <span className="text-slate-200 dark:text-slate-600">·</span>
-          <span className="text-[11px] text-slate-400">{formatRelativeDate(deal.savedAt)}</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={handleDelete}
-            className={`p-1.5 rounded-lg transition-all ${
-              confirmDelete
-                ? 'bg-red-100 dark:bg-red-900/30 text-red-500'
-                : 'text-slate-300 dark:text-slate-600 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 opacity-0 group-hover:opacity-100'
-            }`}
-          >
-            <Trash2 size={13} />
-          </button>
-          {!compareMode && (
-            <ChevronRight size={15} className="text-slate-300 dark:text-slate-600 group-hover:text-primary-400 transition-colors" />
-          )}
-        </div>
       </div>
     </div>
   );

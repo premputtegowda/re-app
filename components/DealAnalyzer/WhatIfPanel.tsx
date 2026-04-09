@@ -361,7 +361,7 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
     const rateBER   = findBreakEven(v => build({ interestRate: v }),      overrides.interestRate,     30,                          cocMetric, target,    'up');
     const capBERCoC = findBreakEven(v => build({ exitCapRate: v }),       overrides.exitCapRate,      30,                          cocMetric, target,    'up');
     const refiBERCoC = refinance.enabled
-      ? findBreakEven(v => build({ refiRate: v }), overrides.refiRate, 30, cocMetric, target, 'up')
+      ? findBreakEven(v => build({ refiRate: v }), overrides.refiRate!, 30, cocMetric, target, 'up')
       : null;
 
     // IRR break-evens
@@ -370,7 +370,7 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
     const rateBERIRR  = findBreakEven(v => build({ interestRate: v }),      overrides.interestRate,     30,                         irrMetric, targetIRR, 'up');
     const capBERIRR   = findBreakEven(v => build({ exitCapRate: v }),       overrides.exitCapRate,      30,                         irrMetric, targetIRR, 'up');
     const refiBERIRR  = refinance.enabled
-      ? findBreakEven(v => build({ refiRate: v }), overrides.refiRate, 30, irrMetric, targetIRR, 'up')
+      ? findBreakEven(v => build({ refiRate: v }), overrides.refiRate!, 30, irrMetric, targetIRR, 'up')
       : null;
 
     // Strip 'beyond' to get numeric values (null when beyond)
@@ -386,13 +386,13 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
     const rentCC = cocCushionOf(rentBE,  overrides.targetRentPerUnit, 'down');
     const rateCC = cocCushionOf(rateBE,  overrides.interestRate,      'up');
     const capCC  = cocCushionOf(capBECoC,overrides.exitCapRate,       'up');
-    const refiCC = cocCushionOf(refiBECoC, overrides.refiRate,        'up');
+    const refiCC = cocCushionOf(refiBECoC, overrides.refiRate ?? 0,   'up');
 
     const vacCI  = cocCushionOf(vacBEIRR,   overrides.vacancyPct,       'up');
     const rentCI = cocCushionOf(rentBEIRR,  overrides.targetRentPerUnit, 'down');
     const rateCI = cocCushionOf(rateBEIRR,  overrides.interestRate,      'up');
     const capCI  = cocCushionOf(capBEIRR,   overrides.exitCapRate,       'up');
-    const refiCI = cocCushionOf(refiBEIRR,  overrides.refiRate,          'up');
+    const refiCI = cocCushionOf(refiBEIRR,  overrides.refiRate ?? 0,     'up');
 
     const rows: BreakEvenRow[] = [
       {
@@ -428,15 +428,15 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
 
     if (refinance.enabled) {
       rows.push({
-        label: 'Refi Rate', assumption: formatPct(overrides.refiRate), worseDir: 'up' as const,
+        label: 'Refi Rate', assumption: formatPct(overrides.refiRate ?? 0), worseDir: 'up' as const,
         cocBreakEvenFormatted: refiBECoC !== null ? fmt(refiBECoC, formatPct) : null,
         cocBeyond: refiBERCoC !== null ? isBeyond(refiBERCoC) : false,
         cocCushion: refiCC !== null ? formatPct(refiCC) : null,
-        cocCushionPct: refiCC !== null ? (refiCC / overrides.refiRate) * 100 : null,
+        cocCushionPct: refiCC !== null && overrides.refiRate ? (refiCC / overrides.refiRate) * 100 : null,
         irrBreakEvenFormatted: refiBEIRR !== null ? fmt(refiBEIRR, formatPct) : null,
         irrBeyond: refiBERIRR !== null ? isBeyond(refiBERIRR) : false,
         irrCushion: refiCI !== null ? formatPct(refiCI) : null,
-        irrCushionPct: refiCI !== null ? (refiCI / overrides.refiRate) * 100 : null,
+        irrCushionPct: refiCI !== null && overrides.refiRate ? (refiCI / overrides.refiRate) * 100 : null,
       });
     }
 
@@ -554,12 +554,12 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
         {refinance.enabled && <>
           <SectionLabel label="Refinance" />
           <Slider label="Refi Interest Rate" sublabel="Rate on the new loan after refinance"
-            value={overrides.refiRate} min={2} max={15} step={0.125}
-            displayValue={formatPct(overrides.refiRate)}
+            value={overrides.refiRate ?? 0} min={2} max={15} step={0.125}
+            displayValue={formatPct(overrides.refiRate ?? 0)}
             onChange={set('refiRate')} isChanged={isChanged('refiRate')} />
           <Slider label="Refi Year" sublabel="Year in which refinance occurs"
-            value={overrides.refiYear} min={1} max={Math.round(overrides.projectionYears)} step={1}
-            displayValue={`Year ${Math.round(overrides.refiYear)}`}
+            value={overrides.refiYear ?? 1} min={1} max={Math.round(overrides.projectionYears)} step={1}
+            displayValue={`Year ${Math.round(overrides.refiYear ?? 1)}`}
             onChange={set('refiYear')} isChanged={isChanged('refiYear')} />
         </>}
       </div>
