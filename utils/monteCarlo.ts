@@ -111,8 +111,9 @@ export function hydrateMCResults(saved: SavedMCResults): MCResults {
     sampled: { targetRentPerUnit: 0, vacancyPct: 0, rentGrowthPct: 0, exitCapRate: 0, renoOverrunPct: 0, interestRate: 0, refiRate: 0 },
   }));
   // Back-fill p30/p70 for results saved before those percentiles were added
-  const p30 = (saved as MCResults).p30 ?? (saved as MCResults).p20 ?? (saved as MCResults).p50;
-  const p70 = (saved as MCResults).p70 ?? (saved as MCResults).p80 ?? (saved as MCResults).p50;
+  const saved_ = saved as unknown as MCResults;
+  const p30 = saved_.p30 ?? saved_.p20 ?? saved_.p50;
+  const p70 = saved_.p70 ?? saved_.p80 ?? saved_.p50;
   return { ...saved, sorted, p30, p70 };
 }
 

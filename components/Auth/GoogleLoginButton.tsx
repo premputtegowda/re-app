@@ -13,6 +13,7 @@ declare global {
             callback: (response: { credential: string }) => void;
             auto_select?: boolean;
           }) => void;
+          cancel: () => void;
           renderButton: (
             element: HTMLElement,
             options: {
@@ -46,6 +47,7 @@ export default function GoogleLoginButton({
     async (response: { credential: string }) => {
       try {
         await login(response.credential);
+        window.google?.accounts.id.cancel();
         onSuccess?.();
       } catch (error) {
         onError?.(error instanceof Error ? error.message : 'Login failed');
