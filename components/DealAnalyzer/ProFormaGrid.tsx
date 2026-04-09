@@ -105,7 +105,7 @@ function YearCell({ computed, override, format, onOverride, onClearOverride, onY
   override: number | undefined;
   format: 'currency' | 'percent';
   onOverride: (v: number) => void;
-  onClearOverride: () => void;
+  onClearOverride?: () => void;
   onYearOnly?: (v: number) => void;
   cascadeDelay?: number; // ms — staggered wave animation delay
 }) {
@@ -142,7 +142,7 @@ function YearCell({ computed, override, format, onOverride, onClearOverride, onY
   const commit = () => {
     const p = parseFloat(draft.replace(/[$,\s]/g, ''));
     if (!isNaN(p)) {
-      if (p === computed) { onClearOverride(); }
+      if (p === computed && onClearOverride) { onClearOverride(); }
       else if (!pushToFuture && onYearOnly) { onYearOnly(p); }
       else { onOverride(p); }
     }
@@ -179,14 +179,16 @@ function YearCell({ computed, override, format, onOverride, onClearOverride, onY
   // ── Fixed state (manual override) ──
   if (isFixed) return (
     <div className="group/fixed flex items-center justify-end gap-0.5">
-      <button
-        type="button"
-        onClick={e => { e.stopPropagation(); onClearOverride(); }}
-        title="Resume flow"
-        className="opacity-0 group-hover/fixed:opacity-100 transition-opacity shrink-0 p-0.5 rounded text-slate-400 hover:text-primary-500 dark:hover:text-primary-400"
-      >
-        <RotateCcw size={9} />
-      </button>
+      {onClearOverride && (
+        <button
+          type="button"
+          onClick={e => { e.stopPropagation(); onClearOverride(); }}
+          title="Resume flow"
+          className="opacity-0 group-hover/fixed:opacity-100 transition-opacity shrink-0 p-0.5 rounded text-slate-400 hover:text-primary-500 dark:hover:text-primary-400"
+        >
+          <RotateCcw size={9} />
+        </button>
+      )}
       <button
         onClick={start}
         className="text-sm tabular-nums text-right font-semibold cursor-text text-slate-900 dark:text-slate-100 ring-1 ring-slate-300 dark:ring-slate-500 rounded px-1 hover:ring-primary-400 dark:hover:ring-primary-500 transition-all"
@@ -741,7 +743,6 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                 override={typeof yr1Override === 'number' ? yr1Override : undefined}
                 format={fmt}
                 onOverride={v => setYearOverride(1, overrideKey, v)}
-                onClearOverride={() => clearYearOverride(1, overrideKey)}
                 onYearOnly={v => applyIncomeYearOnly(1, overrideKey, v)}
               />
               {isPercent && (() => {
@@ -771,7 +772,6 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                 override={typeof yr1Override === 'number' ? yr1Override : undefined}
                 format={fmt}
                 onOverride={v => setYearOverride(1, overrideKey, v)}
-                onClearOverride={() => clearYearOverride(1, overrideKey)}
                 onYearOnly={v => applyIncomeYearOnly(1, overrideKey, v)}
               />
             )}
@@ -942,7 +942,6 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                     override={typeof yr1Override === 'number' ? yr1Override : undefined}
                     format={fmt}
                     onOverride={v => setYearOverride(1, overrideKey, v)}
-                    onClearOverride={() => clearYearOverride(1, overrideKey)}
                     onYearOnly={v => applyIncomeYearOnly(1, overrideKey, v)}
                   />
                 ) : (
@@ -978,7 +977,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                           updated[mobileYear] = { ...ye, [overrideKey]: v, ...extra };
                           onChange({ ...data, yearOverrides: updated });
                         }}
-                        onClearOverride={() => clearYearOverride(mobileYear, overrideKey)}
+                        onClearOverride={mobileYear > 1 ? () => clearYearOverride(mobileYear, overrideKey) : undefined}
                         onYearOnly={v => applyIncomeYearOnly(mobileYear, overrideKey, v)}
                         cascadeDelay={(mobileYear - 1) * 50}
                         />
@@ -1082,7 +1081,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                         onOverride={(v) => {
                           setExpenseYearOverride(mobileYear, expense.id, v);
                         }}
-                        onClearOverride={() => clearExpenseYearOverride(mobileYear, expense.id)}
+                        onClearOverride={mobileYear > 1 ? () => clearExpenseYearOverride(mobileYear, expense.id) : undefined}
                         onYearOnly={v => applyExpenseYearOnly(mobileYear, expense.id, v)}
                         cascadeDelay={(mobileYear - 1) * 50}
                         />
@@ -1523,7 +1522,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                           <div className="flex flex-col items-end gap-0.5">
                             <YearCell computed={computed} override={typeof yrExpOv === 'number' ? yrExpOv : undefined} format={fmt}
                               onOverride={v => setExpenseYearOverride(year, expense.id, v)}
-                              onClearOverride={() => clearExpenseYearOverride(year, expense.id)}
+                              onClearOverride={year > 1 ? () => clearExpenseYearOverride(year, expense.id) : undefined}
                               onYearOnly={v => applyExpenseYearOnly(year, expense.id, v)}
                               cascadeDelay={(year - 1) * 50}
                             />
