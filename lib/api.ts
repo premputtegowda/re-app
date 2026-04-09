@@ -584,4 +584,36 @@ export const api = {
       throw new ApiError(response.status, error.detail || 'Failed to delete deal');
     }
   },
+
+  // ── Feedback ──────────────────────────────────────────────────────────
+
+  async submitFeedback(module: string, message: string) {
+    const response = await authFetch('/api/feedback/', {
+      method: 'POST',
+      body: JSON.stringify({ module, message }),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new ApiError(response.status, error.detail || 'Failed to submit feedback');
+    }
+    return response.json();
+  },
+
+  async adminListFeedback() {
+    const response = await authFetch('/api/feedback/');
+    if (!response.ok) throw new ApiError(response.status, 'Failed to fetch feedback');
+    return response.json();
+  },
+
+  async adminPatchFeedback(feedbackId: string, status: string) {
+    const response = await authFetch(`/api/feedback/${feedbackId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new ApiError(response.status, error.detail || 'Failed to update feedback');
+    }
+    return response.json();
+  },
 };

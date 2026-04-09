@@ -86,15 +86,21 @@ export interface SavedMCResults extends Omit<MCResults, 'sorted'> {
   recommendedMaxPrice?: number | null;
   /** Max purchase price at P20 (conservative, ~80% confidence) conditions. Null = not achievable. */
   conservativeMaxPrice?: number | null;
+  /** Target IRR used when computing the max purchase prices above. */
+  targetIRR?: number | null;
+  /** Target CoC set in the MC panel at the time the simulation was run. */
+  targetCoC?: number | null;
 }
 
 export function toSavedMCResults(
   r: MCResults,
   recommendedMaxPrice?: number | null,
   conservativeMaxPrice?: number | null,
+  targetIRR?: number | null,
+  targetCoC?: number | null,
 ): SavedMCResults {
   const { sorted, ...rest } = r;
-  return { ...rest, compactRuns: sorted.map(run => ({ irr: run.irr, coc: run.avgCoCReturn })), recommendedMaxPrice, conservativeMaxPrice };
+  return { ...rest, compactRuns: sorted.map(run => ({ irr: run.irr, coc: run.avgCoCReturn })), recommendedMaxPrice, conservativeMaxPrice, targetIRR, targetCoC };
 }
 
 export function hydrateMCResults(saved: SavedMCResults): MCResults {
@@ -475,12 +481,17 @@ export function findMaxPriceAtConditions(
 /**
  * Deterministic max purchase price bounds — no randomness, same answer every call.
  *
- * Recommended  = max price at mode (base case) inputs.
+ * Recommended  = max price at P50 (median) of each variable's distribution.
+ *   For symmetric ranges P50 = mode, but for right-skewed ranges (e.g. reno overrun
+ *   0–0–30%) P50 is meaningfully worse than mode (~8.8% vs 0%), so this price
+ *   accounts for distributional uncertainty rather than just the base case.
+ *   Answers: "at median conditions, accounting for the shape of uncertainty, how much
+ *   can you pay and still hit target IRR?"
  * Conservative = max price at analytically-derived pessimistic inputs:
  *   - Variables where higher hurts (vacancy, cap rate, rates): P80 quantile
  *   - Variables where lower hurts (rent, rent growth):         P20 quantile
  *
- * Both prices are stable across simulation runs.
+ * Both prices are fully deterministic (no randomness).
  */
 export function computeDeterministicPrices(
   ranges: MCRanges,
@@ -494,14 +505,15 @@ export function computeDeterministicPrices(
 ): { recommendedMaxPrice: number | null; conservativeMaxPrice: number | null } {
   const refiRange = ranges.refiRate ?? { min: ranges.interestRate.mode, mode: ranges.interestRate.mode, max: ranges.interestRate.mode };
 
+  // P50 (median) of each triangular distribution — accounts for range skewness
   const modeSampled: MCRunResult['sampled'] = {
-    targetRentPerUnit: ranges.targetRentPerUnit.mode,
-    vacancyPct:        ranges.vacancyPct.mode,
-    rentGrowthPct:     ranges.rentGrowthPct.mode,
-    exitCapRate:       ranges.exitCapRate.mode,
-    renoOverrunPct:    ranges.renoOverrunPct.mode,
-    interestRate:      ranges.interestRate.mode,
-    refiRate:          refiRange.mode,
+    targetRentPerUnit: triangularQuantile(ranges.targetRentPerUnit.min, ranges.targetRentPerUnit.mode, ranges.targetRentPerUnit.max, 0.50),
+    vacancyPct:        triangularQuantile(ranges.vacancyPct.min,        ranges.vacancyPct.mode,        ranges.vacancyPct.max,        0.50),
+    rentGrowthPct:     triangularQuantile(ranges.rentGrowthPct.min,     ranges.rentGrowthPct.mode,     ranges.rentGrowthPct.max,     0.50),
+    exitCapRate:       triangularQuantile(ranges.exitCapRate.min,        ranges.exitCapRate.mode,        ranges.exitCapRate.max,        0.50),
+    renoOverrunPct:    triangularQuantile(ranges.renoOverrunPct.min,    ranges.renoOverrunPct.mode,    ranges.renoOverrunPct.max,    0.50),
+    interestRate:      triangularQuantile(ranges.interestRate.min,      ranges.interestRate.mode,      ranges.interestRate.max,      0.50),
+    refiRate:          triangularQuantile(refiRange.min,                refiRange.mode,                refiRange.max,                0.50),
   };
 
   // Pessimistic: worse-than-base values at ~80th percentile of the bad tail

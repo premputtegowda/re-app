@@ -14,7 +14,7 @@ import { ResultsPanel } from './ResultsPanel';
 import { ProFormaGrid, defaultProForma } from './ProFormaGrid';
 import { RehabRentCalculator } from './RehabRentCalculator';
 import type { CalcPersistedState } from '@/types';
-import { projectScenario } from '@/utils/dealAnalyzerCalc';
+import { projectScenario, formatCurrencyCompact } from '@/utils/dealAnalyzerCalc';
 import { useDealAnalyzerStore, type DealAnalyzerDraft } from '@/lib/dealAnalyzerStore';
 import type {
   CoCAcquisition,
@@ -45,6 +45,77 @@ const STEP_ICONS: Record<number, React.ReactNode> = {
   3: <BarChart2 size={20} />,
   4: <TrendingUp size={20} />,
 };
+
+const STEP_CARD_STYLE = {
+  bg: 'bg-white dark:bg-slate-800',
+  iconColor: 'text-primary-500 dark:text-primary-400',
+  border: 'border-slate-200 dark:border-slate-700',
+};
+
+function getStepCardData(
+  stepId: number,
+  acquisition: CoCAcquisition,
+  proForma: ProFormaData,
+  refinance: CoCRefinance,
+  result?: CoCResult | null,
+): { primary: string; primaryExtra: string | null; sub: string } {
+  switch (stepId) {
+    case 0: {
+      const addr = acquisition.propertyAddress.trim() || 'No address';
+      const type = acquisition.propertyType === 'mfr' ? 'Multi-Family' : 'Single Family';
+      const units = acquisition.propertyType === 'mfr' && acquisition.units > 0
+        ? `${acquisition.units} units` : '';
+      return { primary: addr, primaryExtra: null, sub: [type, units].filter(Boolean).join(' · ') };
+    }
+    case 1: {
+      const price = acquisition.purchasePrice > 0 ? formatCurrencyCompact(acquisition.purchasePrice) : '—';
+      const rate = acquisition.interestRate > 0 ? `${acquisition.interestRate}%` : null;
+      const down = acquisition.downPaymentPct > 0 ? `${acquisition.downPaymentPct}% down` : '';
+      const term = acquisition.loanTermYears > 0 ? `${acquisition.loanTermYears}yr term` : '';
+      return { primary: price, primaryExtra: rate, sub: [down, term].filter(Boolean).join(' · ') };
+    }
+    case 2: {
+      const hard = (acquisition.hardCostItems ?? []).reduce((s, e) => s + e.amount, 0);
+      const soft = (acquisition.softCostItems ?? []).reduce((s, e) => s + e.amount, 0);
+      const total = hard + soft;
+      if (total === 0) return { primary: 'No renovation', primaryExtra: null, sub: '' };
+      const subParts = [
+        hard > 0 ? 'Hard cost' : '',
+        soft > 0 ? 'Soft cost' : '',
+        acquisition.renovationMonths > 0 ? `${acquisition.renovationMonths} mo` : '',
+      ].filter(Boolean);
+      return { primary: formatCurrencyCompact(total), primaryExtra: null, sub: subParts.join(' · ') };
+    }
+    case 3: {
+      const exitYearIdx = acquisition.projectionYears - 1;
+      const exitNOI = result?.yearlyProjections?.[exitYearIdx]?.noi ?? null;
+      const stabYear = acquisition.stabilizedMonth > 0
+        ? Math.ceil(acquisition.stabilizedMonth / 12)
+        : null;
+      return {
+        primary: exitNOI !== null ? formatCurrencyCompact(exitNOI) : (proForma.grossRent.stabilized > 0 ? formatCurrencyCompact(proForma.grossRent.stabilized) : '—'),
+        primaryExtra: null,
+        sub: [
+          exitNOI !== null ? `Exit yr NOI` : `Gross rent`,
+          stabYear !== null ? `Stab yr ${stabYear}` : '',
+          `${acquisition.projectionYears}yr projection`,
+        ].filter(Boolean).join(' · '),
+      };
+    }
+    case 4: {
+      const method = acquisition.exitMethod ?? 'value';
+      const exitVal = method === 'capRate'
+        ? (acquisition.exitCapRate > 0 ? `${acquisition.exitCapRate}% cap rate` : '—')
+        : (acquisition.arv > 0 ? formatCurrencyCompact(acquisition.arv) : '—');
+      const subParts = [
+        method === 'value' && acquisition.arv > 0 ? 'Exit value' : method === 'capRate' ? 'Cap rate exit' : '',
+        refinance.enabled ? `Yr${refinance.refiYear} refi` : '',
+      ].filter(Boolean);
+      return { primary: exitVal, primaryExtra: null, sub: subParts.join(' · ') };
+    }
+    default: return { primary: '—', primaryExtra: null, sub: '' };
+  }
+}
 
 // ── AccordionHeader ────────────────────────────────────────────────────────────
 // Defined at module level so React never sees a new component type between renders.
@@ -1558,35 +1629,67 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     exit={{ opacity: 0, y: -8 }}
                     transition={{ duration: 0.25, ease: 'easeOut' }}
                   >
-                    {/* Completed summary bar */}
+                    {/* Completed summary card */}
                     {isCompleted && !isEditing && (() => {
                       const warning = getStepWarning(step.id);
+                      const style = STEP_CARD_STYLE;
+                      const { primary, primaryExtra, sub } = getStepCardData(step.id, acquisition, proForma, refinance, currentResult);
                       return (
                         <button
                           type="button"
                           data-testid={`step-summary-${step.id}`}
                           onClick={() => { setPausedActiveStep(activeStep); setEditingStep(step.id); }}
-                          className={`w-full flex items-center gap-3 px-4 py-3 bg-white dark:bg-slate-800 rounded-xl transition-colors text-left group border ${
+                          className={`w-full flex items-stretch rounded-xl overflow-hidden border transition-all text-left group ${
                             warning
-                              ? 'border-amber-300 dark:border-amber-700 hover:border-amber-400 dark:hover:border-amber-600 hover:bg-amber-50/30 dark:hover:bg-amber-900/10'
-                              : 'border-slate-200 dark:border-slate-700 hover:border-primary-300 dark:hover:border-primary-700 hover:bg-primary-50/30 dark:hover:bg-primary-900/10'
-                          }`}
+                              ? 'border-amber-300 dark:border-amber-700 hover:border-amber-400'
+                              : `${style.border} hover:border-primary-300 dark:hover:border-primary-500`
+                          } ${style.bg}`}
                         >
-                          <span className={`shrink-0 ${warning ? 'text-amber-500 dark:text-amber-400' : 'text-primary-500 dark:text-primary-400'}`}>
+                          {/* Icon zone */}
+                          <div className={`flex items-center justify-center px-4 ${style.iconColor}`}>
                             {STEP_ICONS[step.id]}
-                          </span>
-                          <span className="text-sm font-medium text-slate-500 dark:text-slate-400 shrink-0">{step.label}</span>
-                          <span className="flex-1 text-sm text-slate-700 dark:text-slate-300 truncate">· {getStepSummary(step.id)}</span>
-                          {warning ? (
-                            <span
-                              data-testid={`step-warning-${step.id}`}
-                              className="flex items-center gap-1 shrink-0 text-xs font-medium text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-full px-2 py-0.5"
-                            >
-                              <AlertTriangle size={11} />
-                            </span>
-                          ) : (
-                            <Pencil size={13} className="text-slate-300 dark:text-slate-600 group-hover:text-primary-500 transition-colors shrink-0" />
-                          )}
+                          </div>
+
+                          {/* Divider */}
+                          <div className="w-px bg-slate-200 dark:bg-slate-700/60 self-stretch" />
+
+                          {/* Content */}
+                          <div className="flex-1 px-4 py-3 min-w-0">
+                            <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-0.5">
+                              {step.label}
+                            </p>
+                            <div className="flex items-baseline gap-2 flex-wrap">
+                              <p className={`font-bold text-slate-900 dark:text-white leading-tight truncate ${
+                                step.id === 0 ? 'text-sm' : 'text-lg'
+                              }`}>
+                                {primary}
+                              </p>
+                              {primaryExtra && (
+                                <p className="text-base font-semibold text-slate-500 dark:text-slate-400 shrink-0">
+                                  {primaryExtra}
+                                </p>
+                              )}
+                            </div>
+                            {sub && (
+                              <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wide mt-0.5 truncate">
+                                {sub}
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Right action */}
+                          <div className="flex items-center px-3 shrink-0">
+                            {warning ? (
+                              <span
+                                data-testid={`step-warning-${step.id}`}
+                                className="text-amber-500 dark:text-amber-400"
+                              >
+                                <AlertTriangle size={14} />
+                              </span>
+                            ) : (
+                              <Pencil size={13} className="text-slate-300 dark:text-slate-600 group-hover:text-primary-500 transition-colors" />
+                            )}
+                          </div>
                         </button>
                       );
                     })()}

@@ -8,21 +8,21 @@ export type BullPercentile = 'p70' | 'p80' | 'p90';
 export type ConfidenceLevel = 70 | 80 | 90;
 
 export const BEAR_OPTIONS: { percentile: BearPercentile; label: string; sub: string }[] = [
-  { percentile: 'p10', label: 'P10 — Severe downside', sub: 'Worse than 90% of runs' },
-  { percentile: 'p20', label: 'P20 — Moderate downside', sub: 'Worse than 80% of runs (default)' },
-  { percentile: 'p30', label: 'P30 — Mild downside', sub: 'Worse than 70% of runs' },
+  { percentile: 'p10', label: 'Severe downside', sub: '10% chance market conditions are this bad or worse' },
+  { percentile: 'p20', label: 'Moderate downside', sub: '20% chance market conditions are this bad or worse (default)' },
+  { percentile: 'p30', label: 'Mild downside', sub: '30% chance market conditions are this bad or worse' },
 ];
 
 export const BULL_OPTIONS: { percentile: BullPercentile; label: string; sub: string }[] = [
-  { percentile: 'p70', label: 'P70 — Mild upside', sub: 'Better than 70% of runs' },
-  { percentile: 'p80', label: 'P80 — Moderate upside', sub: 'Better than 80% of runs (default)' },
-  { percentile: 'p90', label: 'P90 — Strong upside', sub: 'Better than 90% of runs' },
+  { percentile: 'p70', label: 'Mild upside', sub: '30% chance market conditions are this favorable or better' },
+  { percentile: 'p80', label: 'Moderate upside', sub: '20% chance market conditions are this favorable or better (default)' },
+  { percentile: 'p90', label: 'Strong upside', sub: '10% chance market conditions are this favorable or better' },
 ];
 
 export const CONFIDENCE_OPTIONS: { value: ConfidenceLevel; label: string; percentile: BearPercentile; sub: string }[] = [
-  { value: 90, label: '90% Confidence', percentile: 'p10', sub: 'Succeeds in 9 out of 10 scenarios' },
-  { value: 80, label: '80% Confidence', percentile: 'p20', sub: 'Succeeds in 4 out of 5 scenarios (default)' },
-  { value: 70, label: '70% Confidence', percentile: 'p30', sub: 'Succeeds in 7 out of 10 scenarios' },
+  { value: 90, label: '90% Confidence', percentile: 'p10', sub: 'Target is hit in 9 out of 10 market conditions — very conservative price' },
+  { value: 80, label: '80% Confidence', percentile: 'p20', sub: 'Target is hit in 4 out of 5 market conditions (default)' },
+  { value: 70, label: '70% Confidence', percentile: 'p30', sub: 'Target is hit in 7 out of 10 market conditions — more aggressive price' },
 ];
 
 interface DealSettingsState {

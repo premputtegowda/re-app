@@ -9,6 +9,7 @@ from app.routers.attachments import attachments_router as attachments_download_r
 from app.routers.admin import router as admin_router
 from app.routers.export import router as export_router
 from app.routers.deals import router as deals_router
+from app.routers.feedback import router as feedback_router
 
 __all__ = [
     "auth_router",
@@ -22,4 +23,5 @@ __all__ = [
     "admin_router",
     "export_router",
     "deals_router",
+    "feedback_router",
 ]

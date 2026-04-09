@@ -279,7 +279,7 @@ const TAB_LABELS: Record<ResultTab, string> = {
   summary:     'Summary',
   projections: 'Projections',
   whatif:      'What If',
-  montecarlo:  'Monte Carlo',
+  montecarlo:  'Stress Testing',
 };
 
 // ── Main ────────────────────────────────────────────────────────────────────────

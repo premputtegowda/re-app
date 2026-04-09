@@ -4,6 +4,7 @@ import React from 'react';
 import { usePathname } from 'next/navigation';
 import { Header } from './Header';
 import { Navigation } from './Navigation';
+import { FeedbackButton } from '@/components/Feedback/FeedbackButton';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -25,6 +26,8 @@ export function Layout({ children }: LayoutProps) {
           {children}
         </div>
       </main>
+
+      <FeedbackButton />
     </div>
   );
 }

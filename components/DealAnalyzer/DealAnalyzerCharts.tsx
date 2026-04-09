@@ -1,99 +1,126 @@
 'use client';
 
-import { useState } from 'react';
 import {
-  LineChart,
-  Line,
-  BarChart,
+  ComposedChart,
   Bar,
+  Line,
   Cell,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ReferenceLine,
+  Legend,
   ResponsiveContainer,
 } from 'recharts';
 import { Card } from '@/components/UI/Card';
 import type { CoCYearlyProjection } from '@/types';
 import { formatCurrency } from '@/utils/dealAnalyzerCalc';
 
-type Tab = 'cashflow' | 'coc';
-
 interface DealChartsProps {
   projections: CoCYearlyProjection[];
 }
 
 export function DealCharts({ projections }: DealChartsProps) {
-  const [tab, setTab] = useState<Tab>('cashflow');
+  const exitYear = projections.length;
+
+  // Split cash flow into operating vs refi cash-out.
+  // Exit year proceeds are part of the deal story but not refi — keep them in operatingCF.
+  const data = projections.map((p) => {
+    const isRefiYear = p.year < exitYear && p.cashOutProceeds > 0;
+    return {
+      ...p,
+      operatingCF: isRefiYear ? p.cashFlow - p.cashOutProceeds : p.cashFlow,
+      refiCashOut: isRefiYear ? p.cashOutProceeds : 0,
+    };
+  });
+
+  const hasRefi = data.some((d) => d.refiCashOut > 0);
 
   return (
     <Card padding="none">
-      {/* Tab bar */}
-      <div className="flex border-b border-slate-100 dark:border-slate-700">
-        <TabBtn active={tab === 'cashflow'} onClick={() => setTab('cashflow')}>Cash Flow</TabBtn>
-        <TabBtn active={tab === 'coc'} onClick={() => setTab('coc')}>CoC Return</TabBtn>
+      <div className="px-4 pt-4 pb-1">
+        <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">Cash Flow &amp; CoC Return</p>
+        <p className="text-[10px] text-slate-400 mt-0.5">Yearly projection{hasRefi ? ' · Refi cash-out highlighted' : ''}</p>
       </div>
+      <div className="p-4 pt-2">
+        <ResponsiveContainer width="100%" height={240}>
+          <ComposedChart data={data} margin={{ top: 4, right: 48, bottom: 8, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+            <XAxis
+              dataKey="year"
+              tick={{ fontSize: 11 }}
+              tickLine={false}
+              axisLine={false}
+              tickFormatter={(v) => `Yr ${v}`}
+            />
+            {/* Left axis — dollars */}
+            <YAxis
+              yAxisId="left"
+              orientation="left"
+              tick={{ fontSize: 10 }}
+              tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+              width={52}
+              axisLine={false}
+              tickLine={false}
+            />
+            {/* Right axis — percentage */}
+            <YAxis
+              yAxisId="right"
+              orientation="right"
+              tick={{ fontSize: 10 }}
+              tickFormatter={(v) => `${v.toFixed(0)}%`}
+              width={36}
+              axisLine={false}
+              tickLine={false}
+            />
+            <Tooltip
+              contentStyle={{ fontSize: 12, borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+              formatter={(value: number, name: string) => {
+                if (name === 'operatingCF') return [formatCurrency(value), 'Operating Cash Flow'];
+                if (name === 'refiCashOut') return [formatCurrency(value), 'Refi Cash-Out'];
+                if (name === 'coCReturn') return [`${value.toFixed(2)}%`, 'CoC Return'];
+                return [value, name];
+              }}
+              labelFormatter={(label) => `Year ${label}`}
+            />
+            <Legend
+              wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
+              formatter={(value) => {
+                if (value === 'operatingCF') return 'Cash Flow ($)';
+                if (value === 'refiCashOut') return 'Refi Cash-Out ($)';
+                if (value === 'coCReturn') return 'CoC Return (%)';
+                return value;
+              }}
+            />
+            <ReferenceLine yAxisId="left" y={0} stroke="#94A3B8" strokeDasharray="4 4" />
 
-      <div className="p-4">
-        {tab === 'cashflow' ? (
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={projections} margin={{ top: 4, right: 8, bottom: 8, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="year" tick={{ fontSize: 11 }} tickLine={false} />
-              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} width={52} axisLine={false} tickLine={false} />
-              <Tooltip
-                formatter={(value: number) => [formatCurrency(value), 'Cash Flow']}
-                contentStyle={{ fontSize: 12, borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-              />
-              <ReferenceLine y={0} stroke="#94A3B8" strokeDasharray="4 4" />
-              <Line
-                type="monotone"
-                dataKey="cashFlow"
-                stroke="#3B82F6"
-                strokeWidth={2.5}
-                dot={{ fill: '#3B82F6', r: 3.5, strokeWidth: 0 }}
-                activeDot={{ r: 5 }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        ) : (
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={projections} margin={{ top: 4, right: 8, bottom: 8, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-              <XAxis dataKey="year" tick={{ fontSize: 11 }} tickLine={false} />
-              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${v.toFixed(0)}%`} width={40} axisLine={false} tickLine={false} />
-              <Tooltip
-                formatter={(value: number) => [`${value.toFixed(2)}%`, 'CoC Return']}
-                contentStyle={{ fontSize: 12, borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-              />
-              <ReferenceLine y={0} stroke="#94A3B8" />
-              <Bar dataKey="coCReturn" radius={[4, 4, 0, 0]}>
-                {projections.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.coCReturn >= 0 ? '#10B981' : '#EF4444'} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        )}
+            {/* Operating cash flow — green positive, red negative */}
+            <Bar yAxisId="left" dataKey="operatingCF" stackId="cf" radius={[0, 0, 0, 0]} maxBarSize={40}>
+              {data.map((entry, i) => (
+                <Cell key={i} fill={entry.operatingCF >= 0 ? '#10B981' : '#EF4444'} />
+              ))}
+            </Bar>
+
+            {/* Refi cash-out — stacked on top in indigo */}
+            {hasRefi && (
+              <Bar yAxisId="left" dataKey="refiCashOut" stackId="cf" radius={[3, 3, 0, 0]} maxBarSize={40} fill="#6366F1" />
+            )}
+
+            {/* CoC return line */}
+            <Line
+              yAxisId="right"
+              type="monotone"
+              dataKey="coCReturn"
+              stroke="#F59E0B"
+              strokeWidth={2}
+              dot={{ fill: '#F59E0B', r: 3, strokeWidth: 0 }}
+              activeDot={{ r: 5 }}
+            />
+          </ComposedChart>
+        </ResponsiveContainer>
       </div>
     </Card>
-  );
-}
-
-function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex-1 py-2.5 text-xs font-semibold transition-colors ${
-        active
-          ? 'text-primary-600 dark:text-primary-400 border-b-2 border-primary-600 dark:border-primary-400'
-          : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
-      }`}
-    >
-      {children}
-    </button>
   );
 }
 

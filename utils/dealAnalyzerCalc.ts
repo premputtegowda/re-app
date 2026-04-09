@@ -394,6 +394,13 @@ export function formatCurrency(n: number): string {
   }).format(n);
 }
 
+/** Compact: $1.2M, $450K, $950 — for tight card layouts */
+export function formatCurrencyCompact(n: number): string {
+  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`;
+  if (Math.abs(n) >= 1_000)     return `$${(n / 1_000).toFixed(n % 1_000 === 0 ? 0 : 0)}K`;
+  return `$${Math.round(n)}`;
+}
+
 export function formatPct(n: number, decimals = 2): string {
   return `${n.toFixed(decimals)}%`;
 }

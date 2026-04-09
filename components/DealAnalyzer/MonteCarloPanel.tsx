@@ -277,17 +277,20 @@ function SensitivitySection({ results }: { results: MCResults }) {
 
 // ── Max Price Card ────────────────────────────────────────────────────────────
 
-function MaxPriceCard({ recommendedMaxPrice, conservativeMaxPrice, targetIRR, currentPrice, confidenceLevel }: {
+function MaxPriceCard({ recommendedMaxPrice, conservativeMaxPrice, targetIRR, currentPrice, confidenceLevel, p50Irr }: {
   recommendedMaxPrice: number | null;
   conservativeMaxPrice: number | null;
   targetIRR: number;
   currentPrice: number;
   confidenceLevel: number;
+  p50Irr: number | null;
 }) {
   const rows: Array<{ label: string; sub: string; price: number | null }> = [
-    { label: 'Recommended',  sub: 'Median market conditions (P50)',              price: recommendedMaxPrice },
+    { label: 'Recommended',  sub: 'Median conditions across uncertainty ranges', price: recommendedMaxPrice },
     { label: 'Conservative', sub: `${confidenceLevel}% confidence — if market underperforms`, price: conservativeMaxPrice },
   ];
+
+  const p50BelowTarget = p50Irr !== null && p50Irr < targetIRR;
 
   return (
     <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
@@ -335,6 +338,16 @@ function MaxPriceCard({ recommendedMaxPrice, conservativeMaxPrice, targetIRR, cu
           );
         })}
       </div>
+      {/* Gap callout: current price is above Recommended Max */}
+      {p50BelowTarget && (
+        <div className="px-4 py-3 bg-amber-50 dark:bg-amber-900/20 border-t border-amber-100 dark:border-amber-800/40">
+          <p className="text-[10px] text-amber-700 dark:text-amber-400 leading-relaxed">
+            <span className="font-semibold">Heads up:</span> At the current price, the simulation median is {p50Irr!.toFixed(1)}% IRR — below your {targetIRR}% target.
+            {' '}Hitting your target at this price requires <span className="font-semibold">better-than-median outcomes</span>.
+            {' '}Consider negotiating closer to the Recommended Max, or use the Ideal Entry price for a built-in buffer.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -526,22 +539,22 @@ export function MonteCarloPanel({
       });
       setResults(r);
       const { recommendedMaxPrice, conservativeMaxPrice } = computeDeterministicPrices(
-        ranges, 12, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit,
+        ranges, targetIRR, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit,
       );
-      onResultsChange?.(toSavedMCResults(r, recommendedMaxPrice, conservativeMaxPrice));
+      onResultsChange?.(toSavedMCResults(r, recommendedMaxPrice, conservativeMaxPrice, targetIRR));
     } finally {
       setRunning(false);
     }
-  }, [ranges, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit]);
+  }, [ranges, targetIRR, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit]);
 
   return (
     <div className="space-y-5">
       {/* Header */}
       <div className="flex items-center justify-between gap-4">
         <div>
-          <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Monte Carlo Simulation</p>
+          <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Stress Testing</p>
           <p className="text-xs text-slate-400 mt-0.5">
-            {N_RUNS.toLocaleString()} random scenarios across rent, vacancy, costs, rates & exit
+            Monte Carlo · {N_RUNS.toLocaleString()} simulations across rent, vacancy, costs, rates & exit
           </p>
         </div>
         <button
@@ -572,6 +585,7 @@ export function MonteCarloPanel({
             targetIRR={targetIRR}
             currentPrice={acquisition.purchasePrice}
             confidenceLevel={recommendedPriceConfidence}
+            p50Irr={results.p50.irr}
           />
           <ScenarioColumns results={results} />
           <SensitivitySection results={results} />

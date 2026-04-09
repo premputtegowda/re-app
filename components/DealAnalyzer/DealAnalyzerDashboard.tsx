@@ -2,11 +2,11 @@
 
 import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, Trash2, TrendingUp, ChevronRight, PenLine, Home, Building2, ArrowUpDown, X, GitCompare, SlidersHorizontal, BarChart2, Coins, ArrowRight } from 'lucide-react';
+import { Plus, Trash2, TrendingUp, ChevronRight, PenLine, Home, Building2, ArrowUpDown, X, GitCompare, SlidersHorizontal, BarChart2, Coins, ArrowRight, Target } from 'lucide-react';
 import { Button } from '@/components/UI/Button';
 import { PageHeader } from '@/components/UI/PageHeader';
 import { useDealAnalyzerStore } from '@/lib/dealAnalyzerStore';
-import { formatCurrency, formatPct, formatMultiple } from '@/utils/dealAnalyzerCalc';
+import { formatCurrency, formatCurrencyCompact, formatPct, formatMultiple } from '@/utils/dealAnalyzerCalc';
 import { computeDeterministicPrices } from '@/utils/monteCarlo';
 import type { SavedDeal, CoCResult, CoCScenarioType } from '@/types';
 import type { SavedMCResults, MCRanges } from '@/utils/monteCarlo';
@@ -89,19 +89,21 @@ function DealCard({ deal, selected, compareMode, onLoad, onDelete, onToggleSelec
   const isDraft = !result;
   const mcResults = deal.mcResults as SavedMCResults | undefined;
   // Use stored deterministic prices if available; otherwise compute from saved ranges
-  const { recommendedMaxPrice, conservativeMaxPrice } = useMemo(() => {
-    if (!mcResults) return { recommendedMaxPrice: null, conservativeMaxPrice: null };
+  const { recommendedMaxPrice, conservativeMaxPrice, targetIRR } = useMemo(() => {
+    if (!mcResults) return { recommendedMaxPrice: null, conservativeMaxPrice: null, targetIRR: null };
+    const storedIRR = mcResults.targetIRR ?? null;
     if (mcResults.recommendedMaxPrice !== undefined && mcResults.conservativeMaxPrice !== undefined) {
-      return { recommendedMaxPrice: mcResults.recommendedMaxPrice, conservativeMaxPrice: mcResults.conservativeMaxPrice };
+      return { recommendedMaxPrice: mcResults.recommendedMaxPrice, conservativeMaxPrice: mcResults.conservativeMaxPrice, targetIRR: storedIRR };
     }
     // Fallback: compute from saved ranges (deals run before deterministic prices were stored)
     const savedRanges = deal.mcRanges as unknown as MCRanges | undefined;
-    if (!savedRanges?.targetRentPerUnit) return { recommendedMaxPrice: mcResults.recommendedMaxPrice ?? null, conservativeMaxPrice: null };
-    return computeDeterministicPrices(
+    if (!savedRanges?.targetRentPerUnit) return { recommendedMaxPrice: mcResults.recommendedMaxPrice ?? null, conservativeMaxPrice: null, targetIRR: storedIRR };
+    const prices = computeDeterministicPrices(
       savedRanges, 12,
       deal.acquisition, deal.operations, deal.proForma, deal.refinance,
       deal.acquisition.units || 1, 0,
     );
+    return { ...prices, targetIRR: storedIRR ?? 12 };
   }, [mcResults, deal.mcRanges, deal.acquisition, deal.operations, deal.proForma, deal.refinance]);
 
   const handleDelete = (e: React.MouseEvent) => {
@@ -124,7 +126,7 @@ function DealCard({ deal, selected, compareMode, onLoad, onDelete, onToggleSelec
     { icon: TrendingUp, label: 'IRR',  value: result.irr !== null ? formatPct(result.irr) : '—' },
     { icon: BarChart2,  label: 'CoC',  value: formatPct(result.avgCoCReturn) },
     { icon: Coins,      label: 'EM',   value: formatMultiple(result.equityMultiple) },
-    { icon: ArrowRight, label: 'CF',   value: formatCurrency(result.totalCashFlow) },
+    { icon: ArrowRight, label: 'CF',   value: formatCurrencyCompact(result.totalCashFlow) },
   ] : [];
 
   return (
@@ -167,7 +169,7 @@ function DealCard({ deal, selected, compareMode, onLoad, onDelete, onToggleSelec
           {/* Price block */}
           <div className="flex items-baseline gap-2 shrink-0">
             <span className="text-xl font-black text-slate-900 dark:text-white tabular-nums">
-              {acq.purchasePrice > 0 ? formatCurrency(acq.purchasePrice) : '—'}
+              {acq.purchasePrice > 0 ? formatCurrencyCompact(acq.purchasePrice) : '—'}
             </span>
             <div className="text-[11px] text-slate-400 dark:text-slate-500 leading-tight">
               {acq.downPaymentPct > 0 && <span>{acq.downPaymentPct}% down</span>}
@@ -195,27 +197,54 @@ function DealCard({ deal, selected, compareMode, onLoad, onDelete, onToggleSelec
         </div>
 
         {/* ── Row 3: Price range bar ── */}
-        {(conservativeMaxPrice !== null || recommendedMaxPrice !== null) && (
-          <div className="space-y-1.5">
-            {/* Gradient bar */}
-            <div className="h-2 rounded-full" style={{ background: 'linear-gradient(to right, #22c55e, #f59e0b)' }} />
-            {/* Labels */}
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-[9px] font-bold text-secondary-600 dark:text-secondary-400 uppercase tracking-wide leading-none">Ideal Entry</p>
-                <p className="text-xs font-bold text-secondary-700 dark:text-secondary-300 tabular-nums mt-0.5">
-                  {conservativeMaxPrice !== null ? formatCurrency(conservativeMaxPrice) : '—'}
-                </p>
+        {(conservativeMaxPrice !== null || recommendedMaxPrice !== null) && (() => {
+          const p50Irr = mcResults?.p50?.irr ?? null;
+          const p50BelowTarget = targetIRR !== null && p50Irr !== null && p50Irr < targetIRR;
+          return (
+            <div className="space-y-1.5">
+              {/* Target + uncertainty indicator */}
+              <div className="flex items-center justify-between gap-2">
+                {targetIRR !== null && (
+                  <div className="flex items-center gap-1">
+                    <Target size={10} className="text-slate-400 shrink-0" />
+                    <span className="text-[10px] text-slate-400 dark:text-slate-500">
+                      Target {targetIRR}% IRR
+                    </span>
+                  </div>
+                )}
+                {/* Uncertainty badge */}
+                {p50Irr !== null && (
+                  <span className={`inline-flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
+                    p50BelowTarget
+                      ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
+                      : 'bg-secondary-100 dark:bg-secondary-900/30 text-secondary-700 dark:text-secondary-400'
+                  }`}>
+                    <span>~</span>
+                    <span>Median {p50Irr.toFixed(1)}%</span>
+                  </span>
+                )}
               </div>
-              <div className="text-right">
-                <p className="text-[9px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wide leading-none">Recommended Max</p>
-                <p className="text-xs font-bold text-amber-700 dark:text-amber-300 tabular-nums mt-0.5">
-                  {recommendedMaxPrice !== null ? formatCurrency(recommendedMaxPrice) : '—'}
-                </p>
+              {/* Gradient bar */}
+              <div className="h-2 rounded-full" style={{ background: 'linear-gradient(to right, #22c55e, #f59e0b)' }} />
+              {/* Labels with uncertainty sub-text */}
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-[9px] font-bold text-secondary-600 dark:text-secondary-400 uppercase tracking-wide leading-none">Ideal Entry</p>
+                  <p className="text-xs font-bold text-secondary-700 dark:text-secondary-300 tabular-nums mt-0.5">
+                    {conservativeMaxPrice !== null ? formatCurrencyCompact(conservativeMaxPrice) : '—'}
+                  </p>
+                  <p className="text-[9px] text-slate-400 dark:text-slate-500 mt-0.5">stress-tested</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[9px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wide leading-none">Recommended Max</p>
+                  <p className="text-xs font-bold text-amber-700 dark:text-amber-300 tabular-nums mt-0.5">
+                    {recommendedMaxPrice !== null ? formatCurrencyCompact(recommendedMaxPrice) : '—'}
+                  </p>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* ── Row 4: Footer ── */}
         <div className="flex items-center justify-between pt-0.5 border-t border-slate-100 dark:border-slate-700/60">

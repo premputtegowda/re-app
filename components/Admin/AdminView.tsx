@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import {
   Users, ShieldCheck, ShieldOff, Trash2, Loader2, AlertCircle,
   Gift, GiftIcon, X, Send, Clock, CheckCircle2, MailPlus, UserCheck, UserX,
+  MessageCircle, CheckCheck, Ban, Milestone,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/lib/authStore';
@@ -37,6 +38,17 @@ interface AdminInvitation {
   is_expired: boolean;
 }
 
+interface FeedbackItem {
+  id: string;
+  user_name: string;
+  user_email: string;
+  module: string;
+  message: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
 interface AccessRequestItem {
   id: string;
   email: string;
@@ -46,7 +58,7 @@ interface AccessRequestItem {
   requested_at: string;
 }
 
-type Tab = 'users' | 'invitations' | 'requests';
+type Tab = 'users' | 'invitations' | 'requests' | 'feedback';
 
 export function AdminView() {
   const currentUser = useAuthStore((s) => s.user);
@@ -63,6 +75,11 @@ export function AdminView() {
   // Access requests state
   const [accessRequests, setAccessRequests] = useState<AccessRequestItem[]>([]);
   const [requestsLoading, setRequestsLoading] = useState(true);
+
+  // Feedback state
+  const [feedbackItems, setFeedbackItems] = useState<FeedbackItem[]>([]);
+  const [feedbackLoading, setFeedbackLoading] = useState(true);
+
   const [inviteEmail, setInviteEmail] = useState('');
   const [sendingInvite, setSendingInvite] = useState(false);
 
@@ -85,6 +102,11 @@ export function AdminView() {
       .then(setAccessRequests)
       .catch((e) => setError(e.message))
       .finally(() => setRequestsLoading(false));
+
+    api.adminListFeedback()
+      .then(setFeedbackItems)
+      .catch((e) => setError(e.message))
+      .finally(() => setFeedbackLoading(false));
 
   }, []);
 
@@ -196,7 +218,19 @@ export function AdminView() {
     }
   };
 
-  const isLoading = usersLoading || invitesLoading || requestsLoading;
+  const handleFeedbackStatus = async (item: FeedbackItem, newStatus: string) => {
+    setActionLoading(`fb-${item.id}-${newStatus}`);
+    try {
+      const updated = await api.adminPatchFeedback(item.id, newStatus);
+      setFeedbackItems((prev) => prev.map((f) => (f.id === updated.id ? updated : f)));
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const isLoading = usersLoading || invitesLoading || requestsLoading || feedbackLoading;
 
   if (isLoading) {
     return (
@@ -226,6 +260,7 @@ export function AdminView() {
         ['users', 'Users', users.length],
         ['requests', 'Access Requests', accessRequests.filter(r => r.status === 'pending').length],
         ['invitations', 'Invitations', invitations.length],
+        ['feedback', 'Feedback', feedbackItems.filter(f => f.status === 'pending').length],
       ] as const).map(([id, label, count]) => (
           <button
             key={id}
@@ -559,6 +594,94 @@ export function AdminView() {
                 </tbody>
               </table>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Feedback tab */}
+      {tab === 'feedback' && (
+        <div className="space-y-3">
+          {feedbackItems.length === 0 ? (
+            <p className="text-sm text-slate-500 dark:text-slate-400 text-center py-8">No feedback submitted yet.</p>
+          ) : (
+            feedbackItems.map((item) => (
+              <div
+                key={item.id}
+                className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3"
+              >
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                      item.module === 'deal_analyzer'
+                        ? 'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300'
+                        : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                    }`}>
+                      {item.module === 'deal_analyzer' ? 'Deal Analyzer' : 'REPS Tracker'}
+                    </span>
+                    {item.status === 'pending' && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">
+                        <Clock size={10} /> Pending
+                      </span>
+                    )}
+                    {item.status === 'resolved' && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300">
+                        <CheckCheck size={10} /> Resolved
+                      </span>
+                    )}
+                    {item.status === 'dismissed' && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">
+                        <Ban size={10} /> Dismissed
+                      </span>
+                    )}
+                    {item.status === 'roadmap' && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300">
+                        <Milestone size={10} /> Roadmap
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-400">{item.created_at}</p>
+                </div>
+
+                <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{item.message}</p>
+
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-slate-600 dark:text-slate-300 truncate">{item.user_name}</p>
+                    <p className="text-xs text-slate-400 truncate">{item.user_email}</p>
+                  </div>
+                  {item.status !== 'dismissed' && item.status !== 'resolved' && (
+                    <div className="flex items-center gap-2 shrink-0">
+                      {item.status !== 'roadmap' && (
+                        <button
+                          onClick={() => handleFeedbackStatus(item, 'roadmap')}
+                          disabled={!!actionLoading}
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors disabled:opacity-50"
+                        >
+                          {actionLoading === `fb-${item.id}-roadmap` ? <Loader2 size={11} className="animate-spin" /> : <Milestone size={11} />}
+                          Roadmap
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleFeedbackStatus(item, 'resolved')}
+                        disabled={!!actionLoading}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors disabled:opacity-50"
+                      >
+                        {actionLoading === `fb-${item.id}-resolved` ? <Loader2 size={11} className="animate-spin" /> : <CheckCheck size={11} />}
+                        Resolve
+                      </button>
+                      <button
+                        onClick={() => handleFeedbackStatus(item, 'dismissed')}
+                        disabled={!!actionLoading}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-50 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-600 dark:hover:text-red-400 transition-colors disabled:opacity-50"
+                      >
+                        {actionLoading === `fb-${item.id}-dismissed` ? <Loader2 size={11} className="animate-spin" /> : <Ban size={11} />}
+                        Dismiss
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))
           )}
         </div>
       )}

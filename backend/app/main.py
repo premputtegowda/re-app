@@ -18,6 +18,7 @@ from app.routers import (
     admin_router,
     export_router,
     deals_router,
+    feedback_router,
 )
 from app.services.scheduler import create_scheduler
 
@@ -72,6 +73,7 @@ app.include_router(attachments_download_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
 app.include_router(export_router, prefix="/api")
 app.include_router(deals_router, prefix="/api")
+app.include_router(feedback_router, prefix="/api")
 
 
 @app.get("/")

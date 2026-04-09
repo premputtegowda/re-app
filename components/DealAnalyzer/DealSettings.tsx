@@ -70,7 +70,7 @@ export function DealSettings() {
 
       <OptionGroup
         title="Bear Case"
-        description="How pessimistic the bear case scenario is in the Monte Carlo simulation."
+        description="Sets the likelihood threshold for the bear case — how probable is it that outcomes are this bad or worse?"
         options={BEAR_OPTIONS}
         value={bearPercentile}
         onChange={setBearPercentile as (v: string) => void}
@@ -78,7 +78,7 @@ export function DealSettings() {
 
       <OptionGroup
         title="Bull Case"
-        description="How optimistic the bull case scenario is in the Monte Carlo simulation."
+        description="Sets the likelihood threshold for the bull case — how probable is it that outcomes reach this level or better?"
         options={BULL_OPTIONS}
         value={bullPercentile}
         onChange={setBullPercentile as (v: string) => void}
