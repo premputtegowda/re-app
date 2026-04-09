@@ -474,36 +474,24 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
     const prev = data.yearOverrides ?? {};
     const updated: NonNullable<ProFormaData['yearOverrides']> = { ...prev };
 
-    // Remember the value being cleared (may be needed to re-anchor a neighbor)
-    const clearedValue = prev[year]?.[field];
+    if (year === 1) {
+      // Year 1 is the chain anchor — retain its value as-is. Only unpin Year 2
+      // so it re-chains from Year 1 instead of being stuck at the old auto-pin.
+    } else {
+      // Year 2+: delete this year's override so it chains from the previous year.
+      const e = { ...(prev[year] ?? {}) };
+      delete e[field];
+      if (field === 'grossRent') delete e.grossRentSystem;
+      updated[year] = e;
+    }
 
-    // 1. Clear this year's override
-    const e = { ...(prev[year] ?? {}) };
-    delete e[field];
-    if (field === 'grossRent') delete e.grossRentSystem;
-    updated[year] = e;
-
-    // 2. Clear the next year's auto-pin (set by applyIncomeYearOnly) so it re-chains from this year
+    // Clear the next year's auto-pin (set by applyIncomeYearOnly) so it re-chains from this year.
     const nextYear = year + 1;
     if (nextYear <= projectionYears && prev[nextYear]?.[field] !== undefined) {
       const nextE = { ...(prev[nextYear] ?? {}) };
       delete nextE[field];
       if (field === 'grossRent') delete nextE.grossRentSystem;
       updated[nextYear] = nextE;
-    }
-
-    // 3. Prevent zero-out: if Year N-1 has no override and the chain base is 0 for this field
-    //    (i.e. non-grossRent fields with no backing stabilized value), carry the cleared value
-    //    back to Year N-1 so the chain has a proper anchor instead of falling to 0.
-    const chainBaseIsZero = field !== 'grossRent';
-    if (
-      year > 1 &&
-      typeof clearedValue === 'number' &&
-      clearedValue !== 0 &&
-      prev[year - 1]?.[field] === undefined &&
-      chainBaseIsZero
-    ) {
-      updated[year - 1] = { ...(updated[year - 1] ?? {}), [field]: clearedValue };
     }
 
     onChange({ ...data, yearOverrides: updated });
@@ -520,33 +508,23 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
     const prev = data.yearOverrides ?? {};
     const updated: NonNullable<ProFormaData['yearOverrides']> = { ...prev };
 
-    const clearedValue = prev[year]?.expenses?.[expenseId];
+    if (year === 1) {
+      // Year 1 is the chain anchor — retain its value. Only unpin Year 2.
+    } else {
+      // Year 2+: delete the override so it chains from the previous year.
+      const ye = { ...(prev[year] ?? {}) };
+      const expenses = { ...(ye.expenses ?? {}) };
+      delete expenses[expenseId];
+      updated[year] = { ...ye, expenses };
+    }
 
-    // 1. Clear this year's expense override
-    const ye = { ...(prev[year] ?? {}) };
-    const expenses = { ...(ye.expenses ?? {}) };
-    delete expenses[expenseId];
-    updated[year] = { ...ye, expenses };
-
-    // 2. Clear next year's auto-pin so it re-chains from this year
+    // Clear the next year's auto-pin so it re-chains from this year.
     const nextYear = year + 1;
     if (nextYear <= projectionYears && prev[nextYear]?.expenses?.[expenseId] !== undefined) {
       const nextYe = { ...(prev[nextYear] ?? {}) };
       const nextExp = { ...(nextYe.expenses ?? {}) };
       delete nextExp[expenseId];
       updated[nextYear] = { ...nextYe, expenses: nextExp };
-    }
-
-    // 3. Prevent zero-out: carry cleared value back to Year N-1 if it has no anchor
-    if (
-      year > 1 &&
-      typeof clearedValue === 'number' &&
-      clearedValue !== 0 &&
-      prev[year - 1]?.expenses?.[expenseId] === undefined
-    ) {
-      const prevYe = { ...(updated[year - 1] ?? {}) };
-      prevYe.expenses = { ...(prevYe.expenses ?? {}), [expenseId]: clearedValue };
-      updated[year - 1] = prevYe;
     }
 
     onChange({ ...data, yearOverrides: updated });
