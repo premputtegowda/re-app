@@ -420,7 +420,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const isDirty =
     !!savedDealId &&
     savedSnapshot.current !== null &&
-    savedSnapshot.current !== JSON.stringify({ acquisition, operations, proForma, refinance });
+    (savedSnapshot.current !== JSON.stringify({ acquisition, operations, proForma, refinance }) ||
+      saveName !== (initialDeal?.name ?? ''));
 
   const resultsRef = useRef<HTMLDivElement>(null);
   const recalcTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
