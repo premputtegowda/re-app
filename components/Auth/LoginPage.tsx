@@ -29,7 +29,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
     },
     {
       icon: Calculator,
-      title: 'ROI Calculator',
+      title: 'Deal Analyzer',
       description: 'Model cash flow, cap rates, and returns across your portfolio to evaluate deals with confidence.',
       available: false,
     },
