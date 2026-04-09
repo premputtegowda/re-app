@@ -767,7 +767,6 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
       // Non-grossRent: Year 1 is the direct chain-starting entry — no formula behind it
       if (!isGrossRent) {
         const yr1Val = typeof yr1Override === 'number' ? yr1Override : 0;
-        const yr1HasDownstream = getDownstreamGrayYears(overrideKey, 1).length > 0;
         return (
           <td className={`px-2 py-2.5 align-top ${bg}`}>
             <div className="flex flex-col items-end gap-0.5">
@@ -777,7 +776,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                 format={fmt}
                 onOverride={v => setYearOverride(1, overrideKey, v)}
                 onClearOverride={() => clearYearOverride(1, overrideKey)}
-                onYearOnly={yr1HasDownstream ? v => applyIncomeYearOnly(1, overrideKey, v) : undefined}
+                onYearOnly={v => applyIncomeYearOnly(1, overrideKey, v)}
               />
               {isPercent && (() => {
                 const gross = yr1Ov?.grossRent ?? data.grossRent.stabilized;
@@ -791,7 +790,6 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
         );
       }
 
-      const yr1HasDownstream = getDownstreamGrayYears(overrideKey, 1).length > 0;
       return (
         <td className={`px-2 py-2.5 align-top ${bg}`}>
           <div className="flex flex-col items-end gap-0.5">
@@ -808,7 +806,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                 format={fmt}
                 onOverride={v => setYearOverride(1, overrideKey, v)}
                 onClearOverride={() => clearYearOverride(1, overrideKey)}
-                onYearOnly={yr1HasDownstream ? v => applyIncomeYearOnly(1, overrideKey, v) : undefined}
+                onYearOnly={v => applyIncomeYearOnly(1, overrideKey, v)}
               />
             )}
           </div>
@@ -838,8 +836,6 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
       year
     );
     const yrGrowthPct = growthRateKey ? (yrOv?.[growthRateKey as 'grossRentGrowthPct' | 'otherIncomeGrowthPct'] ?? growthPct) : growthPct;
-    const hasDownstream = getDownstreamGrayYears(overrideKey, year).length > 0;
-
     return (
       <td key={year} className={`px-2 py-2.5 align-top ${bg}`}>
         <div className="flex flex-col items-end gap-0.5">
@@ -868,7 +864,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                 format={fmt}
                 onOverride={v => setYearOverride(year, overrideKey, v)}
                 onClearOverride={() => clearYearOverride(year, overrideKey)}
-                onYearOnly={hasDownstream ? v => applyIncomeYearOnly(year, overrideKey, v) : undefined}
+                onYearOnly={v => applyIncomeYearOnly(year, overrideKey, v)}
                 cascadeDelay={(year - 1) * 50}
               />
               {!isPercent && growthRateKey && (
@@ -981,7 +977,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                     format={fmt}
                     onOverride={v => setYearOverride(1, overrideKey, v)}
                     onClearOverride={() => clearYearOverride(1, overrideKey)}
-                    onYearOnly={getDownstreamGrayYears(overrideKey, 1).length > 0 ? v => applyIncomeYearOnly(1, overrideKey, v) : undefined}
+                    onYearOnly={v => applyIncomeYearOnly(1, overrideKey, v)}
                   />
                 ) : (
                   <Cell
@@ -1006,7 +1002,6 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                     growthPct,
                     mobileYear
                   );
-                  const hasDownstream = getDownstreamGrayYears(overrideKey, mobileYear).length > 0;
                   return (
                     <>
                       <YearCell computed={computedVal} override={typeof yrOverride === 'number' ? yrOverride : undefined} format={fmt}
@@ -1018,7 +1013,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                           onChange({ ...data, yearOverrides: updated });
                         }}
                         onClearOverride={() => clearYearOverride(mobileYear, overrideKey)}
-                        onYearOnly={hasDownstream ? v => applyIncomeYearOnly(mobileYear, overrideKey, v) : undefined}
+                        onYearOnly={v => applyIncomeYearOnly(mobileYear, overrideKey, v)}
                         cascadeDelay={(mobileYear - 1) * 50}
                         />
                       {!isPercent && growthRateKey && (
@@ -1122,7 +1117,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                           setExpenseYearOverride(mobileYear, expense.id, v);
                         }}
                         onClearOverride={() => clearExpenseYearOverride(mobileYear, expense.id)}
-                        onYearOnly={expHasDownstream ? v => applyExpenseYearOnly(mobileYear, expense.id, v) : undefined}
+                        onYearOnly={v => applyExpenseYearOnly(mobileYear, expense.id, v)}
                         cascadeDelay={(mobileYear - 1) * 50}
                         />
                       {!expense.isPercentOfEGI && (
@@ -1563,7 +1558,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                             <YearCell computed={computed} override={typeof yrExpOv === 'number' ? yrExpOv : undefined} format={fmt}
                               onOverride={v => setExpenseYearOverride(year, expense.id, v)}
                               onClearOverride={() => clearExpenseYearOverride(year, expense.id)}
-                              onYearOnly={expHasDownstream ? v => applyExpenseYearOnly(year, expense.id, v) : undefined}
+                              onYearOnly={v => applyExpenseYearOnly(year, expense.id, v)}
                               cascadeDelay={(year - 1) * 50}
                             />
                             {expense.isPercentOfEGI && egi > 0 && <span className="text-[10px] text-slate-400 tabular-nums">{fmt$(egi * displayVal / 100)}</span>}
