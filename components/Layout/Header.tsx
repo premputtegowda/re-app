@@ -3,7 +3,7 @@
 import { LogOut } from 'lucide-react';
 import { useAuthStore } from '@/lib/authStore';
 import { useStore } from '@/lib/store';
-import { WorkspaceSwitcher } from './WorkspaceSwitcher';
+import { WorkspaceTabBar, WorkspaceTabsDesktop } from './WorkspaceSwitcher';
 
 export function Header() {
   const { user, logout } = useAuthStore();
@@ -16,11 +16,11 @@ export function Header() {
 
   return (
     <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700/60 sticky top-0 z-40 backdrop-blur-sm bg-white/95 dark:bg-slate-900/95">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 grid grid-cols-3 items-center gap-4">
+      {/* Top row — brand + desktop tabs + user */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between gap-4">
 
         {/* Left — Brand */}
         <div className="flex items-center gap-2.5 min-w-0">
-          {/* Logomark */}
           <div className="shrink-0 w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center shadow-sm">
             <span className="text-white font-black text-sm tracking-tight select-none">D</span>
           </div>
@@ -34,16 +34,13 @@ export function Header() {
           </div>
         </div>
 
-        {/* Center — Workspace switcher (always perfectly centered) */}
-        <div className="flex justify-center">
-          <WorkspaceSwitcher />
-        </div>
+        {/* Center — Desktop workspace tabs */}
+        <WorkspaceTabsDesktop />
 
         {/* Right — User */}
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex items-center gap-2">
           {user && (
             <>
-              {/* Avatar + name (desktop) */}
               <div className="hidden md:flex items-center gap-2.5">
                 {user.picture_url ? (
                   <img
@@ -62,11 +59,7 @@ export function Header() {
                   {user.name.split(' ')[0]}
                 </span>
               </div>
-
-              {/* Divider (desktop) */}
               <div className="hidden md:block w-px h-5 bg-slate-200 dark:bg-slate-700 mx-1" />
-
-              {/* Logout */}
               <button
                 onClick={handleLogout}
                 title="Sign out"
@@ -78,8 +71,10 @@ export function Header() {
             </>
           )}
         </div>
-
       </div>
+
+      {/* Workspace tab bar */}
+      <WorkspaceTabBar />
     </header>
   );
 }
