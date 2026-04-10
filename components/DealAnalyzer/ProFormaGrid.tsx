@@ -321,11 +321,12 @@ interface ProFormaGridProps {
   showWarnings?: boolean;
   inPlaceRent?: number;   // for pre-stab formula: InPlace_n = inPlaceRent × (1+g)^(n-1)
   targetRent?: number;    // for pre-stab formula: Target_n = targetRent × (1+g)^(n-1)
+  units?: number;         // unit count — used for CapEx/unit display
 }
 
 const PAGE_SIZE = 3;
 
-export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings = false, inPlaceRent, targetRent }: ProFormaGridProps) {
+export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings = false, inPlaceRent, targetRent, units = 1 }: ProFormaGridProps) {
   const [newExpenseName, setNewExpenseName] = useState('');
   const [addingRow, setAddingRow] = useState(false);
   const [page, setPage] = useState(0);
@@ -1607,6 +1608,8 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
 
               {data.expenses.map(expense => {
                 const fmt = expense.isPercentOfEGI ? 'percent' : 'currency';
+                const isCapEx = expense.name === 'CapEx Reserves' && !expense.isPercentOfEGI;
+                const perUnit = isCapEx ? expense.stabilizedValue / Math.max(units, 1) : 0;
                 return (
                   <tr key={expense.id} className="group hover:bg-slate-50/60 dark:hover:bg-slate-700/20 transition-colors">
                     <td className={`${STICKY} ${STICKY_HOVER} px-3 py-2.5 align-top`}>
@@ -1636,6 +1639,9 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                       </div>
                       {expense.isPercentOfEGI && (
                         <span className="text-[10px] text-slate-400">% of Eff. Gross Income</span>
+                      )}
+                      {isCapEx && (
+                        <span className="text-[10px] text-slate-400">$ / unit</span>
                       )}
                       {renderChainMap(y => isExpenseChainBroken(expense.id, y), y => isExpenseToggleOff(expense.id, y))}
                       {!expense.isPercentOfEGI && renderGrowthChainMap(y => data.yearOverrides?.[y]?.expenseGrowthPcts?.[expense.id] ?? expense.growthPct, y => data.yearOverrides?.[y]?.expenseGrowthPcts?.[expense.id] !== undefined, () => revertExpenseGrowthRow(expense.id, expense.growthPct))}
@@ -1667,8 +1673,23 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                         const cell = (
                           <td key={`exp-yr1-${expense.id}`} className={`px-2 py-2.5 align-top ${bg}`}>
                             <div className="flex flex-col items-end gap-0.5">
-                              <Cell value={expense.stabilizedValue} onChange={v => updateExpense(expense.id, { stabilizedValue: v })} format={fmt} />
-                              {expense.isPercentOfEGI && egi > 0 && <span className="text-[10px] text-slate-400 tabular-nums">{fmt$(egi * expense.stabilizedValue / 100)}</span>}
+                              {isCapEx ? (
+                                <>
+                                  <Cell
+                                    value={perUnit}
+                                    onChange={v => updateExpense(expense.id, { stabilizedValue: v * units })}
+                                    format="currency"
+                                  />
+                                  {units > 1 && (
+                                    <span className="text-[10px] text-slate-400 tabular-nums">× {units} = {fmt$(expense.stabilizedValue)}</span>
+                                  )}
+                                </>
+                              ) : (
+                                <>
+                                  <Cell value={expense.stabilizedValue} onChange={v => updateExpense(expense.id, { stabilizedValue: v })} format={fmt} />
+                                  {expense.isPercentOfEGI && egi > 0 && <span className="text-[10px] text-slate-400 tabular-nums">{fmt$(egi * expense.stabilizedValue / 100)}</span>}
+                                </>
+                              )}
                               {!expense.isPercentOfEGI && (
                                 <div className="flex items-center gap-0.5">
                                   <Cell value={expense.growthPct} onChange={v => updateExpense(expense.id, { growthPct: v })} format="growthPct" />

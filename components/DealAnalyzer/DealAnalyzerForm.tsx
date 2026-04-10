@@ -1434,6 +1434,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
               onChange={setProForma}
               projectionYears={acquisition.projectionYears}
               showWarnings={isVisited}
+              units={acquisition.propertyType === 'mfr' ? (acquisition.unitMix.length > 0 ? acquisition.unitMix.reduce((s, e) => s + e.count, 0) : acquisition.units) : 1}
             />
 
           </div>
