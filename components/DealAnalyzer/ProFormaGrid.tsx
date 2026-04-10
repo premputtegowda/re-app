@@ -32,14 +32,34 @@ const MFR_PRESETS: Omit<ProFormaItem, 'id'>[] = [
   { name: 'Property Management',   isPercentOfEGI: true,  t12Value: 8, stabValue: null, stabilizedValue: 8, growthPct: 0 },
 ];
 
-export function defaultProForma(propertyType: 'sfr' | 'mfr'): ProFormaData {
+export interface ProFormaDefaults {
+  propertyMgmtPct: number;
+  capExPerUnit: number;
+  maintenancePct: number;
+  units: number;
+}
+
+export function defaultProForma(propertyType: 'sfr' | 'mfr', defaults?: Partial<ProFormaDefaults>): ProFormaData {
   const presets = propertyType === 'mfr' ? MFR_PRESETS : SFR_PRESETS;
+  const expenses = presets.map((p, i) => {
+    const e = { ...p, id: `preset-${i}` };
+    if (defaults?.propertyMgmtPct !== undefined && e.name === 'Property Management') {
+      e.stabilizedValue = defaults.propertyMgmtPct;
+    }
+    if (defaults?.capExPerUnit !== undefined && defaults?.units !== undefined && e.name === 'CapEx Reserves') {
+      e.stabilizedValue = defaults.capExPerUnit * defaults.units;
+    }
+    if (defaults?.maintenancePct !== undefined && e.name === 'Maintenance & Repairs') {
+      e.stabilizedValue = defaults.maintenancePct;
+    }
+    return e;
+  });
   return {
     grossRent:     { t12: 0, stab: null, stabilized: 0, growthPct: 3 },
     otherIncome:   { t12: 0, stab: null, stabilized: 0, growthPct: 2 },
     vacancyPct:    { t12: 5, stab: null, stabilized: 5 },
     creditLossPct: { t12: 0, stab: null, stabilized: 0 },
-    expenses: presets.map((p, i) => ({ ...p, id: `preset-${i}` })),
+    expenses,
     yearOverrides: {},
   };
 }

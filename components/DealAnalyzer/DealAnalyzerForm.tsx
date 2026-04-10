@@ -16,6 +16,7 @@ import { RehabRentCalculator } from './RehabRentCalculator';
 import type { CalcPersistedState } from '@/types';
 import { projectScenario, formatCurrencyCompact } from '@/utils/dealAnalyzerCalc';
 import { useDealAnalyzerStore, type DealAnalyzerDraft } from '@/lib/dealAnalyzerStore';
+import { useDealSettingsStore } from '@/lib/dealSettingsStore';
 import type {
   CoCAcquisition,
   CoCOperations,
@@ -281,6 +282,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const router = useRouter();
   const onBack = () => router.push('/deal-analyzer');
   const { addScenario, saveDeal, updateSavedDeal, updateMCData, updateCurrentStep } = useDealAnalyzerStore();
+  const { defaultPropertyMgmtPct, defaultCapExPerUnit, defaultMaintenancePct } = useDealSettingsStore();
 
   // Stepper state
   const [activeStep, setActiveStep] = useState<number>(
@@ -355,7 +357,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     initialDeal?.refinance ?? DEFAULT_REFINANCE
   );
   const [proForma, setProForma] = useState<ProFormaData>(() => {
-    let pf = initialDeal?.proForma ?? defaultProForma(DEFAULT_ACQUISITION.propertyType);
+    const pfDefaults = { propertyMgmtPct: defaultPropertyMgmtPct, capExPerUnit: defaultCapExPerUnit, maintenancePct: defaultMaintenancePct, units: DEFAULT_ACQUISITION.units };
+    let pf = initialDeal?.proForma ?? defaultProForma(DEFAULT_ACQUISITION.propertyType, pfDefaults);
     if (initialDeal?.operations.annualRentGrowthPct) {
       pf = { ...pf, grossRent: { ...pf.grossRent, growthPct: initialDeal.operations.annualRentGrowthPct } };
     }
@@ -556,8 +559,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   useEffect(() => {
     if (acquisition.propertyType === prevPropertyType.current) return;
     prevPropertyType.current = acquisition.propertyType;
-    setProForma(defaultProForma(acquisition.propertyType));
-  }, [acquisition.propertyType]);
+    const units = acquisition.propertyType === 'mfr' ? acquisition.units : 1;
+    setProForma(defaultProForma(acquisition.propertyType, { propertyMgmtPct: defaultPropertyMgmtPct, capExPerUnit: defaultCapExPerUnit, maintenancePct: defaultMaintenancePct, units }));
+  }, [acquisition.propertyType, acquisition.units, defaultPropertyMgmtPct, defaultCapExPerUnit, defaultMaintenancePct]);
 
   // Auto-fill save name when address changes — only if user hasn't set a custom name
   const prevAddressRef = useRef(initialDeal?.acquisition?.propertyAddress ?? '');

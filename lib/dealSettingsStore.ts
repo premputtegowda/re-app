@@ -25,13 +25,26 @@ export const CONFIDENCE_OPTIONS: { value: ConfidenceLevel; label: string; percen
   { value: 70, label: '70% Confidence', percentile: 'p30', sub: 'Target is hit in 7 out of 10 market conditions — more aggressive price' },
 ];
 
+export const PROFORMA_DEFAULTS = {
+  propertyMgmtPct: 8,
+  capExPerUnit: 500,
+  maintenancePct: 5,
+};
+
 interface DealSettingsState {
   bearPercentile: BearPercentile;
   bullPercentile: BullPercentile;
   recommendedPriceConfidence: ConfidenceLevel;
+  // Pro Forma defaults
+  defaultPropertyMgmtPct: number;
+  defaultCapExPerUnit: number;
+  defaultMaintenancePct: number;
   setBearPercentile: (p: BearPercentile) => void;
   setBullPercentile: (p: BullPercentile) => void;
   setRecommendedPriceConfidence: (level: ConfidenceLevel) => void;
+  setDefaultPropertyMgmtPct: (v: number) => void;
+  setDefaultCapExPerUnit: (v: number) => void;
+  setDefaultMaintenancePct: (v: number) => void;
 }
 
 export const useDealSettingsStore = create<DealSettingsState>()(
@@ -40,9 +53,15 @@ export const useDealSettingsStore = create<DealSettingsState>()(
       bearPercentile: 'p20',
       bullPercentile: 'p80',
       recommendedPriceConfidence: 80,
+      defaultPropertyMgmtPct: PROFORMA_DEFAULTS.propertyMgmtPct,
+      defaultCapExPerUnit: PROFORMA_DEFAULTS.capExPerUnit,
+      defaultMaintenancePct: PROFORMA_DEFAULTS.maintenancePct,
       setBearPercentile: (p) => set({ bearPercentile: p }),
       setBullPercentile: (p) => set({ bullPercentile: p }),
       setRecommendedPriceConfidence: (level) => set({ recommendedPriceConfidence: level }),
+      setDefaultPropertyMgmtPct: (v) => set({ defaultPropertyMgmtPct: v }),
+      setDefaultCapExPerUnit: (v) => set({ defaultCapExPerUnit: v }),
+      setDefaultMaintenancePct: (v) => set({ defaultMaintenancePct: v }),
     }),
     { name: 'deal-settings' }
   )
