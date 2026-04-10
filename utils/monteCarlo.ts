@@ -90,6 +90,8 @@ export interface SavedMCResults extends Omit<MCResults, 'sorted'> {
   targetIRR?: number | null;
   /** Target CoC set in the MC panel at the time the simulation was run. */
   targetCoC?: number | null;
+  /** Fingerprint of inputs at the time the simulation was run — used to detect staleness. */
+  inputFingerprint?: string | null;
 }
 
 export function toSavedMCResults(
@@ -98,9 +100,10 @@ export function toSavedMCResults(
   conservativeMaxPrice?: number | null,
   targetIRR?: number | null,
   targetCoC?: number | null,
+  inputFingerprint?: string | null,
 ): SavedMCResults {
   const { sorted, ...rest } = r;
-  return { ...rest, compactRuns: sorted.map(run => ({ irr: run.irr, coc: run.avgCoCReturn })), recommendedMaxPrice, conservativeMaxPrice, targetIRR, targetCoC };
+  return { ...rest, compactRuns: sorted.map(run => ({ irr: run.irr, coc: run.avgCoCReturn })), recommendedMaxPrice, conservativeMaxPrice, targetIRR, targetCoC, inputFingerprint };
 }
 
 export function hydrateMCResults(saved: SavedMCResults): MCResults {

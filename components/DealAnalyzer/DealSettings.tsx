@@ -110,7 +110,7 @@ export function DealSettings() {
 
   return (
     <div className="space-y-8">
-      <PageHeader title="Deal Settings" subtitle="Configure Pro Forma defaults and Monte Carlo scenario thresholds" />
+      <PageHeader title="Deal Settings" subtitle="Configure Pro Forma defaults and stress test scenario thresholds" />
 
       {/* Pro Forma Defaults */}
       <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
@@ -149,9 +149,9 @@ export function DealSettings() {
         </button>
       </div>
 
-      {/* Monte Carlo Settings */}
+      {/* Stress Test Settings */}
       <div>
-        <h2 className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-4">Monte Carlo Settings</h2>
+        <h2 className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-4">Stress Test Settings</h2>
 
         <div className="space-y-4">
           <OptionGroup
