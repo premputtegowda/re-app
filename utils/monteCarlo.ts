@@ -436,6 +436,15 @@ export function findMaxPriceAtConditions(
     : targetRentPerUnit * 0.8;
 
   function irrAtPrice(price: number): number {
+    // If property tax rate is stored, recompute the tax expense at this candidate price
+    const expenses = proForma.propertyTaxRatePct && proForma.propertyTaxRatePct > 0
+      ? proForma.expenses.map(e =>
+          e.name === 'Property Taxes' && !e.isPercentOfEGI
+            ? { ...e, stabilizedValue: price * proForma.propertyTaxRatePct! / 12 }
+            : e
+        )
+      : proForma.expenses;
+
     const scenario: CoCScenario = {
       id: 'p80-price', name: 'P80 Price', scenarioType: 'base',
       acquisition: {
@@ -449,6 +458,7 @@ export function findMaxPriceAtConditions(
       operations,
       proForma: {
         ...proForma,
+        expenses,
         grossRent:     { ...proForma.grossRent,     stabilized: newTargetAnnual, growthPct: rentGrowthPct },
         vacancyPct:    { ...proForma.vacancyPct,    stabilized: vacancyPct },
         creditLossPct: proForma.creditLossPct ?? { t12: 0, stab: null, stabilized: 0 },

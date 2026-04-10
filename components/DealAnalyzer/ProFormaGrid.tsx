@@ -322,11 +322,12 @@ interface ProFormaGridProps {
   inPlaceRent?: number;   // for pre-stab formula: InPlace_n = inPlaceRent × (1+g)^(n-1)
   targetRent?: number;    // for pre-stab formula: Target_n = targetRent × (1+g)^(n-1)
   units?: number;         // unit count — used for CapEx/unit display
+  purchasePrice?: number; // used to derive propertyTaxRatePct when user enters property tax dollar amount
 }
 
 const PAGE_SIZE = 3;
 
-export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings = false, inPlaceRent, targetRent, units = 1 }: ProFormaGridProps) {
+export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings = false, inPlaceRent, targetRent, units = 1, purchasePrice = 0 }: ProFormaGridProps) {
   const [newExpenseName, setNewExpenseName] = useState('');
   const [addingRow, setAddingRow] = useState(false);
   const [page, setPage] = useState(0);
@@ -660,6 +661,19 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
     const newData = { ...data, expenses: newExpenses };
     onChange(newData);
   }, [data, onChange]);
+
+  // Property tax: same as updateExpense but also derives and stores the rate for bisection
+  const updatePropertyTaxExpense = useCallback((id: string, patch: Partial<ProFormaItem>) => {
+    const newExpenses = data.expenses.map(e => {
+      if (e.id !== id) return e;
+      const m = { ...e, ...patch };
+      if ('t12Value' in patch && e.stabilizedValue === 0) m.stabilizedValue = m.t12Value;
+      return m;
+    });
+    const newStabValue = 'stabilizedValue' in patch ? (patch.stabilizedValue as number) : data.expenses.find(e => e.id === id)?.stabilizedValue ?? 0;
+    const propertyTaxRatePct = purchasePrice > 0 ? (newStabValue * 12) / purchasePrice : data.propertyTaxRatePct;
+    onChange({ ...data, expenses: newExpenses, propertyTaxRatePct });
+  }, [data, onChange, purchasePrice]);
 
   const deleteExpense = useCallback((id: string) => { onChange({ ...data, expenses: data.expenses.filter(e => e.id !== id) }); }, [data, onChange]);
 
@@ -1609,6 +1623,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
               {data.expenses.map(expense => {
                 const fmt = expense.isPercentOfEGI ? 'percent' : 'currency';
                 const isCapEx = expense.name === 'CapEx Reserves' && !expense.isPercentOfEGI;
+                const isPropertyTax = expense.name === 'Property Taxes' && !expense.isPercentOfEGI;
                 const perUnit = isCapEx ? expense.stabilizedValue / Math.max(units, 1) : 0;
                 return (
                   <tr key={expense.id} className="group hover:bg-slate-50/60 dark:hover:bg-slate-700/20 transition-colors">
@@ -1684,7 +1699,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                                 </>
                               ) : (
                                 <>
-                                  <Cell value={expense.stabilizedValue} onChange={v => updateExpense(expense.id, { stabilizedValue: v })} format={fmt} />
+                                  <Cell value={expense.stabilizedValue} onChange={v => isPropertyTax ? updatePropertyTaxExpense(expense.id, { stabilizedValue: v }) : updateExpense(expense.id, { stabilizedValue: v })} format={fmt} />
                                   {expense.isPercentOfEGI && egi > 0 && <span className="text-[10px] text-slate-400 tabular-nums">{fmt$(egi * expense.stabilizedValue / 100)}</span>}
                                 </>
                               )}

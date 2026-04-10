@@ -316,6 +316,7 @@ export interface ProFormaData {
     stabilized: number;
   };
   expenses: ProFormaItem[];
+  propertyTaxRatePct?: number; // derived: (stabilizedValue * 12) / purchasePrice — used in bisection, never shown to user
   yearOverrides?: Record<number, {
     grossRent?: number;
     grossRentSystem?: boolean;       // true = set by rent schedule / calculator (not manual)

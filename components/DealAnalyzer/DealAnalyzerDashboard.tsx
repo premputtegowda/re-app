@@ -118,9 +118,12 @@ function DealCard({ deal, selected, compareMode, onLoad, onDelete, onToggleSelec
   };
 
   const PropertyIcon = acq.propertyType === 'sfr' ? Home : Building2;
+  const totalUnits = acq.unitMix && acq.unitMix.length > 0
+    ? acq.unitMix.reduce((s, e) => s + e.count, 0)
+    : acq.units;
   const unitLabel = acq.propertyType === 'sfr'
     ? [acq.sfrBeds && `${acq.sfrBeds}bd`, acq.sfrBaths && `${acq.sfrBaths}ba`].filter(Boolean).join('/')
-    : acq.units > 0 ? `${acq.units} units` : '';
+    : totalUnits > 0 ? `${totalUnits} units` : '';
 
   const metrics = result ? [
     { icon: TrendingUp, label: 'IRR',  value: result.irr !== null ? formatPct(result.irr) : '—' },
@@ -180,17 +183,33 @@ function DealCard({ deal, selected, compareMode, onLoad, onDelete, onToggleSelec
           </div>
 
           {/* Metric pills */}
-          {metrics.length > 0 && (
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {metrics.map(({ icon: Icon, label, value }) => (
-                <div key={label} className="flex items-center gap-1 px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-700/60 border border-slate-200 dark:border-slate-600">
-                  <Icon size={10} className="text-slate-400 shrink-0" />
-                  <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">{label}</span>
-                  <span className="text-[11px] font-bold text-slate-800 dark:text-slate-200 tabular-nums">{value}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          {metrics.length > 0 && (() => {
+            const p50Irr = mcResults?.p50?.irr ?? null;
+            const p50BelowTarget = targetIRR !== null && p50Irr !== null && p50Irr < targetIRR;
+            return (
+              <div className="flex items-start gap-1.5 flex-wrap">
+                {metrics.map(({ icon: Icon, label, value }) => (
+                  <div key={label} className="flex flex-col items-center gap-0.5">
+                    <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-700/60 border border-slate-200 dark:border-slate-600">
+                      <Icon size={10} className="text-slate-400 shrink-0" />
+                      <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">{label}</span>
+                      <span className="text-[11px] font-bold text-slate-800 dark:text-slate-200 tabular-nums">{value}</span>
+                    </div>
+                    {label === 'IRR' && p50Irr !== null && (
+                      <span className={`inline-flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
+                        p50BelowTarget
+                          ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
+                          : 'bg-secondary-100 dark:bg-secondary-900/30 text-secondary-700 dark:text-secondary-400'
+                      }`}>
+                        <span>~</span>
+                        <span>Median {p50Irr.toFixed(1)}%</span>
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
           {!result && (
             <span className="text-xs text-slate-400 italic">Open to run analysis</span>
           )}
@@ -202,8 +221,8 @@ function DealCard({ deal, selected, compareMode, onLoad, onDelete, onToggleSelec
           const p50BelowTarget = targetIRR !== null && p50Irr !== null && p50Irr < targetIRR;
           return (
             <div className="space-y-1.5">
-              {/* Target + uncertainty indicator */}
-              <div className="flex items-center justify-between gap-2">
+              {/* Target IRR indicator */}
+              <div className="flex items-center gap-2">
                 {targetIRR !== null && (
                   <div className="flex items-center gap-1">
                     <Target size={10} className="text-slate-400 shrink-0" />
@@ -211,17 +230,6 @@ function DealCard({ deal, selected, compareMode, onLoad, onDelete, onToggleSelec
                       Target {targetIRR}% IRR
                     </span>
                   </div>
-                )}
-                {/* Uncertainty badge */}
-                {p50Irr !== null && (
-                  <span className={`inline-flex items-center gap-0.5 text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
-                    p50BelowTarget
-                      ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
-                      : 'bg-secondary-100 dark:bg-secondary-900/30 text-secondary-700 dark:text-secondary-400'
-                  }`}>
-                    <span>~</span>
-                    <span>Median {p50Irr.toFixed(1)}%</span>
-                  </span>
                 )}
               </div>
               {/* Gradient bar */}

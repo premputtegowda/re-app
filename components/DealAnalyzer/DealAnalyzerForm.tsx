@@ -64,8 +64,11 @@ function getStepCardData(
     case 0: {
       const addr = acquisition.propertyAddress.trim() || 'No address';
       const type = acquisition.propertyType === 'mfr' ? 'Multi-Family' : 'Single Family';
-      const units = acquisition.propertyType === 'mfr' && acquisition.units > 0
-        ? `${acquisition.units} units` : '';
+      const totalUnits = acquisition.unitMix && acquisition.unitMix.length > 0
+        ? acquisition.unitMix.reduce((s, e) => s + e.count, 0)
+        : acquisition.units;
+      const units = acquisition.propertyType === 'mfr' && totalUnits > 0
+        ? `${totalUnits} units` : '';
       return { primary: addr, primaryExtra: null, sub: [type, units].filter(Boolean).join(' · ') };
     }
     case 1: {
@@ -1435,6 +1438,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
               projectionYears={acquisition.projectionYears}
               showWarnings={isVisited}
               units={acquisition.propertyType === 'mfr' ? (acquisition.unitMix.length > 0 ? acquisition.unitMix.reduce((s, e) => s + e.count, 0) : acquisition.units) : 1}
+              purchasePrice={acquisition.purchasePrice}
             />
 
           </div>
