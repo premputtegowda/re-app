@@ -817,19 +817,37 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
     );
   }
 
-  function renderGrowthChainMap(hasOverride: (y: number) => boolean, onRevert: () => void) {
-    // Growth rates apply from Yr2 onward (Yr1 uses base rate on the item itself)
+  function renderGrowthChainMap(getRate: (y: number) => number, hasOverride: (y: number) => boolean, onRevert: () => void) {
     const years = Array.from({ length: projectionYears - 1 }, (_, i) => i + 2);
     const anyOverride = years.some(y => hasOverride(y));
     if (!anyOverride) return null;
+
+    const rates = years.map(y => getRate(y));
+    const maxRate = Math.max(...rates, 0.1);
+    const BAR_W = 2.5;
+    const GAP = 1;
+    const MAX_H = 10;
+    const MIN_H = 1.5;
+    const totalW = years.length * BAR_W + (years.length - 1) * GAP;
+
     return (
       <div className="flex items-center gap-1 mt-0.5">
-        <TrendingUp size={8} className="text-slate-400 shrink-0" />
-        <div className="flex items-center gap-0.5">
-          {years.map(y => (
-            <span key={y} className={`text-[8px] tabular-nums leading-none ${hasOverride(y) ? 'text-orange-400 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}>{y}</span>
-          ))}
-        </div>
+        <svg width={totalW} height={MAX_H} className="shrink-0 overflow-visible">
+          {years.map((y, idx) => {
+            const barH = Math.max(MIN_H, (rates[idx] / maxRate) * MAX_H);
+            return (
+              <rect
+                key={y}
+                x={idx * (BAR_W + GAP)}
+                y={MAX_H - barH}
+                width={BAR_W}
+                height={barH}
+                rx={0.5}
+                className={hasOverride(y) ? 'fill-orange-400' : 'fill-slate-300 dark:fill-slate-600'}
+              />
+            );
+          })}
+        </svg>
         <button type="button" onClick={onRevert} title="Cascade Yr2 growth rate to all later years"
           className="p-0.5 rounded text-primary-500 hover:text-primary-700 dark:hover:text-primary-300 shrink-0">
           <RotateCcw size={9} />
@@ -1493,7 +1511,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                     )}
                   </div>
                   {renderChainMap(y => isIncomeChainBroken('grossRent', y), y => isIncomeToggleOff('grossRent', y))}
-                  {renderGrowthChainMap(y => data.yearOverrides?.[y]?.grossRentGrowthPct !== undefined, () => revertIncomeGrowthRow('grossRentGrowthPct', data.grossRent.growthPct))}
+                  {renderGrowthChainMap(y => data.yearOverrides?.[y]?.grossRentGrowthPct ?? data.grossRent.growthPct, y => data.yearOverrides?.[y]?.grossRentGrowthPct !== undefined, () => revertIncomeGrowthRow('grossRentGrowthPct', data.grossRent.growthPct))}
                 </td>
                 {visibleCols.map((col, i) => cloneElement(renderIncomeCell(col, 'grossRent', data.grossRent.stabilized, data.grossRent.growthPct, false, v => setGrossRent('t12', v), v => setGrossRent('stabilized', v), v => setGrossRent('growthPct', v), data.grossRent.t12), { key: `gr-${i}` }))}
               </tr>
@@ -1512,7 +1530,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                     )}
                   </div>
                   {renderChainMap(y => isIncomeChainBroken('otherIncome', y), y => isIncomeToggleOff('otherIncome', y))}
-                  {renderGrowthChainMap(y => data.yearOverrides?.[y]?.otherIncomeGrowthPct !== undefined, () => revertIncomeGrowthRow('otherIncomeGrowthPct', data.otherIncome.growthPct))}
+                  {renderGrowthChainMap(y => data.yearOverrides?.[y]?.otherIncomeGrowthPct ?? data.otherIncome.growthPct, y => data.yearOverrides?.[y]?.otherIncomeGrowthPct !== undefined, () => revertIncomeGrowthRow('otherIncomeGrowthPct', data.otherIncome.growthPct))}
                 </td>
                 {visibleCols.map((col, i) => cloneElement(renderIncomeCell(col, 'otherIncome', data.otherIncome.stabilized, data.otherIncome.growthPct, false, v => setOtherIncome('t12', v), v => setOtherIncome('stabilized', v), v => setOtherIncome('growthPct', v), data.otherIncome.t12), { key: `oi-${i}` }))}
               </tr>
@@ -1602,7 +1620,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                         <span className="text-[10px] text-slate-400">% of Eff. Gross Income</span>
                       )}
                       {renderChainMap(y => isExpenseChainBroken(expense.id, y), y => isExpenseToggleOff(expense.id, y))}
-                      {!expense.isPercentOfEGI && renderGrowthChainMap(y => data.yearOverrides?.[y]?.expenseGrowthPcts?.[expense.id] !== undefined, () => revertExpenseGrowthRow(expense.id, expense.growthPct))}
+                      {!expense.isPercentOfEGI && renderGrowthChainMap(y => data.yearOverrides?.[y]?.expenseGrowthPcts?.[expense.id] ?? expense.growthPct, y => data.yearOverrides?.[y]?.expenseGrowthPcts?.[expense.id] !== undefined, () => revertExpenseGrowthRow(expense.id, expense.growthPct))}
                     </td>
                     {visibleCols.flatMap((col, i) => {
                       const prevCol = visibleCols[i - 1];
