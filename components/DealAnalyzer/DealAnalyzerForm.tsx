@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Pencil, Calculator, AlertTriangle, MapPin, CreditCard, Hammer, BarChart2, TrendingUp, ChevronRight, ChevronUp, Check, Zap } from 'lucide-react';
+import { Pencil, Calculator, AlertTriangle, MapPin, CreditCard, Hammer, BarChart2, TrendingUp, ChevronRight, ChevronUp, Check, Zap, X } from 'lucide-react';
 import { Card } from '@/components/UI/Card';
 import { Button } from '@/components/UI/Button';
 import { StepProperty } from './steps/StepProperty';
@@ -294,6 +294,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const [errors, setErrors] = useState<string[]>([]);
   const [errorStep, setErrorStep] = useState<number | null>(null);
   const [calcState, setCalcState] = useState<CalcPersistedState | undefined>(initialDeal?.calcState);
+  const [calcKey, setCalcKey] = useState(0);
   const [isValueAdd, setIsValueAdd] = useState<boolean | null>(() => {
     // Prefer explicitly persisted value
     if (initialDeal?.calcState?.isValueAdd !== undefined) return initialDeal.calcState.isValueAdd ?? null;
@@ -781,11 +782,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
         const calcApplied = Object.values(proForma.yearOverrides ?? {}).some(ov => ov?.grossRentSystem);
 
-        const stepComplete =
-          isValueAdd === false ||
-          (isValueAdd === true && preStabMethod === 'calculator' && calcApplied) ||
-          (isValueAdd === true && preStabMethod === 'manual' && hasPreStab);
-
         const unitsToRenovate = hasMfr
           ? acquisition.unitMix.map(e => e.unitsToRenovate ?? 0)
           : [1];
@@ -807,6 +803,10 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
           unitsToRenovate.some((u, t) => u > 0 && renoScheduleTotals[t] !== u) ||
           leaseUpUnitsArr.some((u, t) => u > 0 && luScheduleTotals[t] !== u)
         );
+
+        const stepComplete =
+          isValueAdd === false ||
+          (isValueAdd === true && !calcScheduleIncomplete);
 
         const unitTypes = hasMfr
           ? acquisition.unitMix.map(e => ({
@@ -1311,14 +1311,41 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                               <span className="text-xs text-slate-400 dark:text-slate-500">Set renovation period to auto-calculate</span>
                             )}
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => { setCalcCollapsed(false); setPreStabMethod('calculator'); }}
-                            className="shrink-0 flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 transition-colors touch-manipulation"
-                          >
-                            <Pencil size={11} />
-                            Edit schedule
-                          </button>
+                          <div className="shrink-0 flex items-center gap-2">
+                            {calcApplied && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCalcState(undefined);
+                                  setCalcKey(k => k + 1);
+                                  setProForma(prev => {
+                                    const ovs = { ...(prev.yearOverrides ?? {}) };
+                                    for (let y = 1; y <= acquisition.projectionYears; y++) {
+                                      if (ovs[y]) {
+                                        const { grossRent: _r, grossRentSystem: _s, ...rest } = ovs[y];
+                                        if (Object.keys(rest).length > 0) ovs[y] = rest; else delete ovs[y];
+                                      }
+                                    }
+                                    return { ...prev, yearOverrides: ovs };
+                                  });
+                                  if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map(u => ({ ...u, preStabRent: 0 })));
+                                  else updateAcquisition('sfrPreStabRent', 0);
+                                }}
+                                className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors touch-manipulation"
+                              >
+                                <X size={11} />
+                                Use target rent
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => { setCalcCollapsed(false); setPreStabMethod('calculator'); }}
+                              className="flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 transition-colors touch-manipulation"
+                            >
+                              <Pencil size={11} />
+                              Edit schedule
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -1326,6 +1353,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     {/* Calculator — always mounted so auto-fill runs even when collapsed */}
                     <div className={calcCollapsed ? 'hidden' : 'rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden -mx-4'}>
                       <RehabRentCalculator
+                          key={calcKey}
                           hideHeader={false}
                           unitTypes={unitTypes}
                           projectionYears={acquisition.projectionYears}
@@ -1357,6 +1385,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                               const ovs = { ...(prev.yearOverrides ?? {}) };
                               Object.entries(overrides).forEach(([yr, rent]) => {
                                 const y = Number(yr);
+                                // Skip years the user has manually overridden (grossRentSystem===false)
+                                if (ovs[y]?.grossRentSystem === false) return;
                                 ovs[y] = { ...(ovs[y] ?? {}), grossRent: rent, grossRentSystem: true };
                               });
                               return { ...prev, yearOverrides: ovs };
@@ -1395,41 +1425,12 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
             )}
 
             {/* ── Pro Forma ── */}
-            {(() => {
-              // When value-add is selected but the stab plan is not yet complete,
-              // show the ProForma using target rent (strip pre-stab year overrides)
-              // and display a notice so the user knows what's happening.
-              const stabIncomplete = isValueAdd === true && !stepComplete;
-              const proFormaData = stabIncomplete
-                ? {
-                    ...proForma,
-                    yearOverrides: Object.fromEntries(
-                      Object.entries(proForma.yearOverrides ?? {})
-                        .map(([yr, ov]) => [yr, ov?.grossRentSystem ? undefined : ov])
-                        .filter(([, ov]) => ov !== undefined)
-                    ) as typeof proForma.yearOverrides,
-                  }
-                : proForma;
-
-              return (
-                <>
-                  {stabIncomplete && (
-                    <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40">
-                      <AlertTriangle size={13} className="text-amber-500 mt-0.5 shrink-0" />
-                      <p className="text-xs text-amber-700 dark:text-amber-400">
-                        Stabilization plan incomplete — Pro Forma will use target rent until the schedule is applied.
-                      </p>
-                    </div>
-                  )}
-                  <ProFormaGrid
-                    data={proFormaData}
-                    onChange={setProForma}
-                    projectionYears={acquisition.projectionYears}
-                    showWarnings={isVisited}
-                  />
-                </>
-              );
-            })()}
+            <ProFormaGrid
+              data={proForma}
+              onChange={setProForma}
+              projectionYears={acquisition.projectionYears}
+              showWarnings={isVisited}
+            />
 
           </div>
         );

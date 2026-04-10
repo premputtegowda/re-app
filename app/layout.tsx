@@ -18,7 +18,12 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   title: 'DealstackRE',
   description: 'Real Estate Professional Status Hours Tracking Application',
-  icons: { icon: '/icon.svg' },
+  icons: {
+    icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
+      { url: '/icon.png', type: 'image/png' },
+    ],
+  },
 };
 
 export default function RootLayout({
@@ -30,15 +35,14 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning className={inter.variable}>
       <body className="font-sans bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 transition-colors antialiased">
         {children}
-        {/* Unregister any stale service workers, then load the current one */}
+        {/* Clear any stale service workers from previous builds */}
         <Script id="sw-cleanup" strategy="afterInteractive">{`
           if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.getRegistrations().then(registrations => {
-              registrations.forEach(r => r.unregister());
+            navigator.serviceWorker.getRegistrations().then(regs => {
+              regs.forEach(r => r.unregister());
             });
           }
         `}</Script>
-        <Script src="/registerSW.js" strategy="afterInteractive" />
       </body>
     </html>
   );
