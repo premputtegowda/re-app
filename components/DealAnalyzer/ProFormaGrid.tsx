@@ -100,7 +100,7 @@ function Cell({ value, onChange, format, onCommit, isOverridden }: {
 
 // ── YearCell ──────────────────────────────────────────────────────────────────
 
-function YearCell({ computed, override, format, onOverride, onClearOverride, onYearOnly, cascadeDelay }: {
+function YearCell({ computed, override, format, onOverride, onClearOverride, onYearOnly, cascadeDelay, pushToFutureOff }: {
   computed: number;
   override: number | undefined;
   format: 'currency' | 'percent';
@@ -108,6 +108,7 @@ function YearCell({ computed, override, format, onOverride, onClearOverride, onY
   onClearOverride?: () => void;
   onYearOnly?: (v: number) => void;
   cascadeDelay?: number; // ms — staggered wave animation delay
+  pushToFutureOff?: boolean; // persisted toggle state
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
@@ -134,7 +135,7 @@ function YearCell({ computed, override, format, onOverride, onClearOverride, onY
 
   const start = () => {
     setDraft(val === 0 ? '' : String(val));
-    setPushToFuture(true);
+    setPushToFuture(!pushToFutureOff);
     setEditing(true);
     setTimeout(() => inputRef.current?.select(), 0);
   };
@@ -338,8 +339,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
   const totalPages = Math.ceil(allCols.length / PAGE_SIZE);
   const visibleCols = allCols.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const exitYear = projectionYears;
-  const connectorCount = visibleCols.filter((col, i) => i > 0 && col.type === 'year' && visibleCols[i - 1].type === 'year').length;
-  const totalCols = 1 + visibleCols.length + connectorCount; // sticky label + visible cols + connectors
+  const totalCols = 1 + visibleCols.length; // sticky label + visible cols
 
   // ── Row helper functions ──
 
@@ -437,15 +437,30 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
     const { chainBase, growthPct: gp, growthRateKey: grk } = getIncomeFieldMeta(field);
     const currentChained = makeChainedValue(data.yearOverrides);
     const updated = { ...(data.yearOverrides ?? {}) };
-    // Only pin the immediate next gray year — it becomes the new chain anchor.
-    // Yr(N+2)+ will cascade from it naturally; no need to set overrides on them.
+    // Pin the immediate next year as a formula snapshot so cascade stops here.
+    // Mark it cascaded so it doesn't appear as a user break.
     const nextYear = year + 1;
     if (nextYear <= projectionYears && data.yearOverrides?.[nextYear]?.[field] === undefined) {
       const formulaVal = currentChained(field, grk, chainBase, gp, nextYear);
-      updated[nextYear] = { ...(updated[nextYear] ?? {}), [field]: formulaVal };
+      const ne = updated[nextYear] ?? {};
+      updated[nextYear] = {
+        ...ne,
+        [field]: formulaVal,
+        cascadedFields: { ...(ne.cascadedFields ?? {}), [field]: true },
+      };
     }
     const extra = field === 'grossRent' ? { grossRentSystem: false } : {};
-    updated[year] = { ...(updated[year] ?? {}), [field]: value, ...extra };
+    const cur = updated[year] ?? {};
+    // Mark toggleOffFields so the toggle stays OFF when the cell is reopened.
+    // Year 1 also gets yr1Blocked so isIncomeChainBroken(field,1) returns true.
+    const yr1Extra = year === 1 ? { yr1Blocked: true } : {};
+    updated[year] = {
+      ...cur,
+      [field]: value,
+      ...extra,
+      ...yr1Extra,
+      toggleOffFields: { ...(cur.toggleOffFields ?? {}), [field]: true },
+    };
     onChange({ ...data, yearOverrides: updated });
   }
 
@@ -457,10 +472,19 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
     if (nextYear <= projectionYears && data.yearOverrides?.[nextYear]?.expenses?.[expenseId] === undefined) {
       const formulaVal = currentChained(expense, nextYear);
       const ye = updated[nextYear] ?? {};
-      updated[nextYear] = { ...ye, expenses: { ...(ye.expenses ?? {}), [expenseId]: formulaVal } };
+      updated[nextYear] = {
+        ...ye,
+        expenses: { ...(ye.expenses ?? {}), [expenseId]: formulaVal },
+        cascadedExpenses: { ...(ye.cascadedExpenses ?? {}), [expenseId]: true },
+      };
     }
     const ye = updated[year] ?? {};
-    updated[year] = { ...ye, expenses: { ...(ye.expenses ?? {}), [expenseId]: value } };
+    // Mark toggleOffExpenses for all years so the toggle stays OFF when cell reopens.
+    updated[year] = {
+      ...ye,
+      expenses: { ...(ye.expenses ?? {}), [expenseId]: value },
+      toggleOffExpenses: { ...(ye.toggleOffExpenses ?? {}), [expenseId]: true as const },
+    };
     onChange({ ...data, yearOverrides: updated });
   }
 
@@ -469,7 +493,18 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
   const setYearOverride = useCallback((year: number, field: 'grossRent' | 'otherIncome' | 'vacancyPct' | 'creditLossPct', value: number) => {
     const prev = data.yearOverrides ?? {};
     const extra = field === 'grossRent' ? { grossRentSystem: false } : {};
-    onChange({ ...data, yearOverrides: { ...prev, [year]: { ...prev[year], [field]: value, ...extra } } });
+    const cur = prev[year] ?? {};
+    // push-to-future=ON: clear toggleOffFields, cascadedFields, yr1Blocked for this field
+    const tf = { ...(cur.toggleOffFields ?? {}) } as Record<string, unknown>;
+    delete tf[field];
+    const cf = { ...(cur.cascadedFields ?? {}) } as Record<string, unknown>;
+    delete cf[field];
+    const yr1Clear = year === 1 ? { yr1Blocked: undefined } : {};
+    onChange({ ...data, yearOverrides: { ...prev, [year]: {
+      ...cur, [field]: value, ...extra, ...yr1Clear,
+      toggleOffFields: Object.keys(tf).length ? tf as typeof cur.toggleOffFields : undefined,
+      cascadedFields: Object.keys(cf).length ? cf as typeof cur.cascadedFields : undefined,
+    } } });
   }, [data, onChange]);
 
   const clearYearOverride = useCallback((year: number, field: 'grossRent' | 'otherIncome' | 'vacancyPct' | 'creditLossPct') => {
@@ -485,7 +520,16 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
   const setExpenseYearOverride = useCallback((year: number, expenseId: string, value: number) => {
     const prev = data.yearOverrides ?? {};
     const ye = prev[year] ?? {};
-    const updated = { ...prev, [year]: { ...ye, expenses: { ...(ye.expenses ?? {}), [expenseId]: value } } };
+    // push-to-future=ON: clear toggleOffExpenses + cascadedExpenses for this expense
+    const toe = { ...(ye.toggleOffExpenses ?? {}) } as Record<string, unknown>;
+    delete toe[expenseId];
+    const ce = { ...(ye.cascadedExpenses ?? {}) } as Record<string, unknown>;
+    delete ce[expenseId];
+    const updated = { ...prev, [year]: { ...ye,
+      expenses: { ...(ye.expenses ?? {}), [expenseId]: value },
+      toggleOffExpenses: Object.keys(toe).length ? toe as typeof ye.toggleOffExpenses : undefined,
+      cascadedExpenses: Object.keys(ce).length ? ce as typeof ye.cascadedExpenses : undefined,
+    } };
     onChange({ ...data, yearOverrides: updated });
   }, [data, onChange]);
 
@@ -647,27 +691,54 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
   function isIncomeChainBroken(field: 'grossRent' | 'otherIncome' | 'vacancyPct' | 'creditLossPct', toYear: number): boolean {
     const ov = data.yearOverrides?.[toYear];
     if (!ov) return false;
-    if (field === 'grossRent' && ov.grossRentSystem === true) return false; // stabilizing phase — not a user break
+    if (field === 'grossRent' && ov.grossRentSystem === true) return false; // stabilizing — not a user break
+    if (ov.cascadedFields?.[field]) return false; // auto-cascaded pin — not a user break
+    if (toYear === 1) return ov.yr1Blocked === true; // Year 1 only breaks if toggle=OFF
     return ov[field] !== undefined;
   }
 
   function isExpenseChainBroken(expenseId: string, toYear: number): boolean {
-    return data.yearOverrides?.[toYear]?.expenses?.[expenseId] !== undefined;
+    const ov = data.yearOverrides?.[toYear];
+    if (!ov) return false;
+    if (ov.cascadedExpenses?.[expenseId]) return false; // auto-cascaded — not a user break
+    if (toYear === 1) return ov.toggleOffExpenses?.[expenseId] === true; // Year 1 only breaks if toggle=OFF
+    return ov.expenses?.[expenseId] !== undefined;
   }
 
-  function renderChainMap(getBroken: (toYear: number) => boolean) {
+  function isIncomeToggleOff(field: 'grossRent' | 'otherIncome' | 'vacancyPct' | 'creditLossPct', year: number): boolean {
+    const ov = data.yearOverrides?.[year];
+    if (!ov) return false;
+    if (year === 1) return ov.yr1Blocked === true;
+    return ov.toggleOffFields?.[field] === true;
+  }
+
+  function isExpenseToggleOff(expenseId: string, year: number): boolean {
+    return data.yearOverrides?.[year]?.toggleOffExpenses?.[expenseId] === true;
+  }
+
+  // getBroken(y): year y has a user override — highlights the year number orange
+  // isToggleOff(y): year y was committed with push-to-future=OFF — breaks the connector AFTER year y
+  function renderChainMap(getBroken: (y: number) => boolean, isToggleOff?: (y: number) => boolean) {
+    const years = Array.from({ length: projectionYears }, (_, i) => i + 1);
+    const anyBroken = years.some(y => getBroken(y));
+    if (!anyBroken) return null;
     return (
       <div className="flex items-center mt-0.5">
-        {Array.from({ length: projectionYears }, (_, i) => i + 1).map((y, idx) => (
-          <Fragment key={y}>
-            {idx > 0 && (
-              getBroken(y)
-                ? <Unlink size={7} className="text-orange-400 mx-0.5 shrink-0" />
-                : <span className="w-2 h-px bg-slate-200 dark:bg-slate-600 block mx-0.5 shrink-0" />
-            )}
-            <span className={`text-[8px] tabular-nums leading-none ${getBroken(y) && idx > 0 ? 'text-orange-400 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}>{y}</span>
-          </Fragment>
-        ))}
+        {years.map((y, idx) => {
+          const broken = getBroken(y);
+          // connector between y-1 and y: broken if y has incoming override OR y-1 stopped the chain (toggle=OFF)
+          const connectorBroken = idx > 0 && (broken || (isToggleOff ? isToggleOff(y - 1) : false));
+          return (
+            <Fragment key={y}>
+              {idx > 0 && (
+                connectorBroken
+                  ? <Unlink size={7} className="text-orange-400 mx-0.5 shrink-0" />
+                  : <span className="w-2 h-px bg-slate-200 dark:bg-slate-600 block mx-0.5 shrink-0" />
+              )}
+              <span className={`text-[8px] tabular-nums leading-none ${broken ? 'text-orange-400 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}>{y}</span>
+            </Fragment>
+          );
+        })}
       </div>
     );
   }
@@ -744,6 +815,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                 format={fmt}
                 onOverride={v => setYearOverride(1, overrideKey, v)}
                 onYearOnly={v => applyIncomeYearOnly(1, overrideKey, v)}
+                pushToFutureOff={yr1Ov?.toggleOffFields?.[overrideKey] === true}
               />
               {isPercent && (() => {
                 const gross = yr1Ov?.grossRent ?? data.grossRent.stabilized;
@@ -773,6 +845,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                 format={fmt}
                 onOverride={v => setYearOverride(1, overrideKey, v)}
                 onYearOnly={v => applyIncomeYearOnly(1, overrideKey, v)}
+                pushToFutureOff={yr1Ov?.toggleOffFields?.[overrideKey] === true}
               />
             )}
           </div>
@@ -832,6 +905,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                 onClearOverride={() => clearYearOverride(year, overrideKey)}
                 onYearOnly={v => applyIncomeYearOnly(year, overrideKey, v)}
                 cascadeDelay={(year - 1) * 50}
+                pushToFutureOff={yrOv?.toggleOffFields?.[overrideKey] === true}
               />
               {!isPercent && growthRateKey && (
                 <div className="flex items-center gap-0.5">
@@ -905,7 +979,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
         <div className="flex items-start justify-between mb-2 gap-2">
           <div className="min-w-0">
             <p className="text-sm font-medium text-slate-700 dark:text-slate-300">{label}</p>
-            {renderChainMap(y => isIncomeChainBroken(overrideKey, y))}
+            {renderChainMap(y => isIncomeChainBroken(overrideKey, y), y => isIncomeToggleOff(overrideKey, y))}
           </div>
           {hasOverride && (
             <button type="button" title="Revert row to formula"
@@ -1017,7 +1091,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                 <AlertTriangle size={12} className="text-amber-500 shrink-0" />
               )}
             </div>
-            {renderChainMap(y => isExpenseChainBroken(expense.id, y))}
+            {renderChainMap(y => isExpenseChainBroken(expense.id, y), y => isExpenseToggleOff(expense.id, y))}
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             {hasExpOverride && (
@@ -1279,13 +1353,9 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-700">
                 <th className="sticky top-0 left-0 z-40 bg-slate-50 dark:bg-slate-800/80 shadow-[1px_0_0_0_theme(colors.slate.200)] dark:shadow-[1px_0_0_0_theme(colors.slate.700)] px-3 py-2.5 w-[140px] text-left" />
-                {visibleCols.flatMap((col, i) => {
-                  const prevCol = visibleCols[i - 1];
+                {visibleCols.map((col, i) => {
                   const { label, sub, color } = colHeader(col);
-                  const connector = col.type === 'year' && prevCol?.type === 'year'
-                    ? <th key={`ch-${i}`} className="sticky top-0 z-20 w-3 bg-slate-50 dark:bg-slate-800/80" />
-                    : null;
-                  const header = (
+                  return (
                     <th key={`h-${i}`} className="sticky top-0 z-20 px-2 py-2.5 w-[120px] bg-slate-50 dark:bg-slate-800/80">
                       <div className={`text-right ${color}`}>
                         <p className="text-xs font-bold uppercase tracking-wide">{label}</p>
@@ -1301,7 +1371,6 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                       </div>
                     </th>
                   );
-                  return connector ? [connector, header] : [header];
                 })}
               </tr>
             </thead>
@@ -1322,16 +1391,9 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                       </button>
                     )}
                   </div>
-                  {renderChainMap(y => isIncomeChainBroken('grossRent', y))}
+                  {renderChainMap(y => isIncomeChainBroken('grossRent', y), y => isIncomeToggleOff('grossRent', y))}
                 </td>
-                {visibleCols.flatMap((col, i) => {
-                  const prevCol = visibleCols[i - 1];
-                  const connector = col.type === 'year' && prevCol?.type === 'year'
-                    ? <td key={`conn-gr-${i}`} className="w-3 p-0 align-middle"><div className="flex justify-center"><ChainConnector broken={isIncomeChainBroken('grossRent', col.year)} /></div></td>
-                    : null;
-                  const cell = cloneElement(renderIncomeCell(col, 'grossRent', data.grossRent.stabilized, data.grossRent.growthPct, false, v => setGrossRent('t12', v), v => setGrossRent('stabilized', v), v => setGrossRent('growthPct', v), data.grossRent.t12), { key: `gr-${i}` });
-                  return connector ? [connector, cell] : [cell];
-                })}
+                {visibleCols.map((col, i) => cloneElement(renderIncomeCell(col, 'grossRent', data.grossRent.stabilized, data.grossRent.growthPct, false, v => setGrossRent('t12', v), v => setGrossRent('stabilized', v), v => setGrossRent('growthPct', v), data.grossRent.t12), { key: `gr-${i}` }))}
               </tr>
 
               {/* Other Income */}
@@ -1347,16 +1409,9 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                       </button>
                     )}
                   </div>
-                  {renderChainMap(y => isIncomeChainBroken('otherIncome', y))}
+                  {renderChainMap(y => isIncomeChainBroken('otherIncome', y), y => isIncomeToggleOff('otherIncome', y))}
                 </td>
-                {visibleCols.flatMap((col, i) => {
-                  const prevCol = visibleCols[i - 1];
-                  const connector = col.type === 'year' && prevCol?.type === 'year'
-                    ? <td key={`conn-oi-${i}`} className="w-3 p-0 align-middle"><div className="flex justify-center"><ChainConnector broken={isIncomeChainBroken('otherIncome', col.year)} /></div></td>
-                    : null;
-                  const cell = cloneElement(renderIncomeCell(col, 'otherIncome', data.otherIncome.stabilized, data.otherIncome.growthPct, false, v => setOtherIncome('t12', v), v => setOtherIncome('stabilized', v), v => setOtherIncome('growthPct', v), data.otherIncome.t12), { key: `oi-${i}` });
-                  return connector ? [connector, cell] : [cell];
-                })}
+                {visibleCols.map((col, i) => cloneElement(renderIncomeCell(col, 'otherIncome', data.otherIncome.stabilized, data.otherIncome.growthPct, false, v => setOtherIncome('t12', v), v => setOtherIncome('stabilized', v), v => setOtherIncome('growthPct', v), data.otherIncome.t12), { key: `oi-${i}` }))}
               </tr>
 
               {/* Vacancy */}
@@ -1372,16 +1427,9 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                       </button>
                     )}
                   </div>
-                  {renderChainMap(y => isIncomeChainBroken('vacancyPct', y))}
+                  {renderChainMap(y => isIncomeChainBroken('vacancyPct', y), y => isIncomeToggleOff('vacancyPct', y))}
                 </td>
-                {visibleCols.flatMap((col, i) => {
-                  const prevCol = visibleCols[i - 1];
-                  const connector = col.type === 'year' && prevCol?.type === 'year'
-                    ? <td key={`conn-vac-${i}`} className="w-3 p-0 align-middle"><div className="flex justify-center"><ChainConnector broken={isIncomeChainBroken('vacancyPct', col.year)} /></div></td>
-                    : null;
-                  const cell = cloneElement(renderIncomeCell(col, 'vacancyPct', data.vacancyPct.stabilized, 0, true, v => setVacancy('t12', v), v => setVacancy('stabilized', v), () => {}, data.vacancyPct.t12), { key: `vac-${i}` });
-                  return connector ? [connector, cell] : [cell];
-                })}
+                {visibleCols.map((col, i) => cloneElement(renderIncomeCell(col, 'vacancyPct', data.vacancyPct.stabilized, 0, true, v => setVacancy('t12', v), v => setVacancy('stabilized', v), () => {}, data.vacancyPct.t12), { key: `vac-${i}` }))}
               </tr>
 
               {/* Credit Loss */}
@@ -1398,16 +1446,9 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                     )}
                   </div>
                   <p className="text-[10px] text-slate-400 leading-tight">Concessions, bad debt</p>
-                  {renderChainMap(y => isIncomeChainBroken('creditLossPct', y))}
+                  {renderChainMap(y => isIncomeChainBroken('creditLossPct', y), y => isIncomeToggleOff('creditLossPct', y))}
                 </td>
-                {visibleCols.flatMap((col, i) => {
-                  const prevCol = visibleCols[i - 1];
-                  const connector = col.type === 'year' && prevCol?.type === 'year'
-                    ? <td key={`conn-cl-${i}`} className="w-3 p-0 align-middle"><div className="flex justify-center"><ChainConnector broken={isIncomeChainBroken('creditLossPct', col.year)} /></div></td>
-                    : null;
-                  const cell = cloneElement(renderIncomeCell(col, 'creditLossPct', cl.stabilized, 0, true, v => setCreditLoss('t12', v), v => setCreditLoss('stabilized', v), () => {}, cl.t12), { key: `cl-${i}` });
-                  return connector ? [connector, cell] : [cell];
-                })}
+                {visibleCols.map((col, i) => cloneElement(renderIncomeCell(col, 'creditLossPct', cl.stabilized, 0, true, v => setCreditLoss('t12', v), v => setCreditLoss('stabilized', v), () => {}, cl.t12), { key: `cl-${i}` }))}
               </tr>
 
               {/* EGI */}
@@ -1415,16 +1456,11 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                 <td className={`sticky left-0 z-10 px-3 py-2.5 ${STICKY_MUTED}`}>
                   <span className="text-xs font-bold uppercase tracking-wide text-slate-600 dark:text-slate-400">Eff. Gross Income</span>
                 </td>
-                {visibleCols.flatMap((col, i) => {
-                  const prevCol = visibleCols[i - 1];
+                {visibleCols.map((col, i) => {
                   const val = col.type === 't12' ? t12EGI : col.year === 1
                     ? computeEGI(data.yearOverrides?.[1]?.grossRent ?? data.grossRent.stabilized, data.yearOverrides?.[1]?.otherIncome ?? 0, data.yearOverrides?.[1]?.vacancyPct ?? 0, data.yearOverrides?.[1]?.creditLossPct ?? 0)
                     : getEGIForYear(col.year);
-                  const connector = col.type === 'year' && prevCol?.type === 'year'
-                    ? <td key={`conn-egi-${i}`} className="w-3 p-0 bg-slate-50 dark:bg-slate-700/30" />
-                    : null;
-                  const cell = <td key={`egi-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap bg-slate-50 dark:bg-slate-700/30"><span className="text-sm font-bold tabular-nums text-slate-700 dark:text-slate-300">{fmt$(val)}</span></td>;
-                  return connector ? [connector, cell] : [cell];
+                  return <td key={`egi-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap bg-slate-50 dark:bg-slate-700/30"><span className="text-sm font-bold tabular-nums text-slate-700 dark:text-slate-300">{fmt$(val)}</span></td>;
                 })}
               </tr>
 
@@ -1462,7 +1498,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                       {expense.isPercentOfEGI && (
                         <span className="text-[10px] text-slate-400">% of Eff. Gross Income</span>
                       )}
-                      {renderChainMap(y => isExpenseChainBroken(expense.id, y))}
+                      {renderChainMap(y => isExpenseChainBroken(expense.id, y), y => isExpenseToggleOff(expense.id, y))}
                     </td>
                     {visibleCols.flatMap((col, i) => {
                       const prevCol = visibleCols[i - 1];
@@ -1487,10 +1523,6 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                         ? computeEGI(data.yearOverrides?.[1]?.grossRent ?? data.grossRent.stabilized, data.yearOverrides?.[1]?.otherIncome ?? 0, data.yearOverrides?.[1]?.vacancyPct ?? 0, data.yearOverrides?.[1]?.creditLossPct ?? 0)
                         : getEGIForYear(year);
 
-                      const connector = prevCol?.type === 'year'
-                        ? <td key={`conn-exp-${expense.id}-${i}`} className="w-3 p-0 align-middle"><div className="flex justify-center"><ChainConnector broken={isExpenseChainBroken(expense.id, year)} /></div></td>
-                        : null;
-
                       if (year === 1) {
                         const cell = (
                           <td key={`exp-yr1-${expense.id}`} className={`px-2 py-2.5 align-top ${bg}`}>
@@ -1506,7 +1538,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                             </div>
                           </td>
                         );
-                        return connector ? [connector, cell] : [cell];
+                        return [cell];
                       }
 
                       const yrExpOv = data.yearOverrides?.[year]?.expenses?.[expense.id];
@@ -1525,6 +1557,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                               onClearOverride={year > 1 ? () => clearExpenseYearOverride(year, expense.id) : undefined}
                               onYearOnly={v => applyExpenseYearOnly(year, expense.id, v)}
                               cascadeDelay={(year - 1) * 50}
+                              pushToFutureOff={data.yearOverrides?.[year]?.toggleOffExpenses?.[expense.id] === true}
                             />
                             {expense.isPercentOfEGI && egi > 0 && <span className="text-[10px] text-slate-400 tabular-nums">{fmt$(egi * displayVal / 100)}</span>}
                             {!expense.isPercentOfEGI && (
@@ -1538,7 +1571,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                           </div>
                         </td>
                       );
-                      return connector ? [connector, cell] : [cell];
+                      return [cell];
                     })}
                     <td className="w-0 p-0 relative">
                       {!expense.id.startsWith('preset-') && (
@@ -1573,17 +1606,12 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                 <td className={`sticky left-0 z-10 px-3 py-2.5 ${STICKY_MUTED}`}>
                   <span className="text-xs font-bold uppercase tracking-wide text-slate-600 dark:text-slate-400">Total OpEx</span>
                 </td>
-                {visibleCols.flatMap((col, i) => {
-                  const prevCol = visibleCols[i - 1];
+                {visibleCols.map((col, i) => {
                   const egi = col.type === 't12' ? t12EGI : col.year === 1
                     ? computeEGI(data.yearOverrides?.[1]?.grossRent ?? data.grossRent.stabilized, data.yearOverrides?.[1]?.otherIncome ?? 0, data.yearOverrides?.[1]?.vacancyPct ?? 0, data.yearOverrides?.[1]?.creditLossPct ?? 0)
                     : getEGIForYear(col.year);
                   const val = col.type === 't12' ? t12OpEx : getOpExForYear(col.year, egi);
-                  const connector = col.type === 'year' && prevCol?.type === 'year'
-                    ? <td key={`conn-opex-${i}`} className="w-3 p-0 bg-slate-50 dark:bg-slate-700/30" />
-                    : null;
-                  const cell = <td key={`opex-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap bg-slate-50 dark:bg-slate-700/30"><span className="text-sm font-bold tabular-nums text-slate-700 dark:text-slate-300">{fmt$(val)}</span></td>;
-                  return connector ? [connector, cell] : [cell];
+                  return <td key={`opex-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap bg-slate-50 dark:bg-slate-700/30"><span className="text-sm font-bold tabular-nums text-slate-700 dark:text-slate-300">{fmt$(val)}</span></td>;
                 })}
               </tr>
 
@@ -1592,18 +1620,13 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                 <td className={`sticky left-0 z-10 px-3 py-2.5 ${STICKY_HIGHLIGHT}`}>
                   <span className="text-xs font-bold uppercase tracking-wide text-primary-700 dark:text-primary-300">NOI</span>
                 </td>
-                {visibleCols.flatMap((col, i) => {
-                  const prevCol = visibleCols[i - 1];
+                {visibleCols.map((col, i) => {
                   const egi = col.type === 't12' ? t12EGI : col.year === 1
                     ? computeEGI(data.yearOverrides?.[1]?.grossRent ?? data.grossRent.stabilized, data.yearOverrides?.[1]?.otherIncome ?? 0, data.yearOverrides?.[1]?.vacancyPct ?? 0, data.yearOverrides?.[1]?.creditLossPct ?? 0)
                     : getEGIForYear(col.year);
                   const opex = col.type === 't12' ? t12OpEx : getOpExForYear(col.year, egi);
                   const val = egi - opex;
-                  const connector = col.type === 'year' && prevCol?.type === 'year'
-                    ? <td key={`conn-noi-${i}`} className="w-3 p-0 bg-primary-50 dark:bg-primary-900/20" />
-                    : null;
-                  const cell = <td key={`noi-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap bg-primary-50 dark:bg-primary-900/20"><span className="text-sm font-bold tabular-nums text-primary-700 dark:text-primary-300">{fmt$(val)}</span></td>;
-                  return connector ? [connector, cell] : [cell];
+                  return <td key={`noi-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap bg-primary-50 dark:bg-primary-900/20"><span className="text-sm font-bold tabular-nums text-primary-700 dark:text-primary-300">{fmt$(val)}</span></td>;
                 })}
               </tr>
 
