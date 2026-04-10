@@ -1680,7 +1680,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                                     onChange={v => updateExpense(expense.id, { stabilizedValue: v * units })}
                                     format="currency"
                                   />
-                                  <span className="text-[10px] text-slate-400 tabular-nums">× {units} = {fmt$(expense.stabilizedValue)}</span>
+                                  <span className="text-[10px] text-slate-400 tabular-nums">{fmt$(expense.stabilizedValue)}</span>
                                 </>
                               ) : (
                                 <>
@@ -1711,14 +1711,18 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                       const cell = (
                         <td key={`exp-${expense.id}-${year}`} className={`px-2 py-2.5 align-top ${bg}`}>
                           <div className="flex flex-col items-end gap-0.5">
-                            <YearCell computed={computed} override={typeof yrExpOv === 'number' ? yrExpOv : undefined} format={fmt}
-                              onOverride={v => setExpenseYearOverride(year, expense.id, v)}
+                            <YearCell
+                              computed={isCapEx ? computed / units : computed}
+                              override={isCapEx ? (typeof yrExpOv === 'number' ? yrExpOv / units : undefined) : (typeof yrExpOv === 'number' ? yrExpOv : undefined)}
+                              format={fmt}
+                              onOverride={v => setExpenseYearOverride(year, expense.id, isCapEx ? v * units : v)}
                               onClearOverride={year > 1 ? () => clearExpenseYearOverride(year, expense.id) : undefined}
-                              onYearOnly={v => applyExpenseYearOnly(year, expense.id, v)}
+                              onYearOnly={v => applyExpenseYearOnly(year, expense.id, isCapEx ? v * units : v)}
                               cascadeDelay={(year - 1) * 50}
                               pushToFutureOff={data.yearOverrides?.[year]?.toggleOffExpenses?.[expense.id] === true}
                             />
                             {expense.isPercentOfEGI && egi > 0 && <span className="text-[10px] text-slate-400 tabular-nums">{fmt$(egi * displayVal / 100)}</span>}
+                            {isCapEx && <span className="text-[10px] text-slate-400 tabular-nums">{fmt$(displayVal)}</span>}
                             {!expense.isPercentOfEGI && !isCapEx && (
                               <div className="flex items-center gap-0.5">
                                 <YearCell
