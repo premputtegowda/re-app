@@ -716,42 +716,23 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
     return data.yearOverrides?.[year]?.toggleOffExpenses?.[expenseId] === true;
   }
 
-  function incomeGrowthHasOverride(field: 'grossRentGrowthPct' | 'otherIncomeGrowthPct'): boolean {
-    for (let y = 2; y <= projectionYears; y++) {
-      if (data.yearOverrides?.[y]?.[field] !== undefined) return true;
-    }
-    return false;
-  }
-
-  function expenseGrowthHasOverride(expenseId: string): boolean {
-    for (let y = 2; y <= projectionYears; y++) {
-      if (data.yearOverrides?.[y]?.expenseGrowthPcts?.[expenseId] !== undefined) return true;
-    }
-    return false;
-  }
-
-  function revertIncomeGrowthRow(field: 'grossRentGrowthPct' | 'otherIncomeGrowthPct') {
+  function revertIncomeGrowthRow(field: 'grossRentGrowthPct' | 'otherIncomeGrowthPct', baseGrowthPct: number) {
     const prev = data.yearOverrides ?? {};
-    const updated: NonNullable<ProFormaData['yearOverrides']> = {};
-    for (const [yStr, ye] of Object.entries(prev)) {
-      const newYe = { ...ye };
-      delete (newYe as Record<string, unknown>)[field];
-      updated[Number(yStr)] = newYe;
+    const yr2Rate = prev[2]?.[field] ?? baseGrowthPct;
+    const updated: NonNullable<ProFormaData['yearOverrides']> = { ...prev };
+    for (let y = 3; y <= projectionYears; y++) {
+      updated[y] = { ...(updated[y] ?? {}), [field]: yr2Rate };
     }
     onChange({ ...data, yearOverrides: updated });
   }
 
-  function revertExpenseGrowthRow(expenseId: string) {
+  function revertExpenseGrowthRow(expenseId: string, baseGrowthPct: number) {
     const prev = data.yearOverrides ?? {};
-    const updated: NonNullable<ProFormaData['yearOverrides']> = {};
-    for (const [yStr, ye] of Object.entries(prev)) {
-      const newYe = { ...ye };
-      if (newYe.expenseGrowthPcts) {
-        const g = { ...newYe.expenseGrowthPcts };
-        delete g[expenseId];
-        newYe.expenseGrowthPcts = Object.keys(g).length ? g : undefined;
-      }
-      updated[Number(yStr)] = newYe;
+    const yr2Rate = prev[2]?.expenseGrowthPcts?.[expenseId] ?? baseGrowthPct;
+    const updated: NonNullable<ProFormaData['yearOverrides']> = { ...prev };
+    for (let y = 3; y <= projectionYears; y++) {
+      const ye = updated[y] ?? {};
+      updated[y] = { ...ye, expenseGrowthPcts: { ...(ye.expenseGrowthPcts ?? {}), [expenseId]: yr2Rate } };
     }
     onChange({ ...data, yearOverrides: updated });
   }
@@ -783,30 +764,20 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
     );
   }
 
-  function renderGrowthChainMap(getBroken: (y: number) => boolean, onRevert: () => void) {
+  function renderGrowthChainMap(hasOverride: (y: number) => boolean, onRevert: () => void) {
     // Growth rates apply from Yr2 onward (Yr1 uses base rate on the item itself)
     const years = Array.from({ length: projectionYears - 1 }, (_, i) => i + 2);
-    const anyBroken = years.some(y => getBroken(y));
-    if (!anyBroken) return null;
+    const anyOverride = years.some(y => hasOverride(y));
+    if (!anyOverride) return null;
     return (
       <div className="flex items-center gap-1 mt-0.5">
         <TrendingUp size={8} className="text-slate-400 shrink-0" />
-        <div className="flex items-center">
-          {years.map((y, idx) => {
-            const broken = getBroken(y);
-            const connectorBroken = idx > 0 && broken;
-            return (
-              <Fragment key={y}>
-                {idx > 0 && (connectorBroken
-                  ? <Unlink size={7} className="text-orange-400 mx-0.5 shrink-0" />
-                  : <span className="w-2 h-px bg-slate-200 dark:bg-slate-600 block mx-0.5 shrink-0" />
-                )}
-                <span className={`text-[8px] tabular-nums leading-none ${broken ? 'text-orange-400 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}>{y}</span>
-              </Fragment>
-            );
-          })}
+        <div className="flex items-center gap-0.5">
+          {years.map(y => (
+            <span key={y} className={`text-[8px] tabular-nums leading-none ${hasOverride(y) ? 'text-orange-400 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}>{y}</span>
+          ))}
         </div>
-        <button type="button" onClick={onRevert} title="Revert growth rates to base"
+        <button type="button" onClick={onRevert} title="Cascade Yr2 growth rate to all later years"
           className="p-0.5 rounded text-primary-500 hover:text-primary-700 dark:hover:text-primary-300 shrink-0">
           <RotateCcw size={9} />
         </button>
@@ -1463,7 +1434,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                     )}
                   </div>
                   {renderChainMap(y => isIncomeChainBroken('grossRent', y), y => isIncomeToggleOff('grossRent', y))}
-                  {renderGrowthChainMap(y => data.yearOverrides?.[y]?.grossRentGrowthPct !== undefined, () => revertIncomeGrowthRow('grossRentGrowthPct'))}
+                  {renderGrowthChainMap(y => data.yearOverrides?.[y]?.grossRentGrowthPct !== undefined, () => revertIncomeGrowthRow('grossRentGrowthPct', data.grossRent.growthPct))}
                 </td>
                 {visibleCols.map((col, i) => cloneElement(renderIncomeCell(col, 'grossRent', data.grossRent.stabilized, data.grossRent.growthPct, false, v => setGrossRent('t12', v), v => setGrossRent('stabilized', v), v => setGrossRent('growthPct', v), data.grossRent.t12), { key: `gr-${i}` }))}
               </tr>
@@ -1482,7 +1453,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                     )}
                   </div>
                   {renderChainMap(y => isIncomeChainBroken('otherIncome', y), y => isIncomeToggleOff('otherIncome', y))}
-                  {renderGrowthChainMap(y => data.yearOverrides?.[y]?.otherIncomeGrowthPct !== undefined, () => revertIncomeGrowthRow('otherIncomeGrowthPct'))}
+                  {renderGrowthChainMap(y => data.yearOverrides?.[y]?.otherIncomeGrowthPct !== undefined, () => revertIncomeGrowthRow('otherIncomeGrowthPct', data.otherIncome.growthPct))}
                 </td>
                 {visibleCols.map((col, i) => cloneElement(renderIncomeCell(col, 'otherIncome', data.otherIncome.stabilized, data.otherIncome.growthPct, false, v => setOtherIncome('t12', v), v => setOtherIncome('stabilized', v), v => setOtherIncome('growthPct', v), data.otherIncome.t12), { key: `oi-${i}` }))}
               </tr>
@@ -1572,7 +1543,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                         <span className="text-[10px] text-slate-400">% of Eff. Gross Income</span>
                       )}
                       {renderChainMap(y => isExpenseChainBroken(expense.id, y), y => isExpenseToggleOff(expense.id, y))}
-                      {!expense.isPercentOfEGI && renderGrowthChainMap(y => data.yearOverrides?.[y]?.expenseGrowthPcts?.[expense.id] !== undefined, () => revertExpenseGrowthRow(expense.id))}
+                      {!expense.isPercentOfEGI && renderGrowthChainMap(y => data.yearOverrides?.[y]?.expenseGrowthPcts?.[expense.id] !== undefined, () => revertExpenseGrowthRow(expense.id, expense.growthPct))}
                     </td>
                     {visibleCols.flatMap((col, i) => {
                       const prevCol = visibleCols[i - 1];
