@@ -819,10 +819,8 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
 
   function renderGrowthChainMap(getRate: (y: number) => number, hasOverride: (y: number) => boolean, onRevert: () => void) {
     const years = Array.from({ length: projectionYears - 1 }, (_, i) => i + 2);
-    const anyOverride = years.some(y => hasOverride(y));
-    if (!anyOverride) return null;
-
     const rates = years.map(y => getRate(y));
+    if (rates.every(r => r === rates[0])) return null;
     const maxRate = Math.max(...rates, 0.1);
     const BAR_W = 2.5;
     const GAP = 1;
