@@ -334,6 +334,8 @@ export interface ProFormaData {
     cascadedExpenseGrowthPcts?: Record<string, true>; // expenseId -> cascaded
     toggleOffFields?: Partial<Record<'grossRent' | 'otherIncome' | 'vacancyPct' | 'creditLossPct', true>>; // fields last committed with pushToFuture=OFF
     toggleOffExpenses?: Record<string, true>;        // expenseId -> last committed with pushToFuture=OFF
+    toggleOffGrowthPcts?: Partial<Record<'grossRentGrowthPct' | 'otherIncomeGrowthPct', true>>; // growth pct fields last committed with pushToFuture=OFF
+    toggleOffExpenseGrowthPcts?: Record<string, true>; // expenseId growth pct -> last committed with pushToFuture=OFF
   }>;
 }
 

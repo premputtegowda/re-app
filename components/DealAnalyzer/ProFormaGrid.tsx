@@ -103,7 +103,7 @@ function Cell({ value, onChange, format, onCommit, isOverridden }: {
 function YearCell({ computed, override, format, onOverride, onClearOverride, onYearOnly, cascadeDelay, pushToFutureOff }: {
   computed: number;
   override: number | undefined;
-  format: 'currency' | 'percent';
+  format: 'currency' | 'percent' | 'growthPct';
   onOverride: (v: number) => void;
   onClearOverride?: () => void;
   onYearOnly?: (v: number) => void;
@@ -119,7 +119,7 @@ function YearCell({ computed, override, format, onOverride, onClearOverride, onY
 
   const isFixed = override !== undefined && override !== computed;
   const val = isFixed ? override : computed;
-  const display = format === 'currency' ? fmt$(val) : fmtPct(val);
+  const display = format === 'currency' ? fmt$(val) : format === 'growthPct' ? `${val.toFixed(2)}%` : fmtPct(val);
 
   // Staggered cascade flash — fires when formula value changes while cell is in Flow state
   useEffect(() => {
@@ -542,15 +542,68 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
     onChange({ ...data, yearOverrides: { ...prev, [year]: { ...ye, expenses } } });
   }, [data, onChange]);
 
+  // push-to-future=ON: cascade to year..N and clear toggleOff flag
   const setYearGrowthPct = useCallback((year: number, field: 'grossRentGrowthPct' | 'otherIncomeGrowthPct', value: number) => {
     const prev = data.yearOverrides ?? {};
-    onChange({ ...data, yearOverrides: { ...prev, [year]: { ...prev[year], [field]: value } } });
+    const updated = { ...prev };
+    for (let y = year; y <= projectionYears; y++) {
+      const cur = updated[y] ?? {};
+      const tgp = { ...(cur.toggleOffGrowthPcts ?? {}) };
+      delete tgp[field];
+      updated[y] = { ...cur, [field]: value, toggleOffGrowthPcts: Object.keys(tgp).length ? tgp : undefined };
+    }
+    onChange({ ...data, yearOverrides: updated });
+  }, [data, onChange, projectionYears]);
+
+  // push-to-future=OFF: pin just this year, mark toggleOff
+  const applyIncomeGrowthYearOnly = useCallback((year: number, field: 'grossRentGrowthPct' | 'otherIncomeGrowthPct', value: number) => {
+    const prev = data.yearOverrides ?? {};
+    const cur = prev[year] ?? {};
+    const tgp = { ...(cur.toggleOffGrowthPcts ?? {}), [field]: true as const };
+    onChange({ ...data, yearOverrides: { ...prev, [year]: { ...cur, [field]: value, toggleOffGrowthPcts: tgp } } });
   }, [data, onChange]);
 
+  const clearYearGrowthPct = useCallback((year: number, field: 'grossRentGrowthPct' | 'otherIncomeGrowthPct') => {
+    const prev = data.yearOverrides ?? {};
+    const cur = { ...(prev[year] ?? {}) } as Record<string, unknown>;
+    delete cur[field];
+    const tgp = { ...((cur.toggleOffGrowthPcts as Record<string, unknown>) ?? {}) };
+    delete tgp[field];
+    cur.toggleOffGrowthPcts = Object.keys(tgp).length ? tgp : undefined;
+    onChange({ ...data, yearOverrides: { ...prev, [year]: cur as NonNullable<ProFormaData['yearOverrides']>[number] } });
+  }, [data, onChange]);
+
+  // push-to-future=ON: cascade expense growth pct to year..N
   const setExpenseYearGrowthPct = useCallback((year: number, expenseId: string, value: number) => {
     const prev = data.yearOverrides ?? {};
+    const updated = { ...prev };
+    for (let y = year; y <= projectionYears; y++) {
+      const ye = updated[y] ?? {};
+      const tegp = { ...(ye.toggleOffExpenseGrowthPcts ?? {}) };
+      delete tegp[expenseId];
+      updated[y] = { ...ye, expenseGrowthPcts: { ...(ye.expenseGrowthPcts ?? {}), [expenseId]: value }, toggleOffExpenseGrowthPcts: Object.keys(tegp).length ? tegp : undefined };
+    }
+    onChange({ ...data, yearOverrides: updated });
+  }, [data, onChange, projectionYears]);
+
+  // push-to-future=OFF: pin just this year
+  const applyExpenseGrowthYearOnly = useCallback((year: number, expenseId: string, value: number) => {
+    const prev = data.yearOverrides ?? {};
     const ye = prev[year] ?? {};
-    onChange({ ...data, yearOverrides: { ...prev, [year]: { ...ye, expenseGrowthPcts: { ...(ye.expenseGrowthPcts ?? {}), [expenseId]: value } } } });
+    const tegp = { ...(ye.toggleOffExpenseGrowthPcts ?? {}), [expenseId]: true as const };
+    onChange({ ...data, yearOverrides: { ...prev, [year]: { ...ye, expenseGrowthPcts: { ...(ye.expenseGrowthPcts ?? {}), [expenseId]: value }, toggleOffExpenseGrowthPcts: tegp } } });
+  }, [data, onChange]);
+
+  const clearExpenseYearGrowthPct = useCallback((year: number, expenseId: string) => {
+    const prev = data.yearOverrides ?? {};
+    const ye = { ...(prev[year] ?? {}) };
+    const g = { ...(ye.expenseGrowthPcts ?? {}) };
+    delete g[expenseId];
+    ye.expenseGrowthPcts = Object.keys(g).length ? g : undefined;
+    const tegp = { ...(ye.toggleOffExpenseGrowthPcts ?? {}) };
+    delete tegp[expenseId];
+    ye.toggleOffExpenseGrowthPcts = Object.keys(tegp).length ? tegp : undefined;
+    onChange({ ...data, yearOverrides: { ...prev, [year]: ye } });
   }, [data, onChange]);
 
   // ── Data helpers ──
@@ -951,9 +1004,15 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
               />
               {!isPercent && growthRateKey && (
                 <div className="flex items-center gap-0.5">
-                  <Cell value={yrGrowthPct} onChange={() => {}} onCommit={(v) => {
-                    setYearGrowthPct(year, growthRateKey, v);
-                  }} format="growthPct" isOverridden={yrOv?.[growthRateKey as 'grossRentGrowthPct' | 'otherIncomeGrowthPct'] !== undefined} />
+                  <YearCell
+                    computed={growthPct}
+                    override={yrOv?.[growthRateKey as 'grossRentGrowthPct' | 'otherIncomeGrowthPct'] !== undefined ? yrGrowthPct : undefined}
+                    format="growthPct"
+                    onOverride={v => setYearGrowthPct(year, growthRateKey, v)}
+                    onClearOverride={() => clearYearGrowthPct(year, growthRateKey)}
+                    onYearOnly={v => applyIncomeGrowthYearOnly(year, growthRateKey, v)}
+                    pushToFutureOff={yrOv?.toggleOffGrowthPcts?.[growthRateKey] === true}
+                  />
                   <span className="text-[10px] text-slate-400">/yr</span>
                 </div>
               )}
@@ -1607,9 +1666,15 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                             {expense.isPercentOfEGI && egi > 0 && <span className="text-[10px] text-slate-400 tabular-nums">{fmt$(egi * displayVal / 100)}</span>}
                             {!expense.isPercentOfEGI && (
                               <div className="flex items-center gap-0.5">
-                                <Cell value={yrGrowth} onChange={() => {}} onCommit={(v) => {
-                                  setExpenseYearGrowthPct(year, expense.id, v);
-                                }} format="growthPct" isOverridden={data.yearOverrides?.[year]?.expenseGrowthPcts?.[expense.id] !== undefined} />
+                                <YearCell
+                                  computed={expense.growthPct}
+                                  override={data.yearOverrides?.[year]?.expenseGrowthPcts?.[expense.id] !== undefined ? yrGrowth : undefined}
+                                  format="growthPct"
+                                  onOverride={v => setExpenseYearGrowthPct(year, expense.id, v)}
+                                  onClearOverride={() => clearExpenseYearGrowthPct(year, expense.id)}
+                                  onYearOnly={v => applyExpenseGrowthYearOnly(year, expense.id, v)}
+                                  pushToFutureOff={data.yearOverrides?.[year]?.toggleOffExpenseGrowthPcts?.[expense.id] === true}
+                                />
                                 <span className="text-[10px] text-slate-400">/yr</span>
                               </div>
                             )}
