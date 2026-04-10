@@ -1644,7 +1644,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                         <span className="text-[10px] text-slate-400">$ / unit</span>
                       )}
                       {renderChainMap(y => isExpenseChainBroken(expense.id, y), y => isExpenseToggleOff(expense.id, y))}
-                      {!expense.isPercentOfEGI && renderGrowthChainMap(y => data.yearOverrides?.[y]?.expenseGrowthPcts?.[expense.id] ?? expense.growthPct, y => data.yearOverrides?.[y]?.expenseGrowthPcts?.[expense.id] !== undefined, () => revertExpenseGrowthRow(expense.id, expense.growthPct))}
+                      {!expense.isPercentOfEGI && !isCapEx && renderGrowthChainMap(y => data.yearOverrides?.[y]?.expenseGrowthPcts?.[expense.id] ?? expense.growthPct, y => data.yearOverrides?.[y]?.expenseGrowthPcts?.[expense.id] !== undefined, () => revertExpenseGrowthRow(expense.id, expense.growthPct))}
                     </td>
                     {visibleCols.flatMap((col, i) => {
                       const prevCol = visibleCols[i - 1];
@@ -1680,9 +1680,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                                     onChange={v => updateExpense(expense.id, { stabilizedValue: v * units })}
                                     format="currency"
                                   />
-                                  {units > 1 && (
-                                    <span className="text-[10px] text-slate-400 tabular-nums">× {units} = {fmt$(expense.stabilizedValue)}</span>
-                                  )}
+                                  <span className="text-[10px] text-slate-400 tabular-nums">× {units} = {fmt$(expense.stabilizedValue)}</span>
                                 </>
                               ) : (
                                 <>
@@ -1690,7 +1688,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                                   {expense.isPercentOfEGI && egi > 0 && <span className="text-[10px] text-slate-400 tabular-nums">{fmt$(egi * expense.stabilizedValue / 100)}</span>}
                                 </>
                               )}
-                              {!expense.isPercentOfEGI && (
+                              {!expense.isPercentOfEGI && !isCapEx && (
                                 <div className="flex items-center gap-0.5">
                                   <Cell value={expense.growthPct} onChange={v => updateExpense(expense.id, { growthPct: v })} format="growthPct" />
                                   <span className="text-[10px] text-slate-400">/yr</span>
@@ -1721,7 +1719,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                               pushToFutureOff={data.yearOverrides?.[year]?.toggleOffExpenses?.[expense.id] === true}
                             />
                             {expense.isPercentOfEGI && egi > 0 && <span className="text-[10px] text-slate-400 tabular-nums">{fmt$(egi * displayVal / 100)}</span>}
-                            {!expense.isPercentOfEGI && (
+                            {!expense.isPercentOfEGI && !isCapEx && (
                               <div className="flex items-center gap-0.5">
                                 <YearCell
                                   computed={expense.growthPct}
