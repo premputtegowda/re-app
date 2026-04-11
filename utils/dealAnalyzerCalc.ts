@@ -297,7 +297,7 @@ export function projectScenario(scenario: CoCScenario): CoCResult {
         refinance.newInterestRate,
         currentLoanTermMonths
       );
-      paymentsMadeBeforeRefi = 0;
+      paymentsMadeBeforeRefi = (year - ioPeriodYears) * 12;
       refiHappened = true;
 
       loanBalance = newLoanAmount;

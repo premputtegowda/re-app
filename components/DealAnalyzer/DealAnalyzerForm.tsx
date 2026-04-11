@@ -152,6 +152,46 @@ function AccordionHeader({ num, title, summary, isOpen, onToggle, isComplete }: 
   );
 }
 
+// ── OpsCard ────────────────────────────────────────────────────────────────────
+// Completed sub-section summary card for the Operations mini-step flow.
+
+function OpsCard({ num, title, summary, onEdit }: {
+  num: number; title: string; summary: string; onEdit: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onEdit}
+      className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-left group hover:border-primary-300 dark:hover:border-primary-600 transition-colors"
+    >
+      <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400">
+        <Check size={12} />
+      </span>
+      <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex-1">{title}</span>
+      {summary && <span className="text-xs text-slate-400 dark:text-slate-500 truncate max-w-[180px]">{summary}</span>}
+      <Pencil size={13} className="text-slate-300 dark:text-slate-600 group-hover:text-primary-500 dark:group-hover:text-primary-400 transition-colors shrink-0" />
+    </button>
+  );
+}
+
+// ── OpsSectionHeader ───────────────────────────────────────────────────────────
+// Non-interactive header for an active Operations sub-section.
+
+function OpsSectionHeader({ num, title, isComplete }: { num: number; title: string; isComplete: boolean }) {
+  return (
+    <div className="flex items-center gap-3 px-4 py-3.5">
+      <span className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
+        isComplete
+          ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400'
+          : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+      }`}>
+        {isComplete ? <Check size={12} /> : <span className="text-xs font-bold">{num}</span>}
+      </span>
+      <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">{title}</span>
+    </div>
+  );
+}
+
 // ── Defaults ───────────────────────────────────────────────────────────────────
 
 const DEFAULT_ACQUISITION: CoCAcquisition = {
@@ -334,19 +374,49 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   );
   const [calcCollapsed, setCalcCollapsed] = useState(true);
 
-  // Accordion open states for Operations step
-  const [rentOpen, setRentOpen]         = useState(true);
-  const [valueAddOpen, setValueAddOpen] = useState(() => {
-    const hasMfr = initialDeal?.acquisition?.propertyType === 'mfr';
-    return hasMfr
-      ? (initialDeal?.acquisition?.unitMix ?? []).some(e => (e.rentMonthly || 0) > 0)
-      : (initialDeal?.acquisition?.sfrTargetRent || 0) > 0;
+  // ── Operations mini-step state ────────────────────────────────────────────────
+  type OpsSection = 'rent' | 'valueAdd' | 'stab';
+
+  const [activeOpsSection, setActiveOpsSection] = useState<OpsSection | null>(() => {
+    if (!initialDeal) return 'rent';
+    const acq = initialDeal.acquisition;
+    const isMfr = acq.propertyType === 'mfr' && (acq.unitMix?.length ?? 0) > 0;
+    const rentDone = isMfr
+      ? (acq.unitMix ?? []).some(e => (e.rentMonthly || 0) > 0)
+      : (acq.sfrTargetRent || 0) > 0;
+    if (!rentDone) return 'rent';
+    const vaState = initialDeal.calcState?.isValueAdd;
+    const hasCalcOvs = Object.values(initialDeal.proForma?.yearOverrides ?? {}).some(ov => ov?.grossRentSystem);
+    const hasPreStab = isMfr
+      ? (acq.unitMix ?? []).some(e => (e.preStabRent || 0) > 0)
+      : (acq.sfrPreStabRent || 0) > 0;
+    const vaAnswered = vaState !== undefined && vaState !== null
+      ? true : (hasCalcOvs || hasPreStab);
+    if (!vaAnswered) return 'valueAdd';
+    const vaYes = vaState === true || (vaState === undefined && (hasCalcOvs || hasPreStab));
+    if (!vaYes) return null;
+    const stabDone = hasCalcOvs || hasPreStab;
+    return stabDone ? null : 'stab';
   });
-  const [stabOpen, setStabOpen]         = useState(() => {
-    const hasCalcOvs = Object.values(initialDeal?.proForma?.yearOverrides ?? {}).some(ov => ov?.grossRentSystem);
-    const hasPreStab = (initialDeal?.acquisition?.unitMix ?? []).some(e => (e.preStabRent || 0) > 0)
-      || (initialDeal?.acquisition?.sfrPreStabRent || 0) > 0;
-    return !hasCalcOvs && !hasPreStab;
+
+  const [completedOpsSections, setCompletedOpsSections] = useState<Set<OpsSection>>(() => {
+    const s = new Set<OpsSection>();
+    if (!initialDeal) return s;
+    const acq = initialDeal.acquisition;
+    const isMfr = acq.propertyType === 'mfr' && (acq.unitMix?.length ?? 0) > 0;
+    const rentDone = isMfr
+      ? (acq.unitMix ?? []).some(e => (e.rentMonthly || 0) > 0)
+      : (acq.sfrTargetRent || 0) > 0;
+    if (rentDone) s.add('rent');
+    const vaState = initialDeal.calcState?.isValueAdd;
+    const hasCalcOvs = Object.values(initialDeal.proForma?.yearOverrides ?? {}).some(ov => ov?.grossRentSystem);
+    const hasPreStab = isMfr
+      ? (acq.unitMix ?? []).some(e => (e.preStabRent || 0) > 0)
+      : (acq.sfrPreStabRent || 0) > 0;
+    const vaAnswered = (vaState !== undefined && vaState !== null) || hasCalcOvs || hasPreStab;
+    if (vaAnswered) s.add('valueAdd');
+    if (vaState === false || hasCalcOvs || hasPreStab) s.add('stab');
+    return s;
   });
 
   // Form data
@@ -886,13 +956,11 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
           <div className="space-y-3">
 
             {/* ── Section 1: Rent ── */}
+            {completedOpsSections.has('rent') && activeOpsSection !== 'rent' ? (
+              <OpsCard num={1} title="Rent" summary={rentSummary} onEdit={() => setActiveOpsSection('rent')} />
+            ) : (
             <div className={card}>
-              <AccordionHeader
-                num={1} title="Rent" summary={rentSummary}
-                isOpen={rentOpen} onToggle={() => setRentOpen(o => !o)}
-                isComplete={hasTargetRent}
-              />
-              {rentOpen && (
+              <OpsSectionHeader num={1} title="Rent" isComplete={hasTargetRent} />
                 <div className="border-t border-slate-100 dark:border-slate-700/60">
                   <p className="px-4 pt-3 text-xs text-slate-400 dark:text-slate-500">Estimate ok if exact figures aren't available</p>
                   {hasMfr ? (
@@ -926,12 +994,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                                           updateAcquisition('unitMix', acquisition.unitMix.map(u =>
                                             u.id === entry.id ? { ...u, [field]: Number(e.target.value) } : u
                                           ));
-                                        }}
-                                        onBlur={e => {
-                                          if (field === 'rentMonthly' && Number(e.target.value) > 0 && isValueAdd === null) {
-                                            setRentOpen(false);
-                                            setValueAddOpen(true);
-                                          }
                                         }}
                                       />
                                     </div>
@@ -989,12 +1051,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                                               u.id === entry.id ? { ...u, [field]: Number(e.target.value) } : u
                                             ));
                                           }}
-                                          onBlur={e => {
-                                            if (field === 'rentMonthly' && Number(e.target.value) > 0 && isValueAdd === null) {
-                                              setRentOpen(false);
-                                              setValueAddOpen(true);
-                                            }
-                                          }}
                                         />
                                       </div>
                                     </td>
@@ -1035,12 +1091,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                                   onChange={e => {
                                     updateAcquisition(field, Number(e.target.value));
                                   }}
-                                  onBlur={e => {
-                                    if (field === 'sfrTargetRent' && Number(e.target.value) > 0 && isValueAdd === null) {
-                                      setRentOpen(false);
-                                      setValueAddOpen(true);
-                                    }
-                                  }}
                                 />
                               </div>
                             </div>
@@ -1050,26 +1100,41 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     </div>
                   )}
                 </div>
-              )}
+              <div className="flex gap-3 px-4 pb-4 pt-2 border-t border-slate-100 dark:border-slate-700/60 mt-2">
+                {completedOpsSections.has('rent') && (
+                  <Button variant="secondary" onClick={() => setActiveOpsSection(null)}>Cancel</Button>
+                )}
+                <Button variant="primary" fullWidth={!completedOpsSections.has('rent')} onClick={() => {
+                  setCompletedOpsSections(prev => { const s = new Set(prev); s.add('rent'); return s; });
+                  setActiveOpsSection(hasTargetRent ? 'valueAdd' : null);
+                }}>Done</Button>
+              </div>
             </div>
+            )}
 
             {/* ── Section 2: Value-Add Plan ── */}
             <AnimatePresence>
-            {hasTargetRent && (
+            {completedOpsSections.has('rent') && completedOpsSections.has('valueAdd') && activeOpsSection !== 'valueAdd' && (
               <motion.div
-                key="ops-value-add"
+                key="va-summary"
+                initial={{ opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.25, ease: 'easeOut' }}
+              >
+                <OpsCard num={2} title="Value-Add Plan" summary={valueAddSummary} onEdit={() => setActiveOpsSection('valueAdd')} />
+              </motion.div>
+            )}
+            {completedOpsSections.has('rent') && activeOpsSection === 'valueAdd' && (
+              <motion.div
+                key="va-active"
                 initial={{ opacity: 0, y: 14 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.25, ease: 'easeOut' }}
                 className={card}
               >
-                <AccordionHeader
-                  num={2} title="Value-Add Plan" summary={valueAddSummary}
-                  isOpen={valueAddOpen} onToggle={() => setValueAddOpen(o => !o)}
-                  isComplete={isValueAdd !== null}
-                />
-                {valueAddOpen && (
+                <OpsSectionHeader num={2} title="Value-Add Plan" isComplete={isValueAdd !== null} />
                   <div className="border-t border-slate-100 dark:border-slate-700/60 px-4 py-4 space-y-4">
 
                     {/* Yes / No */}
@@ -1101,10 +1166,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                                   }
                                   return { ...prev, yearOverrides: ovs };
                                 });
-                                setValueAddOpen(false);
-                              } else {
-                                setValueAddOpen(false);
-                                setStabOpen(true);
                               }
                             }}
                             className={`py-3 px-3 rounded-xl text-left transition-colors ${
@@ -1201,29 +1262,49 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                       </div>
                     )}
                   </div>
-                )}
+                <div className="flex gap-3 px-4 pb-4 pt-2 border-t border-slate-100 dark:border-slate-700/60 mt-2">
+                  {completedOpsSections.has('valueAdd') && (
+                    <Button variant="secondary" onClick={() => setActiveOpsSection(null)}>Cancel</Button>
+                  )}
+                  <Button variant="primary" fullWidth={!completedOpsSections.has('valueAdd')} onClick={() => {
+                    setCompletedOpsSections(prev => { const s = new Set(prev); s.add('valueAdd'); return s; });
+                    if (isValueAdd === true) {
+                      setActiveOpsSection('stab');
+                      setCalcCollapsed(false);
+                    } else {
+                      setActiveOpsSection(null);
+                    }
+                  }}>Done</Button>
+                </div>
               </motion.div>
             )}
             </AnimatePresence>
 
             {/* ── Section 3: Stabilization ── */}
             <AnimatePresence>
-            {isValueAdd === true && (
+            {completedOpsSections.has('valueAdd') && isValueAdd === true && completedOpsSections.has('stab') && activeOpsSection !== 'stab' && (
               <motion.div
-                key="ops-stabilization"
+                key="stab-summary"
+                initial={{ opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.25, ease: 'easeOut' }}
+              >
+                <OpsCard num={3} title="Stabilization" summary={stabSummary} onEdit={() => { setActiveOpsSection('stab'); setCalcCollapsed(false); }} />
+              </motion.div>
+            )}
+            {completedOpsSections.has('valueAdd') && isValueAdd === true && activeOpsSection === 'stab' && (
+              <motion.div
+                key="stab-active"
                 initial={{ opacity: 0, y: 14 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.25, ease: 'easeOut' }}
                 className={card}
               >
-                <AccordionHeader
-                  num={3} title="Stabilization" summary={stabSummary}
-                  isOpen={stabOpen} onToggle={() => setStabOpen(o => !o)}
-                  isComplete={stepComplete}
-                />
-                {/* Always-visible row — distribution summary (MFR) or revenue-loss summary (SFR) */}
-                <div className="px-4 py-2 border-t border-slate-100 dark:border-slate-700/60 flex items-start justify-between gap-3">
+                <OpsSectionHeader num={3} title="Stabilization" isComplete={stepComplete} />
+                {/* Distribution/revenue-loss info row */}
+                <div className="px-4 py-2 border-t border-slate-100 dark:border-slate-700/60">
                   {hasMfr ? (
                     <div className="flex flex-col gap-0.5 min-w-0">
                       <span className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
@@ -1236,7 +1317,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                       </p>
                     </div>
                   ) : (
-                    /* SFR: show offline duration + estimated lost revenue */
                     <div className="flex items-center gap-3 min-w-0">
                       <span className="text-[11px] text-slate-500 dark:text-slate-400 shrink-0">
                         Unit offline: <span className="font-semibold text-slate-700 dark:text-slate-200">{offlinePerUnit} mo</span>
@@ -1251,23 +1331,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                       )}
                     </div>
                   )}
-                  <div className="flex items-center gap-2 shrink-0">
-                    {!stabOpen && stabSummary && (
-                      <span className="text-[11px] text-slate-400 dark:text-slate-500">{stabSummary}</span>
-                    )}
-                    {!stabOpen && (
-                      <button
-                        type="button"
-                        onClick={() => { setStabOpen(true); setCalcCollapsed(false); setPreStabMethod('calculator'); }}
-                        className="flex items-center gap-1 text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 transition-colors touch-manipulation"
-                      >
-                        <Pencil size={11} />
-                        Edit schedule
-                      </button>
-                    )}
-                  </div>
                 </div>
-                <div className={`border-t border-slate-100 dark:border-slate-700/60 space-y-4 px-4 py-4 ${stabOpen ? '' : 'hidden'}`}>
+                <div className="border-t border-slate-100 dark:border-slate-700/60 space-y-4 px-4 py-4">
 
                     {/* Timeline */}
                     <div className={`grid gap-4 ${someReno ? 'grid-cols-2' : 'grid-cols-1'}`}>
@@ -1433,6 +1498,15 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     )}
 
 
+                </div>
+                <div className="flex gap-3 px-4 pb-4 pt-2 border-t border-slate-100 dark:border-slate-700/60 mt-2">
+                  {completedOpsSections.has('stab') && (
+                    <Button variant="secondary" onClick={() => setActiveOpsSection(null)}>Cancel</Button>
+                  )}
+                  <Button variant="primary" fullWidth={!completedOpsSections.has('stab')} onClick={() => {
+                    setCompletedOpsSections(prev => { const s = new Set(prev); s.add('stab'); return s; });
+                    setActiveOpsSection(null);
+                  }}>Done</Button>
                 </div>
               </motion.div>
             )}
