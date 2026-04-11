@@ -111,6 +111,12 @@ async def create_loi(
     db: AsyncSession = Depends(get_db),
 ):
     """Generate LOI PDF, send to DocuSeal for e-signature, store record."""
+    if not current_user.gmail_refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="GMAIL_NOT_CONNECTED",
+        )
+
     deal = await _get_deal_or_404(deal_id, current_user.id, db)
 
     # Only one LOI per deal — cancel existing if present

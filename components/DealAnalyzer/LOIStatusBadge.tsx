@@ -70,8 +70,24 @@ export function LOIStatusBadge({ dealId, acquisition }: LOIStatusBadgeProps) {
   // Loading
   if (loi === undefined) return null;
 
-  // No LOI yet — show send button
+  // No LOI yet
   if (!loi) {
+    // Gmail not connected — nudge user to Settings
+    if (!user?.gmail_connected) {
+      return (
+        <span
+          title="Connect your Gmail in Settings to send LOIs"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 text-xs text-slate-400 cursor-default select-none"
+        >
+          <FileSignature size={13} />
+          Send LOI
+          <span className="text-[10px] bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded-full font-medium">
+            Connect Gmail in Settings
+          </span>
+        </span>
+      );
+    }
+
     return (
       <>
         <button

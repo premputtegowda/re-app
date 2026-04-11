@@ -29,6 +29,8 @@ export interface User {
   is_admin: boolean;
   has_complimentary_access: boolean;
   features: string[];
+  gmail_connected: boolean;
+  gmail_sender_email: string | null;
 }
 
 interface AuthStore {

@@ -6,6 +6,7 @@ import hmac
 import logging
 from datetime import datetime
 
+import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,20 +14,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_db
 from app.models.loi import LOI
+from app.models.user import User
 from app.services.docuseal import get_docuseal_client, DocuSealError
-from app.services.email import get_smtp_sender
+from app.services.gmail_sender import GmailSender
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
 
 
-# ── DocuSeal ──────────────────────────────────────────────────────────────────
-
 def _verify_docuseal_signature(body: bytes, signature: str | None, secret: str) -> bool:
-    """HMAC-SHA256 verification of DocuSeal webhook payload."""
     if not secret:
-        return True  # skip verification if no secret configured (dev mode)
+        return True
     if not signature:
         return False
     expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
@@ -44,7 +43,7 @@ async def docuseal_webhook(
     On 'submission.completed':
       - Marks LOI as completed
       - Downloads signed PDF from DocuSeal
-      - Emails it to all notify_emails recipients configured by the user
+      - Emails it via the user's connected Gmail to all notify_emails recipients
     """
     settings = get_settings()
     body = await request.body()
@@ -64,7 +63,6 @@ async def docuseal_webhook(
     if not submission_id:
         return {"status": "ignored"}
 
-    # Find matching LOI
     result = await db.execute(
         select(LOI).where(LOI.docuseal_submission_id == submission_id)
     )
@@ -76,48 +74,58 @@ async def docuseal_webhook(
     if loi.status == "completed":
         return {"status": "already_processed"}
 
-    # Mark completed first — email delivery is best-effort
+    # Mark completed first — email is best-effort
     loi.status = "completed"
     loi.updated_at = datetime.utcnow()
     await db.commit()
 
-    # Download signed PDF and email to notify_emails
     notify_emails: list[str] = loi.notify_emails or []
-    if notify_emails and settings.smtp_enabled:
+    if not notify_emails:
+        return {"status": "ok"}
+
+    # Load the deal owner's Gmail credentials
+    user_result = await db.execute(select(User).where(User.id == loi.user_id))
+    user = user_result.scalar_one_or_none()
+
+    if not user or not user.gmail_refresh_token:
+        logger.warning("LOI %s has notify_emails but user has no Gmail connected — skipping", loi.id)
+        return {"status": "ok"}
+
+    # Download signed PDF from DocuSeal
+    try:
+        client = get_docuseal_client()
+        pdf_url = await client.get_document_url(submission_id)
+        async with httpx.AsyncClient(timeout=30.0) as http:
+            resp = await http.get(pdf_url)
+            resp.raise_for_status()
+            pdf_bytes = resp.content
+    except Exception as exc:
+        logger.error("Failed to download signed PDF for LOI %s: %s", loi.id, exc)
+        return {"status": "ok"}
+
+    property_address = loi.terms_data.get("property_address", "the property")
+    subject = f"Signed LOI - {property_address}"
+    body_text = (
+        "The Letter of Intent has been signed by all parties.\n\n"
+        "Please find the signed copy attached.\n\n"
+        "This document was signed via DocuSeal e-signature."
+    )
+
+    sender = GmailSender(
+        refresh_token=user.gmail_refresh_token,
+        sender_email=user.gmail_sender_email or user.email,
+    )
+    for email_addr in notify_emails:
         try:
-            client = get_docuseal_client()
-            pdf_url = await client.get_document_url(submission_id)
-
-            import httpx
-            async with httpx.AsyncClient(timeout=30.0) as http:
-                resp = await http.get(pdf_url)
-                resp.raise_for_status()
-                pdf_bytes = resp.content
-
-            property_address = loi.terms_data.get("property_address", "the property")
-            subject = f"Signed LOI - {property_address}"
-            body_text = (
-                "The Letter of Intent has been signed by all parties.\n\n"
-                "Please find the signed copy attached.\n\n"
-                "This document was signed via DocuSeal e-signature."
+            await sender.send(
+                to_email=email_addr,
+                subject=subject,
+                body=body_text,
+                attachment_bytes=pdf_bytes,
+                attachment_filename="signed-loi.pdf",
             )
-            sender = get_smtp_sender()
-            for email_addr in notify_emails:
-                try:
-                    await sender.send(
-                        to_email=email_addr,
-                        subject=subject,
-                        body=body_text,
-                        attachment_bytes=pdf_bytes,
-                        attachment_filename="signed-loi.pdf",
-                    )
-                    logger.info("Signed LOI emailed to %s", email_addr)
-                except Exception as exc:
-                    logger.warning("Failed to email signed LOI to %s: %s", email_addr, exc)
+            logger.info("Signed LOI emailed to %s via Gmail", email_addr)
+        except Exception as exc:
+            logger.warning("Failed to email signed LOI to %s: %s", email_addr, exc)
 
-        except (DocuSealError, Exception) as exc:
-            logger.error("Failed to download/email signed PDF: %s", exc)
-            # Status is already committed — don't fail the webhook response
-
-    logger.info("LOI %s marked completed (submission %s)", loi.id, submission_id)
     return {"status": "ok"}

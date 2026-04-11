@@ -26,6 +26,10 @@ class User(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
+    # Gmail OAuth — set when user connects their Gmail for sending LOI emails
+    gmail_refresh_token: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    gmail_sender_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
     # Relationships
     categories = relationship("Category", back_populates="user", cascade="all, delete-orphan")
     properties = relationship("Property", back_populates="user", cascade="all, delete-orphan")

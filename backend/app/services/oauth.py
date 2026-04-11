@@ -103,3 +103,60 @@ async def exchange_code_for_tokens(code: str) -> dict:
             raise GoogleOAuthError(f"Token exchange failed: {response.text}")
 
         return response.json()
+
+
+# ── Gmail OAuth (for sending emails on behalf of users) ───────────────────────
+
+GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+
+
+def get_gmail_auth_url(state: str) -> str:
+    """
+    Generate a Google OAuth URL that requests gmail.send permission.
+    Uses a separate redirect URI so it doesn't interfere with login flow.
+    """
+    settings = get_settings()
+    from urllib.parse import urlencode
+    params = {
+        "client_id": settings.google_client_id,
+        "redirect_uri": settings.gmail_oauth_redirect_uri,
+        "response_type": "code",
+        "scope": f"openid email {GMAIL_SEND_SCOPE}",
+        "state": state,
+        "access_type": "offline",
+        "prompt": "consent",  # always show consent to guarantee refresh_token
+    }
+    return f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
+
+
+async def exchange_gmail_code(code: str) -> dict:
+    """
+    Exchange an authorization code for Gmail OAuth tokens.
+    Returns dict containing at minimum: access_token, refresh_token, id_token.
+    """
+    settings = get_settings()
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": settings.google_client_id,
+                "client_secret": settings.google_client_secret,
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": settings.gmail_oauth_redirect_uri,
+            },
+        )
+        if response.status_code != 200:
+            raise GoogleOAuthError(f"Gmail token exchange failed: {response.text}")
+        return response.json()
+
+
+async def get_gmail_sender_email(access_token: str) -> str:
+    """Fetch the email address of the Gmail account just authorized."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            "https://www.googleapis.com/oauth2/v3/userinfo",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        resp.raise_for_status()
+        return resp.json().get("email", "")

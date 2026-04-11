@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:8000/api/auth/google/callback"
+    gmail_oauth_redirect_uri: str = "http://localhost:8000/api/auth/gmail/callback"
 
     # CORS
     frontend_url: str = "http://localhost:3000"

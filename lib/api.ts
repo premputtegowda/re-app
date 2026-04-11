@@ -701,4 +701,15 @@ export const api = {
     if (!response.ok) throw new ApiError(response.status, 'Signed PDF not available');
     return response.json();
   },
+
+  async getGmailAuthUrl(): Promise<{ url: string }> {
+    const response = await authFetch('/api/auth/gmail/authorize');
+    if (!response.ok) throw new ApiError(response.status, 'Failed to get Gmail auth URL');
+    return response.json();
+  },
+
+  async disconnectGmail(): Promise<void> {
+    const response = await authFetch('/api/auth/gmail/disconnect', { method: 'DELETE' });
+    if (!response.ok) throw new ApiError(response.status, 'Failed to disconnect Gmail');
+  },
 };
