@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { PageHeader } from '@/components/UI/PageHeader';
+import { GmailSettings } from '@/components/Settings/GmailSettings';
 import { useDealSettingsStore, BEAR_OPTIONS, BULL_OPTIONS, CONFIDENCE_OPTIONS, PROFORMA_DEFAULTS } from '@/lib/dealSettingsStore';
 import type { BearPercentile, BullPercentile, ConfidenceLevel } from '@/lib/dealSettingsStore';
 
@@ -111,6 +112,11 @@ export function DealSettings() {
   return (
     <div className="space-y-8">
       <PageHeader title="Deal Settings" subtitle="Configure Pro Forma defaults and stress test scenario thresholds" />
+
+      {/* Gmail / LOI */}
+      <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
+        <GmailSettings />
+      </div>
 
       {/* Pro Forma Defaults */}
       <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
