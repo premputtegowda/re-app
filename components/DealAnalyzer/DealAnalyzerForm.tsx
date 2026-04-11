@@ -1054,8 +1054,16 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
             </div>
 
             {/* ── Section 2: Value-Add Plan ── */}
+            <AnimatePresence>
             {hasTargetRent && (
-              <div className={card}>
+              <motion.div
+                key="ops-value-add"
+                initial={{ opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.25, ease: 'easeOut' }}
+                className={card}
+              >
                 <AccordionHeader
                   num={2} title="Value-Add Plan" summary={valueAddSummary}
                   isOpen={valueAddOpen} onToggle={() => setValueAddOpen(o => !o)}
@@ -1194,12 +1202,21 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     )}
                   </div>
                 )}
-              </div>
+              </motion.div>
             )}
+            </AnimatePresence>
 
             {/* ── Section 3: Stabilization ── */}
+            <AnimatePresence>
             {isValueAdd === true && (
-              <div className={card}>
+              <motion.div
+                key="ops-stabilization"
+                initial={{ opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.25, ease: 'easeOut' }}
+                className={card}
+              >
                 <AccordionHeader
                   num={3} title="Stabilization" summary={stabSummary}
                   isOpen={stabOpen} onToggle={() => setStabOpen(o => !o)}
@@ -1417,8 +1434,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
 
                 </div>
-              </div>
+              </motion.div>
             )}
+            </AnimatePresence>
 
             {/* ── Pro Forma ── */}
             <ProFormaGrid
