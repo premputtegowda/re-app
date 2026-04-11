@@ -35,7 +35,9 @@ export function DealCharts({ projections }: DealChartsProps) {
     };
   });
 
-  const hasRefi = data.some((d) => d.refiCashOut > 0);
+  const hasRefi    = data.some((d) => d.refiCashOut > 0);
+  const hasPosCF   = data.some((d) => d.operatingCF >= 0);
+  const hasNegCF   = data.some((d) => d.operatingCF < 0);
 
   return (
     <Card padding="none">
@@ -86,12 +88,32 @@ export function DealCharts({ projections }: DealChartsProps) {
             />
             <Legend
               wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
-              formatter={(value) => {
-                if (value === 'operatingCF') return 'Cash Flow ($)';
-                if (value === 'refiCashOut') return 'Refi Cash-Out ($)';
-                if (value === 'coCReturn') return 'CoC Return (%)';
-                return value;
-              }}
+              content={() => (
+                <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 pt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                  {/* Cash flow swatch — split only when both signs exist */}
+                  <span className="flex items-center gap-1">
+                    {hasPosCF && hasNegCF ? (
+                      <span className="flex flex-col">
+                        <span className="inline-block w-5 h-1.5 rounded-t-sm" style={{ background: '#10B981' }} />
+                        <span className="inline-block w-5 h-1.5 rounded-b-sm" style={{ background: '#EF4444' }} />
+                      </span>
+                    ) : (
+                      <span className="inline-block w-5 h-3 rounded-sm" style={{ background: hasNegCF ? '#EF4444' : '#10B981' }} />
+                    )}
+                    Cash Flow{hasPosCF && hasNegCF ? ' (+ / −)' : ''}
+                  </span>
+                  {hasRefi && (
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block w-5 h-3 rounded-sm" style={{ background: '#6366F1' }} />
+                      Refi Cash-Out
+                    </span>
+                  )}
+                  <span className="flex items-center gap-1">
+                    <span className="inline-block w-5 h-0.5 rounded" style={{ background: '#F59E0B' }} />
+                    CoC Return (%)
+                  </span>
+                </div>
+              )}
             />
             <ReferenceLine yAxisId="left" y={0} stroke="#94A3B8" strokeDasharray="4 4" />
 
