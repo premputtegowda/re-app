@@ -210,7 +210,52 @@ async def google_callback(
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
-    """Handle Google OAuth callback (redirect flow)."""
+    """
+    Shared Google OAuth callback for both login and Gmail sender flows.
+    Gmail flows use state prefixed with 'gmail:'.
+    """
+    # ── Gmail sender flow ──────────────────────────────────────────────────────
+    if state.startswith("gmail:"):
+        import hmac as _hmac, hashlib as _hashlib, time as _time, uuid as _uuid
+        raw_state = state[len("gmail:"):]
+        try:
+            user_id_str, timestamp_str, sig = raw_state.rsplit(":", 2)
+            expected_sig = _hmac.new(
+                settings.jwt_secret_key.encode(),
+                f"{user_id_str}:{timestamp_str}".encode(),
+                _hashlib.sha256,
+            ).hexdigest()[:16]
+            if not _hmac.compare_digest(expected_sig, sig):
+                raise ValueError("bad sig")
+            if _time.time() - int(timestamp_str) > 600:
+                raise ValueError("state expired")
+        except Exception:
+            return RedirectResponse(f"{settings.frontend_url}/deal-analyzer/settings?gmail_error=invalid_state")
+
+        try:
+            tokens = await exchange_gmail_code(code)
+            refresh_token = tokens.get("refresh_token")
+            access_token = tokens.get("access_token")
+            if not refresh_token:
+                raise GoogleOAuthError("No refresh_token — consent screen may not have appeared")
+            sender_email = await get_gmail_sender_email(access_token)
+        except GoogleOAuthError as exc:
+            logger.warning("Gmail OAuth exchange failed: %s", exc)
+            return RedirectResponse(f"{settings.frontend_url}/deal-analyzer/settings?gmail_error=oauth_failed")
+
+        result = await db.execute(select(User).where(User.id == _uuid.UUID(user_id_str)))
+        user = result.scalar_one_or_none()
+        if not user:
+            return RedirectResponse(f"{settings.frontend_url}/deal-analyzer/settings?gmail_error=user_not_found")
+
+        user.gmail_refresh_token = refresh_token
+        user.gmail_sender_email = sender_email
+        user.updated_at = datetime.utcnow()
+        await db.commit()
+        logger.info("Gmail sender connected for user %s (%s)", user.id, sender_email)
+        return RedirectResponse(f"{settings.frontend_url}/deal-analyzer/settings?gmail_connected=1")
+
+    # ── Login flow ─────────────────────────────────────────────────────────────
     try:
         tokens = await exchange_code_for_tokens(code)
         id_token = tokens.get("id_token")
@@ -367,66 +412,18 @@ async def delete_account(
 async def gmail_authorize(
     current_user: User = Depends(get_current_user),
 ):
-    """Return the Google OAuth URL that grants gmail.send permission."""
+    """
+    Return the Google OAuth URL that grants gmail.send permission.
+    State is prefixed with 'gmail:' so the shared google/callback can route it.
+    """
     import hmac as _hmac, hashlib as _hashlib, time as _time
-    # State = "userId:timestamp:hmac" so the callback can identify the user
     raw_state = f"{current_user.id}:{int(_time.time())}"
     sig = _hmac.new(
         settings.jwt_secret_key.encode(), raw_state.encode(), _hashlib.sha256
     ).hexdigest()[:16]
-    state = f"{raw_state}:{sig}"
+    state = f"gmail:{raw_state}:{sig}"
     url = get_gmail_auth_url(state)
     return {"url": url}
-
-
-@router.get("/gmail/callback")
-async def gmail_callback(
-    code: str,
-    state: str,
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Google redirects here after the user grants gmail.send permission.
-    Stores the refresh token on the user record, then redirects to settings.
-    """
-    import hmac as _hmac, hashlib as _hashlib, time as _time
-    try:
-        user_id_str, timestamp_str, sig = state.rsplit(":", 2)
-        raw_state = f"{user_id_str}:{timestamp_str}"
-        expected_sig = _hmac.new(
-            settings.jwt_secret_key.encode(), raw_state.encode(), _hashlib.sha256
-        ).hexdigest()[:16]
-        if not _hmac.compare_digest(expected_sig, sig):
-            raise ValueError("bad sig")
-        if _time.time() - int(timestamp_str) > 600:  # 10-minute window
-            raise ValueError("state expired")
-    except Exception:
-        return RedirectResponse(f"{settings.frontend_url}/settings?gmail_error=invalid_state")
-
-    try:
-        tokens = await exchange_gmail_code(code)
-        refresh_token = tokens.get("refresh_token")
-        access_token = tokens.get("access_token")
-        if not refresh_token:
-            raise GoogleOAuthError("No refresh_token returned — consent may not have been shown")
-        sender_email = await get_gmail_sender_email(access_token)
-    except GoogleOAuthError as exc:
-        logger.warning("Gmail OAuth exchange failed: %s", exc)
-        return RedirectResponse(f"{settings.frontend_url}/settings?gmail_error=oauth_failed")
-
-    import uuid as _uuid
-    result = await db.execute(select(User).where(User.id == _uuid.UUID(user_id_str)))
-    user = result.scalar_one_or_none()
-    if not user:
-        return RedirectResponse(f"{settings.frontend_url}/settings?gmail_error=user_not_found")
-
-    user.gmail_refresh_token = refresh_token
-    user.gmail_sender_email = sender_email
-    user.updated_at = datetime.utcnow()
-    await db.commit()
-
-    logger.info("Gmail sender connected for user %s (%s)", user.id, sender_email)
-    return RedirectResponse(f"{settings.frontend_url}/settings?gmail_connected=1")
 
 
 @router.delete("/gmail/disconnect")

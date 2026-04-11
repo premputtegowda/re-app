@@ -113,13 +113,14 @@ GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
 def get_gmail_auth_url(state: str) -> str:
     """
     Generate a Google OAuth URL that requests gmail.send permission.
-    Uses a separate redirect URI so it doesn't interfere with login flow.
+    Reuses GOOGLE_REDIRECT_URI — no second URI needs registering in Google Cloud Console.
+    The state carries a 'gmail:' prefix so the shared callback can route correctly.
     """
     settings = get_settings()
     from urllib.parse import urlencode
     params = {
         "client_id": settings.google_client_id,
-        "redirect_uri": settings.gmail_oauth_redirect_uri,
+        "redirect_uri": settings.google_redirect_uri,
         "response_type": "code",
         "scope": f"openid email {GMAIL_SEND_SCOPE}",
         "state": state,
@@ -143,7 +144,7 @@ async def exchange_gmail_code(code: str) -> dict:
                 "client_secret": settings.google_client_secret,
                 "code": code,
                 "grant_type": "authorization_code",
-                "redirect_uri": settings.gmail_oauth_redirect_uri,
+                "redirect_uri": settings.google_redirect_uri,
             },
         )
         if response.status_code != 200:
