@@ -17,8 +17,6 @@ from app.models.loi import LOI
 from app.models.saved_deal import SavedDeal
 from app.services.docuseal import get_docuseal_client, DocuSealError
 from app.services.loi_pdf import generate_loi_pdf
-from app.services.r2 import generate_download_url, get_r2_client
-from app.config import get_settings
 
 router = APIRouter(prefix="/deals", tags=["LOI"])
 
@@ -90,20 +88,13 @@ async def _get_loi_or_404(deal_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSessi
 
 
 def _loi_to_response(loi: LOI) -> LOIResponse:
-    signed_url = None
-    if loi.signed_pdf_r2_key:
-        try:
-            signed_url = generate_download_url(loi.signed_pdf_r2_key)
-        except Exception:
-            pass
-
     return LOIResponse(
         id=str(loi.id),
         deal_id=str(loi.deal_id),
         status=loi.status,
         terms=loi.terms_data,
         signers=loi.signers,
-        signed_pdf_url=signed_url,
+        signed_pdf_url=None,  # fetched on demand via /download
         created_at=loi.created_at.isoformat(),
         updated_at=loi.updated_at.isoformat(),
     )
@@ -241,12 +232,17 @@ async def download_loi(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return a short-lived presigned R2 URL for the signed PDF."""
+    """Return the DocuSeal-hosted download URL for the signed PDF."""
     await _get_deal_or_404(deal_id, current_user.id, db)
     loi = await _get_loi_or_404(deal_id, current_user.id, db)
 
-    if loi.status != "completed" or not loi.signed_pdf_r2_key:
+    if loi.status != "completed" or not loi.docuseal_submission_id:
         raise HTTPException(status_code=404, detail="Signed PDF not available yet")
 
-    url = generate_download_url(loi.signed_pdf_r2_key)
+    try:
+        client = get_docuseal_client()
+        url = await client.get_document_url(loi.docuseal_submission_id)
+    except DocuSealError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not fetch download URL: {exc}")
+
     return {"url": url}

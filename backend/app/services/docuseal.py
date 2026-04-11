@@ -98,21 +98,16 @@ class DocuSealClient:
                 raise DocuSealError(f"DocuSeal API error {resp.status_code}: {resp.text}")
             return resp.json()
 
-    async def download_document(self, submission_id: str) -> bytes:
-        """Download the completed signed PDF from DocuSeal."""
+    async def get_document_url(self, submission_id: str) -> str:
+        """Return the direct download URL for the signed PDF stored on DocuSeal."""
         submission = await self.get_submission(submission_id)
         documents = submission.get("documents", [])
         if not documents:
             raise DocuSealError("No documents found in completed submission")
-
-        download_url = documents[0].get("url")
-        if not download_url:
+        url = documents[0].get("url")
+        if not url:
             raise DocuSealError("No download URL in submission documents")
-
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(download_url)
-            resp.raise_for_status()
-            return resp.content
+        return url
 
     async def void_submission(self, submission_id: str) -> None:
         """Cancel/void a pending submission."""
