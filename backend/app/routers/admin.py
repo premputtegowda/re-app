@@ -192,7 +192,7 @@ async def patch_user(
 
     newly_added_feature: str | None = None
     if body.add_feature is not None:
-        current = _parse_features(user.features)
+        current = list(_parse_features(user.features))  # force new list so SQLAlchemy detects the change
         if body.add_feature not in current:
             current.append(body.add_feature)
             newly_added_feature = body.add_feature
