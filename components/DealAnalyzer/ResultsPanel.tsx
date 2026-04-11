@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { useState, useRef, useCallback } from 'react';
+import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import { Card } from '@/components/UI/Card';
 import type { CoCResult, CoCAcquisition, CoCOperations, CoCRefinance, ProFormaData } from '@/types';
 import { formatCurrency, formatPct, formatMultiple } from '@/utils/dealAnalyzerCalc';
@@ -294,6 +294,8 @@ interface ResultsPanelProps {
   onMcRangesChange?: (r: MCRanges) => void;
   mcResults?: SavedMCResults | null;
   onMcResultsChange?: (r: SavedMCResults) => void;
+  baseStale?: boolean;
+  onRefreshBase?: () => void;
 }
 
 function computeAvgRents(acquisition: CoCAcquisition): { units: number; avgTargetRent: number; avgPreStabRent: number } {
@@ -312,11 +314,22 @@ function computeAvgRents(acquisition: CoCAcquisition): { units: number; avgTarge
   return { units: acquisition.units || 1, avgTargetRent: 0, avgPreStabRent: 0 };
 }
 
-export function ResultsPanel({ result, acquisition, operations, proForma, refinance, mcRanges, onMcRangesChange, mcResults, onMcResultsChange }: ResultsPanelProps) {
+export function ResultsPanel({ result, acquisition, operations, proForma, refinance, mcRanges, onMcRangesChange, mcResults, onMcResultsChange, baseStale, onRefreshBase }: ResultsPanelProps) {
   const [activeTab, setActiveTab] = useState<ResultTab>('summary');
   const { units, avgTargetRent, avgPreStabRent } = computeAvgRents(acquisition);
   const { totalInvested, avgCoCReturn, irr, equityMultiple, peakCoCReturn, totalCashFlow } = result;
   const v = verdict(irr, avgCoCReturn);
+
+  // Stress test state lifted from MonteCarloPanel
+  const [stressRunning, setStressRunning]   = useState(false);
+  const [stressProgress, setStressProgress] = useState(0);
+  const stressRunRef = useRef<(() => void) | null>(null);
+  const openEditorRef = useRef<(() => void) | null>(null);
+
+  const handleRunningChange = useCallback((running: boolean, progress: number) => {
+    setStressRunning(running);
+    setStressProgress(progress);
+  }, []);
 
   return (
     <div className="space-y-4">
@@ -332,12 +345,30 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
           </div>
         </div>
 
+        {/* Refresh Returns banner — shown when base inputs changed */}
+        {baseStale && !stressRunning && (
+          <div className="flex items-center justify-between gap-3 mb-4 px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700">
+            <p className="text-xs text-amber-700 dark:text-amber-400">Inputs changed — results may be outdated</p>
+            <button
+              type="button"
+              onClick={() => { onRefreshBase?.(); stressRunRef.current?.(); }}
+              className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold transition-colors shrink-0"
+            >
+              <span className="absolute inset-0 rounded-lg animate-ping bg-amber-400 opacity-30 pointer-events-none" />
+              <RefreshCw size={11} />
+              Refresh Returns
+            </button>
+          </div>
+        )}
+
         {/* Primary metrics — IRR takes prominence */}
         <div className="grid grid-cols-3 gap-px bg-slate-100 dark:bg-slate-700 rounded-xl overflow-hidden">
           <MetricCell
             label="IRR"
             value={irr !== null ? formatPct(irr) : '—'}
             sub="Internal rate of return"
+            mostLikely={mcResults?.p50?.irr != null && mcResults.p50.irr > -900 ? formatPct(mcResults.p50.irr) : null}
+            loading={stressRunning}
             color={irr !== null && irr >= 8 ? 'text-secondary-600 dark:text-secondary-400' : irr !== null && irr < 0 ? 'text-red-500' : 'text-slate-800 dark:text-slate-200'}
             large
           />
@@ -345,15 +376,65 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
             label="Avg CoC"
             value={formatPct(avgCoCReturn)}
             sub={`Peak ${formatPct(peakCoCReturn)}`}
+            mostLikely={mcResults?.p50?.avgCoCReturn != null ? formatPct(mcResults.p50.avgCoCReturn) : null}
+            loading={stressRunning}
             color={avgCoCReturn >= 6 ? 'text-secondary-600 dark:text-secondary-400' : avgCoCReturn < 0 ? 'text-red-500' : 'text-slate-800 dark:text-slate-200'}
+            large
           />
           <MetricCell
             label="Equity ×"
             value={formatMultiple(equityMultiple)}
             sub={`${formatCurrency(totalCashFlow)} cash`}
+            mostLikely={mcResults?.p50?.equityMultiple != null ? formatMultiple(mcResults.p50.equityMultiple) : null}
+            loading={stressRunning}
             color={equityMultiple >= 1.5 ? 'text-primary-600 dark:text-primary-400' : equityMultiple < 1 ? 'text-red-500' : 'text-slate-800 dark:text-slate-200'}
+            large
           />
         </div>
+
+        {/* Legend — only when stress test values are present */}
+        {mcResults?.p50 && (
+          <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+            <span className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">( )</span>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500">Median outcome from stress test</p>
+            <span className="text-[10px] text-slate-300 dark:text-slate-600">·</span>
+            <button
+              type="button"
+              onClick={() => { setActiveTab('montecarlo'); openEditorRef.current?.(); }}
+              className="text-[10px] text-primary-500 hover:text-primary-600 dark:text-primary-400 dark:hover:text-primary-300 font-medium transition-colors"
+            >
+              Refine market uncertainty ranges →
+            </button>
+          </div>
+        )}
+
+        {/* Stress test progress — shown below metrics while simulation runs */}
+        {stressRunning && (
+          <div className="mt-4 px-4 py-3 rounded-xl bg-primary-50 dark:bg-primary-900/20 border border-primary-100 dark:border-primary-800 space-y-2.5">
+            <div className="flex items-center gap-2.5">
+              <svg className="w-4 h-4 text-primary-500 shrink-0 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+              </svg>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-primary-700 dark:text-primary-300">
+                  {stressProgress < 40 ? 'Sampling market conditions…'
+                    : stressProgress < 80 ? 'Running scenarios…'
+                    : 'Wrapping up…'}
+                </p>
+                <p className="text-[10px] text-primary-500 dark:text-primary-400 mt-0.5">
+                  {stressProgress < 40 ? 'Rent, vacancy, rates & exit across thousands of paths'
+                    : stressProgress < 80 ? 'Projecting cash flows and returns'
+                    : 'Computing price guidance and risk drivers'}
+                </p>
+              </div>
+              <span className="text-sm font-bold text-primary-600 dark:text-primary-400 tabular-nums shrink-0">{Math.round(stressProgress)}%</span>
+            </div>
+            <div className="h-2 w-full rounded-full bg-primary-100 dark:bg-primary-800 overflow-hidden">
+              <div className="h-full rounded-full bg-primary-500 transition-all duration-300" style={{ width: `${stressProgress}%` }} />
+            </div>
+          </div>
+        )}
       </Card>
 
       {/* ── Tab chips ── */}
@@ -417,17 +498,25 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
           onRangesChange={onMcRangesChange}
           savedResults={mcResults ?? null}
           onResultsChange={onMcResultsChange}
+          onRunningChange={handleRunningChange}
+          runTriggerRef={stressRunRef}
+          openEditorRef={openEditorRef}
         />
       )}
     </div>
   );
 }
 
-function MetricCell({ label, value, sub, color, large }: { label: string; value: string; sub?: string; color: string; large?: boolean }) {
+function MetricCell({ label, value, sub, mostLikely, loading, color, large }: { label: string; value: string; sub?: string; mostLikely?: string | null; loading?: boolean; color: string; large?: boolean }) {
   return (
     <div className="bg-white dark:bg-slate-800 px-4 py-3.5 flex flex-col">
       <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-1">{label}</p>
       <p className={`font-bold tabular-nums leading-none ${large ? 'text-3xl' : 'text-xl'} ${color}`}>{value}</p>
+      {loading ? (
+        <span className="mt-1 h-3 w-10 rounded bg-slate-200 dark:bg-slate-600 animate-pulse" />
+      ) : mostLikely ? (
+        <span className="text-[11px] tabular-nums text-slate-400 dark:text-slate-500 mt-0.5 leading-none">({mostLikely})</span>
+      ) : null}
       {sub && <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5 leading-tight">{sub}</p>}
     </div>
   );

@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import React from 'react';
 import { RefreshCw, ChevronDown, ChevronUp, RotateCcw, CheckCircle2 } from 'lucide-react';
 import { formatCurrency, formatPct, formatMultiple } from '@/utils/dealAnalyzerCalc';
-import { runSimulation, computeDefaultRanges, toSavedMCResults, hydrateMCResults, computeDeterministicPrices } from '@/utils/monteCarlo';
+import { runSimulation, computeDefaultRanges, toSavedMCResults, hydrateMCResults, findMaxPriceAtConditions } from '@/utils/monteCarlo';
 import type { MCRanges, MCResults, SavedMCResults } from '@/utils/monteCarlo';
 import type { CoCAcquisition, CoCOperations, CoCRefinance, ProFormaData } from '@/types';
 import { useDealSettingsStore, BEAR_OPTIONS, BULL_OPTIONS } from '@/lib/dealSettingsStore';
@@ -23,6 +23,10 @@ interface MonteCarloPanelProps {
   onRangesChange?: (r: MCRanges) => void;
   savedResults?: SavedMCResults | null;
   onResultsChange?: (r: SavedMCResults) => void;
+  onStaleChange?: (stale: boolean) => void;
+  onRunningChange?: (running: boolean, progress: number) => void;
+  runTriggerRef?: React.MutableRefObject<(() => void) | null>;
+  openEditorRef?: React.MutableRefObject<(() => void) | null>;
 }
 
 const N_RUNS = 10000;
@@ -33,8 +37,6 @@ function computeFingerprint(
   acquisition: CoCAcquisition,
   proForma: ProFormaData,
   ranges: MCRanges,
-  targetIRR: number,
-  targetCoC: number,
 ): string {
   return JSON.stringify({
     price:        acquisition.purchasePrice,
@@ -44,8 +46,6 @@ function computeFingerprint(
     rent:         proForma.grossRent.stabilized,
     vacancy:      proForma.vacancyPct.stabilized,
     ranges:       Object.entries(ranges).map(([k, v]) => `${k}:${v.min}-${v.mode}-${v.max}`).join(','),
-    targetIRR,
-    targetCoC,
   });
 }
 
@@ -65,14 +65,27 @@ function impactLabel(r: number): { label: string; color: string; width: number }
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function ProgressBar({ pct }: { pct: number }) {
+  const phase = pct < 40
+    ? { heading: 'Sampling market conditions…', sub: 'Rent, vacancy, rates & exit across 10,000 paths' }
+    : pct < 80
+    ? { heading: 'Running scenarios…', sub: 'Projecting cash flows and returns' }
+    : { heading: 'Wrapping up…', sub: 'Computing price guidance and risk drivers' };
+
   return (
-    <div className="space-y-2">
-      <div className="flex justify-between text-xs text-slate-500">
-        <span>Running {N_RUNS.toLocaleString()} scenarios…</span>
-        <span>{Math.round(pct)}%</span>
+    <div className="space-y-3 py-2">
+      <div className="flex items-start gap-3">
+        <svg className="w-4 h-4 text-primary-500 shrink-0 mt-0.5 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+        </svg>
+        <div>
+          <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{phase.heading}</p>
+          <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{phase.sub}</p>
+        </div>
+        <span className="ml-auto text-xs font-medium text-slate-400 tabular-nums shrink-0">{Math.round(pct)}%</span>
       </div>
       <div className="h-1.5 w-full rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
-        <div className="h-full rounded-full bg-primary-500 transition-all duration-150" style={{ width: `${pct}%` }} />
+        <div className="h-full rounded-full bg-primary-500 transition-all duration-300" style={{ width: `${pct}%` }} />
       </div>
     </div>
   );
@@ -388,6 +401,7 @@ export function MonteCarloPanel({
   avgTargetRentPerUnit, avgPreStabPerUnit, units,
   savedRanges, onRangesChange,
   savedResults, onResultsChange,
+  onStaleChange, onRunningChange, runTriggerRef, openEditorRef,
 }: MonteCarloPanelProps) {
   const defaults = useMemo(
     () => computeDefaultRanges(acquisition, proForma, avgTargetRentPerUnit, units, refinance),
@@ -413,6 +427,8 @@ export function MonteCarloPanel({
   const [progress, setProgress]   = useState(0);
   const [isStale, setIsStale]     = useState(false);
   const [showEditor, setShowEditor] = useState(false);
+  const [draftRanges, setDraftRanges] = useState<MCRanges>(initialRanges);
+  const editorRef = useRef<HTMLDivElement>(null);
 
   // Restore targets from last saved run
   const [targetIRR, setTargetIRR] = useState(() => savedResults?.targetIRR ?? 12);
@@ -420,12 +436,18 @@ export function MonteCarloPanel({
 
   // Track mounted state so we don't update state after unmount
   const isMountedRef = useRef(true);
-  useEffect(() => { return () => { isMountedRef.current = false; }; }, []);
+  useEffect(() => {
+    isMountedRef.current = true; // reset on remount (handles React Strict Mode double-invoke)
+    return () => { isMountedRef.current = false; };
+  }, []);
+
+  // Prevent concurrent runs (React Strict Mode double-invokes effects; this ensures only one simulation runs at a time)
+  const simRunningRef = useRef(false);
 
   // Fingerprint of current inputs
   const fingerprint = useMemo(
-    () => computeFingerprint(acquisition, proForma, ranges, targetIRR, targetCoC),
-    [acquisition, proForma, ranges, targetIRR, targetCoC],
+    () => computeFingerprint(acquisition, proForma, ranges),
+    [acquisition, proForma, ranges],
   );
 
   // Track fingerprint at last run — initialize from saved results
@@ -438,14 +460,27 @@ export function MonteCarloPanel({
     }
   }, [fingerprint]);
 
+  // Lift stale state to parent
+  useEffect(() => { onStaleChange?.(isStale); }, [isStale, onStaleChange]);
+
+  // Lift running/progress state to parent
+  useEffect(() => { onRunningChange?.(running, progress); }, [running, progress, onRunningChange]);
+
+  const { bearPercentile } = useDealSettingsStore();
+
   const { recommendedMaxPrice, conservativeMaxPrice } = useMemo(() => {
     if (!results) return { recommendedMaxPrice: null, conservativeMaxPrice: null };
-    return computeDeterministicPrices(
-      ranges, targetIRR, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit,
-    );
-  }, [ranges, targetIRR, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit]);
+    const bearData = results[bearPercentile] ?? results.p20 ?? results.p50;
+    const args = [acquisition, operations, proForma, refinance, units, avgPreStabPerUnit] as const;
+    return {
+      recommendedMaxPrice:  findMaxPriceAtConditions(results.p50.sampled,  targetIRR, ...args),
+      conservativeMaxPrice: findMaxPriceAtConditions(bearData.sampled,      targetIRR, ...args),
+    };
+  }, [results, bearPercentile, targetIRR, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit]);
 
   const run = useCallback(async () => {
+    if (simRunningRef.current) return;
+    simRunningRef.current = true;
     setRunning(true);
     setProgress(0);
     if (isMountedRef.current) setResults(null);
@@ -454,11 +489,12 @@ export function MonteCarloPanel({
         n: N_RUNS, ranges, acquisition, operations, proForma, refinance,
         units, avgPreStabPerUnit, onProgress: pct => { if (isMountedRef.current) setProgress(pct); },
       });
-      const fp = computeFingerprint(acquisition, proForma, ranges, targetIRR, targetCoC);
-      const { recommendedMaxPrice, conservativeMaxPrice } = computeDeterministicPrices(
-        ranges, targetIRR, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit,
-      );
-      const saved = toSavedMCResults(r, recommendedMaxPrice, conservativeMaxPrice, targetIRR, targetCoC, fp);
+      const fp = computeFingerprint(acquisition, proForma, ranges);
+      const bearRun = r[bearPercentile] ?? r.p20 ?? r.p50;
+      const args = [acquisition, operations, proForma, refinance, units, avgPreStabPerUnit] as const;
+      const recMax  = findMaxPriceAtConditions(r.p50.sampled,    targetIRR, ...args);
+      const conMax  = findMaxPriceAtConditions(bearRun.sampled,  targetIRR, ...args);
+      const saved = toSavedMCResults(r, recMax, conMax, targetIRR, targetCoC, fp);
       onResultsChange?.(saved);
       lastRunFingerprintRef.current = fp;
       if (isMountedRef.current) {
@@ -466,19 +502,31 @@ export function MonteCarloPanel({
         setIsStale(false);
       }
     } finally {
+      simRunningRef.current = false;
       if (isMountedRef.current) setRunning(false);
     }
   }, [ranges, targetIRR, targetCoC, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit, onResultsChange]);
 
   // Keep latest run fn in a ref so the unmount cleanup always calls the current version
   const runRef = useRef(run);
-  useEffect(() => { runRef.current = run; }, [run]);
+  useEffect(() => {
+    runRef.current = run;
+    if (runTriggerRef) runTriggerRef.current = run;
+  }, [run, runTriggerRef]);
+
+  useEffect(() => {
+    if (openEditorRef) openEditorRef.current = () => {
+      setDraftRanges(ranges);
+      setShowEditor(true);
+      setTimeout(() => editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+    };
+  }, [openEditorRef, ranges]);
   const isStaleRef = useRef(isStale);
   useEffect(() => { isStaleRef.current = isStale; }, [isStale]);
 
-  // Auto-run on first visit if no saved results
+  // Auto-run on first visit if no saved results, or if fingerprint was never stored
   useEffect(() => {
-    if (!savedResults) {
+    if (!savedResults || !savedResults.inputFingerprint) {
       runRef.current();
     }
     // Auto-run on unmount if stale (keeps dashboard card fresh)
@@ -491,30 +539,11 @@ export function MonteCarloPanel({
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Deal Stress Test</p>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Runs {N_RUNS.toLocaleString()} scenarios across rent, vacancy, costs, rates & exit
-          </p>
-        </div>
-
-        {/* Refresh button — only shown when stale */}
-        {isStale && !running && (
-          <div className="flex flex-col items-end gap-1">
-            <button
-              type="button"
-              onClick={run}
-              className="relative flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold transition-colors shrink-0"
-            >
-              {/* Pulse ring */}
-              <span className="absolute inset-0 rounded-xl animate-ping bg-amber-400 opacity-30 pointer-events-none" />
-              <RefreshCw size={14} />
-              Refresh
-            </button>
-            <p className="text-[10px] text-amber-600 dark:text-amber-400">Inputs changed — refresh to update</p>
-          </div>
-        )}
+      <div>
+        <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Deal Stress Test</p>
+        <p className="text-xs text-slate-400 mt-0.5">
+          Simulates thousands of market conditions to pressure-test your deal
+        </p>
       </div>
 
       {/* Progress */}
@@ -539,24 +568,49 @@ export function MonteCarloPanel({
         </div>
       )}
 
-      {/* Assumption editor toggle */}
-      <button
-        type="button"
-        onClick={() => setShowEditor(v => !v)}
-        className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
-      >
-        {showEditor ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-        {showEditor ? 'Hide' : 'Adjust'} assumptions
-      </button>
+      {/* Market Uncertainty Ranges toggle */}
+      {!showEditor && (
+        <button
+          type="button"
+          onClick={() => { setDraftRanges(ranges); setShowEditor(true); }}
+          className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
+        >
+          <ChevronDown size={12} />
+          Market Uncertainty Ranges
+        </button>
+      )}
 
       {showEditor && (
-        <RangeEditor
-          ranges={ranges}
-          defaults={defaults}
-          onChange={handleRangesChange}
-          onReset={() => handleRangesChange(defaults)}
-          showRefiRate={refinance.enabled}
-        />
+        <div className="space-y-4" ref={editorRef}>
+          <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">Market Uncertainty Ranges</p>
+          <RangeEditor
+            ranges={draftRanges}
+            defaults={defaults}
+            onChange={setDraftRanges}
+            onReset={() => setDraftRanges(defaults)}
+            showRefiRate={refinance.enabled}
+          />
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                handleRangesChange(draftRanges);
+                setShowEditor(false);
+                runRef.current();
+              }}
+              className="px-4 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-xs font-semibold transition-colors"
+            >
+              Done
+            </button>
+            <button
+              type="button"
+              onClick={() => { setDraftRanges(ranges); setShowEditor(false); }}
+              className="px-4 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-slate-400 text-xs font-medium transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

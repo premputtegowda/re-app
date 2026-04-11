@@ -431,7 +431,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       saveName !== (initialDeal?.name ?? ''));
 
   const resultsRef = useRef<HTMLDivElement>(null);
-  const recalcTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [baseStale, setBaseStale] = useState(false);
+  const lastCalcFingerprintRef = useRef<string | null>(null);
 
   // Recompute results when opening a saved deal
   useEffect(() => {
@@ -579,23 +580,17 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [acquisition.propertyAddress]);
 
-  // Auto-recalculate when inputs change (debounced)
+  // Mark base returns as stale when inputs change since last calculation
+  const baseFingerprint = JSON.stringify({ acquisition, operations, proForma, refinance });
   useEffect(() => {
     if (Object.keys(scenarioResults).length === 0) return;
-    if (recalcTimer.current) clearTimeout(recalcTimer.current);
-    recalcTimer.current = setTimeout(() => {
-      const scenario: CoCScenario = {
-        id: Date.now().toString(36),
-        name: CHIP_LABELS[activeType],
-        scenarioType: activeType,
-        acquisition, operations, proForma, refinance,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      setScenarioResults(prev => ({ ...prev, [activeType]: projectScenario(scenario) }));
-    }, 1000);
-    return () => { if (recalcTimer.current) clearTimeout(recalcTimer.current); };
-  }, [acquisition, operations, proForma, refinance]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Initialize on first render — not stale yet
+    if (lastCalcFingerprintRef.current === null) {
+      lastCalcFingerprintRef.current = baseFingerprint;
+      return;
+    }
+    if (baseFingerprint !== lastCalcFingerprintRef.current) setBaseStale(true);
+  }, [baseFingerprint]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Stable arrays for calculator props (must be memoized — new refs trigger external effects) ──
 
@@ -666,6 +661,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
     const updatedResults = { ...scenarioResults, [activeType]: newResult };
     setScenarioResults(updatedResults);
+    lastCalcFingerprintRef.current = JSON.stringify({ acquisition, operations, proForma, refinance });
+    setBaseStale(false);
 
     if (savedDealId) {
       const name = saveName || defaultSaveName(acquisition);
@@ -1798,6 +1795,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     onMcRangesChange={setMcRanges}
                     mcResults={mcResults}
                     onMcResultsChange={setMcResults}
+                    baseStale={baseStale}
+                    onRefreshBase={handleCalculate}
                   />
                 </div>
               </>

@@ -346,7 +346,7 @@ export async function runSimulation(opts: RunSimulationOptions): Promise<MCResul
   const origDefaultPreStabAnnual = avgPreStabPerUnit * Math.max(1, units) * 12;
 
   const all: MCRunResult[] = [];
-  const CHUNK = 250;
+  const CHUNK = 1000;
 
   for (let i = 0; i < n; i += CHUNK) {
     const end = Math.min(i + CHUNK, n);
