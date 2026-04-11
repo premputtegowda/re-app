@@ -45,3 +45,4 @@ class SavedDeal(Base):
 
     # Relationships
     user = relationship("User", back_populates="saved_deals")
+    loi = relationship("LOI", back_populates="deal", uselist=False, cascade="all, delete-orphan")

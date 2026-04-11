@@ -38,4 +38,7 @@ boto3==1.42.73
 
 # AI Classification
 google-genai>=1.51.0
+
+# PDF generation (LOI)
+fpdf2>=2.7.9
 # cache-bust: 2026-02-19

@@ -20,6 +20,8 @@ from app.routers import (
     deals_router,
     feedback_router,
     shared_router,
+    loi_router,
+    webhooks_router,
 )
 from app.services.scheduler import create_scheduler
 
@@ -76,6 +78,8 @@ app.include_router(export_router, prefix="/api")
 app.include_router(deals_router, prefix="/api")
 app.include_router(feedback_router, prefix="/api")
 app.include_router(shared_router, prefix="/api")
+app.include_router(loi_router, prefix="/api")
+app.include_router(webhooks_router, prefix="/api")
 
 
 @app.get("/")
