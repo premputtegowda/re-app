@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useRef, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Clock, Home, ArrowRight, LogIn } from 'lucide-react';
 import { ResultsPanel } from './ResultsPanel';
 import { projectScenario } from '@/utils/dealAnalyzerCalc';
@@ -34,8 +34,17 @@ export function SharedDealView({ deal, token }: SharedDealViewProps) {
   const [mcResults, setMcResults] = useState<SavedMCResults | null>(
     deal.mcResults ? (deal.mcResults as SavedMCResults) : null
   );
+  const searchParams = useSearchParams();
   const [forking, setForking] = useState(false);
   const [forkError, setForkError] = useState<string | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  // After login redirect, automatically prompt the user to add the deal
+  useEffect(() => {
+    if (isAuthenticated && searchParams.get('prompt') === 'add') {
+      setShowConfirm(true);
+    }
+  }, [isAuthenticated, searchParams]);
 
   // Compute result client-side from deal inputs
   const resultRef = useRef<CoCResult | null>(null);
@@ -59,9 +68,14 @@ export function SharedDealView({ deal, token }: SharedDealViewProps) {
 
   async function handleAddToDashboard() {
     if (!isAuthenticated) {
-      router.push(`/?redirect=/shared/${token}`);
+      router.push(`/?redirect=${encodeURIComponent(`/shared/${token}?prompt=add`)}`);
       return;
     }
+    setShowConfirm(true);
+  }
+
+  async function handleConfirmAdd() {
+    setShowConfirm(false);
     setForking(true);
     setForkError(null);
     try {
@@ -71,6 +85,11 @@ export function SharedDealView({ deal, token }: SharedDealViewProps) {
       setForkError(err instanceof ApiError ? err.message : 'Failed to copy deal');
       setForking(false);
     }
+  }
+
+  function handleDecline() {
+    setShowConfirm(false);
+    router.push('/deal-analyzer');
   }
 
   return (
@@ -149,6 +168,35 @@ export function SharedDealView({ deal, token }: SharedDealViewProps) {
           </div>
         </div>
       </div>
+      {/* Confirmation modal */}
+      {showConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-6 max-w-sm w-full space-y-4">
+            <h2 className="text-base font-semibold text-slate-800 dark:text-slate-200">
+              Add to your dashboard?
+            </h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              This will create a full copy of <span className="font-medium text-slate-700 dark:text-slate-300">{deal.name || deal.acquisition.propertyAddress || 'this deal'}</span> in your account. The original is not affected.
+            </p>
+            <div className="flex gap-3 pt-1">
+              <button
+                type="button"
+                onClick={handleDecline}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+              >
+                No, go to dashboard
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmAdd}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
+              >
+                Yes, add it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

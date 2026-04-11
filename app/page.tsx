@@ -1,13 +1,15 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Toaster } from 'sonner';
 import { LoginPage } from '@/components/Auth';
 import { useAuthStore } from '@/lib/authStore';
 
 export default function Home() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectTo = searchParams.get('redirect') ?? '/dashboard';
   const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
 
   useEffect(() => {
@@ -16,9 +18,9 @@ export default function Home() {
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      router.replace('/dashboard');
+      router.replace(redirectTo);
     }
-  }, [isLoading, isAuthenticated, router]);
+  }, [isLoading, isAuthenticated, router, redirectTo]);
 
   if (isLoading) {
     return (
@@ -30,7 +32,7 @@ export default function Home() {
 
   return (
     <>
-      <LoginPage onLoginSuccess={() => router.replace('/dashboard')} />
+      <LoginPage onLoginSuccess={() => router.replace(redirectTo)} />
       <Toaster position="top-right" richColors closeButton />
     </>
   );
