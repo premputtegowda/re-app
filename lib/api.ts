@@ -669,6 +669,7 @@ export const api = {
       additional_terms: string;
     };
     signers: { name: string; email: string; role: string }[];
+    notify_emails?: string[];
   }) {
     const response = await authFetch(`/api/deals/${dealId}/loi`, {
       method: 'POST',

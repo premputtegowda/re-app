@@ -128,7 +128,17 @@ function TermsStep({ terms, onChange }: { terms: LOITerms; onChange: (t: LOITerm
 
 // ── Step 2: Signers ───────────────────────────────────────────────────────────
 
-function SignersStep({ signers, onChange }: { signers: Signer[]; onChange: (s: Signer[]) => void }) {
+function SignersStep({
+  signers,
+  onChange,
+  notifyEmails,
+  onNotifyChange,
+}: {
+  signers: Signer[];
+  onChange: (s: Signer[]) => void;
+  notifyEmails: string;
+  onNotifyChange: (v: string) => void;
+}) {
   const update = (i: number, field: keyof Signer, val: string) => {
     const next = signers.map((s, idx) => idx === i ? { ...s, [field]: val } : s);
     onChange(next);
@@ -198,6 +208,23 @@ function SignersStep({ signers, onChange }: { signers: Signer[]; onChange: (s: S
           Add another signer
         </button>
       )}
+
+      <div className="border-t border-slate-100 dark:border-slate-700 pt-4">
+        <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+          Email signed copy to{' '}
+          <span className="font-normal text-slate-400">(optional — comma-separated)</span>
+        </label>
+        <input
+          type="text"
+          value={notifyEmails}
+          onChange={e => onNotifyChange(e.target.value)}
+          placeholder="attorney@firm.com, partner@example.com"
+          className="input w-full text-sm"
+        />
+        <p className="text-[11px] text-slate-400 mt-1">
+          These people receive the signed PDF from your app once all parties have signed.
+        </p>
+      </div>
     </div>
   );
 }
@@ -208,10 +235,12 @@ function ReviewStep({
   acquisition,
   terms,
   signers,
+  notifyEmailsRaw,
 }: {
   acquisition: CoCAcquisition;
   terms: LOITerms;
   signers: Signer[];
+  notifyEmailsRaw: string;
 }) {
   return (
     <div className="space-y-4 text-sm">
@@ -262,9 +291,18 @@ function ReviewStep({
         ))}
       </div>
 
+      {notifyEmailsRaw.trim() && (
+        <div className="rounded-xl bg-slate-50 dark:bg-slate-700/40 p-4">
+          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-2">Notify on completion</p>
+          <p className="text-xs text-slate-700 dark:text-slate-300">{notifyEmailsRaw}</p>
+        </div>
+      )}
+
       <p className="text-[11px] text-slate-400 dark:text-slate-500">
-        Each signer will receive an email with a secure link to review and sign this LOI.
-        You will be emailed the signed copy automatically when all parties have signed.
+        Each signer receives a secure link to sign via DocuSeal.
+        {notifyEmailsRaw.trim()
+          ? ' The signed PDF will also be emailed to the addresses above once all parties have signed.'
+          : ''}
       </p>
     </div>
   );
@@ -297,6 +335,9 @@ export function LOIWizard({ dealId, acquisition, userName, userEmail, onClose, o
     { name: userName, email: userEmail, role: 'Buyer' },
   ]);
 
+  // Comma-separated notify emails (raw string, parsed on send)
+  const [notifyEmailsRaw, setNotifyEmailsRaw] = useState('');
+
   const canAdvance = () => {
     if (step === 0) return terms.purchase_price > 0 && terms.earnest_money >= 0 && !!terms.close_date;
     if (step === 1) return signers.every(s => s.name.trim() && s.email.trim() && s.role.trim());
@@ -306,8 +347,12 @@ export function LOIWizard({ dealId, acquisition, userName, userEmail, onClose, o
   async function handleSend() {
     setSending(true);
     setError(null);
+    const notify_emails = notifyEmailsRaw
+      .split(',')
+      .map(e => e.trim())
+      .filter(e => e.length > 0);
     try {
-      await api.createLOI(dealId, { terms, signers });
+      await api.createLOI(dealId, { terms, signers, notify_emails });
       onSent();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to send LOI. Please try again.');
@@ -353,8 +398,8 @@ export function LOIWizard({ dealId, acquisition, userName, userEmail, onClose, o
         {/* Step content */}
         <div className="px-5 pb-2 overflow-y-auto flex-1">
           {step === 0 && <TermsStep terms={terms} onChange={setTerms} />}
-          {step === 1 && <SignersStep signers={signers} onChange={setSigners} />}
-          {step === 2 && <ReviewStep acquisition={acquisition} terms={terms} signers={signers} />}
+          {step === 1 && <SignersStep signers={signers} onChange={setSigners} notifyEmails={notifyEmailsRaw} onNotifyChange={setNotifyEmailsRaw} />}
+          {step === 2 && <ReviewStep acquisition={acquisition} terms={terms} signers={signers} notifyEmailsRaw={notifyEmailsRaw} />}
         </div>
 
         {/* Footer */}

@@ -39,6 +39,9 @@ class LOI(Base):
     # [{name, email, role, order}]
     signers: Mapped[list] = mapped_column(JSON, nullable=False)
 
+    # Additional email addresses to receive the signed PDF (beyond the signers)
+    notify_emails: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+
     # 'pending' | 'completed' | 'expired'
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
 

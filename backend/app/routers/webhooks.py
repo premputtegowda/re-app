@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.database import get_db
 from app.models.loi import LOI
+from app.services.docuseal import get_docuseal_client, DocuSealError
+from app.services.email import get_smtp_sender
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +41,10 @@ async def docuseal_webhook(
 ):
     """
     Receives DocuSeal webhook events.
-    On 'submission.completed': marks the LOI as completed.
-    DocuSeal automatically emails the signed PDF to all signers.
-    The signed document remains accessible via DocuSeal's API.
+    On 'submission.completed':
+      - Marks LOI as completed
+      - Downloads signed PDF from DocuSeal
+      - Emails it to all notify_emails recipients configured by the user
     """
     settings = get_settings()
     body = await request.body()
@@ -73,9 +76,48 @@ async def docuseal_webhook(
     if loi.status == "completed":
         return {"status": "already_processed"}
 
+    # Mark completed first — email delivery is best-effort
     loi.status = "completed"
     loi.updated_at = datetime.utcnow()
     await db.commit()
+
+    # Download signed PDF and email to notify_emails
+    notify_emails: list[str] = loi.notify_emails or []
+    if notify_emails and settings.smtp_enabled:
+        try:
+            client = get_docuseal_client()
+            pdf_url = await client.get_document_url(submission_id)
+
+            import httpx
+            async with httpx.AsyncClient(timeout=30.0) as http:
+                resp = await http.get(pdf_url)
+                resp.raise_for_status()
+                pdf_bytes = resp.content
+
+            property_address = loi.terms_data.get("property_address", "the property")
+            subject = f"Signed LOI - {property_address}"
+            body_text = (
+                "The Letter of Intent has been signed by all parties.\n\n"
+                "Please find the signed copy attached.\n\n"
+                "This document was signed via DocuSeal e-signature."
+            )
+            sender = get_smtp_sender()
+            for email_addr in notify_emails:
+                try:
+                    await sender.send(
+                        to_email=email_addr,
+                        subject=subject,
+                        body=body_text,
+                        attachment_bytes=pdf_bytes,
+                        attachment_filename="signed-loi.pdf",
+                    )
+                    logger.info("Signed LOI emailed to %s", email_addr)
+                except Exception as exc:
+                    logger.warning("Failed to email signed LOI to %s: %s", email_addr, exc)
+
+        except (DocuSealError, Exception) as exc:
+            logger.error("Failed to download/email signed PDF: %s", exc)
+            # Status is already committed — don't fail the webhook response
 
     logger.info("LOI %s marked completed (submission %s)", loi.id, submission_id)
     return {"status": "ok"}

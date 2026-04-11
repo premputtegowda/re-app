@@ -42,6 +42,7 @@ class LOITermsIn(BaseModel):
 class CreateLOIRequest(BaseModel):
     terms: LOITermsIn
     signers: list[SignerIn]
+    notify_emails: list[EmailStr] = []   # additional recipients for the signed PDF
 
 
 class SignerStatus(BaseModel):
@@ -168,6 +169,7 @@ async def create_loi(
         docuseal_submission_id=submission_id,
         terms_data=body.terms.model_dump(),
         signers=signers_list,
+        notify_emails=body.notify_emails,
         status="pending",
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
