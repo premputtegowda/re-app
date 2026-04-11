@@ -585,6 +585,45 @@ export const api = {
     }
   },
 
+  async generateShareLink(dealId: string): Promise<{ shareToken: string; shareUrl: string; role: string; expiresAt: string }> {
+    const response = await authFetch(`/api/deals/${dealId}/share`, {
+      method: 'POST',
+      body: JSON.stringify({ role: 'partner' }),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new ApiError(response.status, error.detail || 'Failed to generate share link');
+    }
+    return response.json();
+  },
+
+  async revokeShareLink(dealId: string): Promise<void> {
+    const response = await authFetch(`/api/deals/${dealId}/share`, { method: 'DELETE' });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new ApiError(response.status, error.detail || 'Failed to revoke share link');
+    }
+  },
+
+  async getSharedDeal(token: string): Promise<unknown> {
+    const response = await fetch(`${API_BASE_URL}/api/shared/${token}`, {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!response.ok) {
+      throw new ApiError(response.status, response.status === 410 ? 'Link expired' : 'Link not found');
+    }
+    return response.json();
+  },
+
+  async forkSharedDeal(token: string): Promise<{ id: string }> {
+    const response = await authFetch(`/api/shared/${token}/fork`, { method: 'POST' });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new ApiError(response.status, error.detail || 'Failed to fork deal');
+    }
+    return response.json();
+  },
+
   // ── Feedback ──────────────────────────────────────────────────────────
 
   async submitFeedback(module: string, message: string) {

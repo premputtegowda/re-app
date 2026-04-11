@@ -27,6 +27,7 @@ export interface BuildDeps {
   units: number;
   origStabilizedAnnual: number;
   defaultPreStabAnnual: number;
+  defaultFixedExpenseGrowthPct: number;
 }
 
 // ── Pure helpers ───────────────────────────────────────────────────────────────
@@ -85,15 +86,20 @@ export function buildWhatIfResult(ov: WhatIfOverrides, deps: BuildDeps): CoCResu
 
   const priceRatio = acquisition.purchasePrice > 0 ? ov.purchasePrice / acquisition.purchasePrice : 1;
 
+  // Only apply the averaged fixedExpenseGrowthPct when the user has moved the slider
+  // away from its default. At default, preserve each expense's individual growth rate
+  // so the What-If baseline exactly matches the base scenario result.
+  const fixedGrowthChanged = ov.fixedExpenseGrowthPct !== deps.defaultFixedExpenseGrowthPct;
+
   const modifiedExpenses = proForma.expenses.map(e => {
     if (e.isPercentOfEGI && e.name.toLowerCase().includes('management'))
       return { ...e, stabilizedValue: ov.propertyMgmtPct };
     if (e.isPercentOfEGI && (e.name.toLowerCase().includes('maintenance') || e.name.toLowerCase().includes('repair')))
       return { ...e, stabilizedValue: ov.maintenancePct };
     if (!e.isPercentOfEGI && e.name.toLowerCase().includes('tax'))
-      return { ...e, stabilizedValue: e.stabilizedValue * priceRatio, growthPct: ov.fixedExpenseGrowthPct };
+      return { ...e, stabilizedValue: e.stabilizedValue * priceRatio, ...(fixedGrowthChanged ? { growthPct: ov.fixedExpenseGrowthPct } : {}) };
     if (!e.isPercentOfEGI)
-      return { ...e, growthPct: ov.fixedExpenseGrowthPct };
+      return fixedGrowthChanged ? { ...e, growthPct: ov.fixedExpenseGrowthPct } : e;
     return e;
   });
 
