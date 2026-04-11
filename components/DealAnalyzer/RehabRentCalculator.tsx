@@ -159,7 +159,7 @@ function evenDistribute(n: number, dur: number): number[] {
  * Weighted Distribution — S-curve model:
  *   First 33%  of months → 20% of units  (slow start)
  *   Middle 33% of months → 50% of units  (peak production)
- *   Final 33%  of months → 30% of units  (punch list / difficult units)
+ *   Final 33%  of months → 30% of units  (finishing stretch)
  *
  * Uses cumulative rounding so p1+p2+p3 always equals n exactly,
  * regardless of unit count. Zero-duration phases roll units forward.
@@ -337,8 +337,13 @@ export function RehabRentCalculator({
 
   useEffect(() => {
     if (externalDistributionMethod === undefined) return;
+    if (externalDistributionMethod === 'custom') {
+      // Clear weighted auto-fill when switching to custom
+      setScheduleByType(unitTypes.map(() => Array(totalDuration).fill(0)));
+      setLeaseUpScheduleByType(unitTypes.map(() => Array(totalDuration).fill(0)));
+    }
     setDistributionMethod(externalDistributionMethod);
-  }, [externalDistributionMethod]);
+  }, [externalDistributionMethod]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync rent changes from the form back into localRents (bidirectional sync).
   // Echo-back guard: when the calculator pushes rents → form → unitTypes, the values
@@ -575,6 +580,19 @@ export function RehabRentCalculator({
                 <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
                   Schedule
                 </p>
+                {distributionMethod === 'custom' && unitTypes.length === 1 &&
+                  (scheduleByType[0]?.some(v => v > 0) || leaseUpScheduleByType[0]?.some(v => v > 0)) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setScheduleByType(prev => prev.map((s, i) => i === 0 ? Array(totalDuration).fill(0) : s));
+                      setLeaseUpScheduleByType(prev => prev.map((s, i) => i === 0 ? Array(totalDuration).fill(0) : s));
+                    }}
+                    className="text-[11px] text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-colors touch-manipulation"
+                  >
+                    Clear
+                  </button>
+                )}
               </div>
               {/* ── Distribution method toggle ── */}
               <div className="flex flex-wrap items-center gap-2">
@@ -583,7 +601,13 @@ export function RehabRentCalculator({
                     <button
                       key={m}
                       type="button"
-                      onClick={() => setDistributionMethod(m)}
+                      onClick={() => {
+                        if (m === 'custom') {
+                          setScheduleByType(unitTypes.map(() => Array(totalDuration).fill(0)));
+                          setLeaseUpScheduleByType(unitTypes.map(() => Array(totalDuration).fill(0)));
+                        }
+                        setDistributionMethod(m);
+                      }}
                       className={`text-[11px] px-2 py-1 rounded-md font-medium transition-colors touch-manipulation ${
                         distributionMethod === m
                           ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm'
@@ -607,7 +631,7 @@ export function RehabRentCalculator({
               {/* Method description */}
               <p className="text-[11px] text-slate-400 dark:text-slate-500">
                 {distributionMethod === 'weighted'
-                  ? 'First 33% of time → 20% of units (slow start) · Middle 33% → 50% (peak) · Final 33% → 30% (punch list)'
+                  ? 'First 33% of time → 20% of units (slow start) · Middle 33% → 50% (peak) · Final 33% → 30% (finishing stretch)'
                   : 'Enter exact units per month below — full control over the renovation pace'}
               </p>
 
@@ -688,11 +712,29 @@ export function RehabRentCalculator({
                       <div className="grid gap-2 px-3 py-2 border-b border-slate-100 dark:border-slate-700/60 bg-slate-50/50 dark:bg-slate-800/20"
                         style={{ gridTemplateColumns: `5rem repeat(${unitTypes.length}, 1fr)` }}>
                         <span />
-                        {unitTypes.map((ut, t) => (
-                          <span key={t} className="text-xs font-semibold text-slate-500 dark:text-slate-400 text-center tracking-wide uppercase">
-                            {ut.label}
-                          </span>
-                        ))}
+                        {unitTypes.map((ut, t) => {
+                          const hasData = distributionMethod === 'custom' &&
+                            ((scheduleByType[t]?.some(v => v > 0)) || (leaseUpScheduleByType[t]?.some(v => v > 0)));
+                          return (
+                            <div key={t} className="flex flex-col items-center gap-0.5">
+                              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 text-center tracking-wide uppercase">
+                                {ut.label}
+                              </span>
+                              {hasData && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setScheduleByType(prev => prev.map((s, i) => i === t ? Array(totalDuration).fill(0) : s));
+                                    setLeaseUpScheduleByType(prev => prev.map((s, i) => i === t ? Array(totalDuration).fill(0) : s));
+                                  }}
+                                  className="text-[10px] text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-colors touch-manipulation"
+                                >
+                                  Clear
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
 
@@ -773,22 +815,8 @@ export function RehabRentCalculator({
                 return (
                   <div className="rounded-lg bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40 px-3 py-2 space-y-1.5">
                     <p className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">Schedule doesn&apos;t match your plan:</p>
-                    {staleTypes.map(({ t, label, detail }) => (
-                      <div key={t} className="flex items-center justify-between gap-2">
-                        <p className="text-[11px] text-amber-600 dark:text-amber-400">• {label}: {detail}</p>
-                        {distributionMethod === 'custom' && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setScheduleByType(prev => prev.map((s, i) => i === t ? Array(totalDuration).fill(0) : s));
-                              setLeaseUpScheduleByType(prev => prev.map((s, i) => i === t ? Array(totalDuration).fill(0) : s));
-                            }}
-                            className="text-[11px] font-semibold text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 underline touch-manipulation shrink-0"
-                          >
-                            Clear
-                          </button>
-                        )}
-                      </div>
+                    {staleTypes.map(({ label, detail }) => (
+                      <p key={label} className="text-[11px] text-amber-600 dark:text-amber-400">• {label}: {detail}</p>
                     ))}
                   </div>
                 );

@@ -1205,27 +1205,19 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                   isOpen={stabOpen} onToggle={() => setStabOpen(o => !o)}
                   isComplete={stepComplete}
                 />
-                {/* Always-visible row — distribution toggle (MFR) or revenue-loss summary (SFR) */}
-                <div className="px-4 py-2 border-t border-slate-100 dark:border-slate-700/60 flex items-center gap-2 flex-wrap">
+                {/* Always-visible row — distribution summary (MFR) or revenue-loss summary (SFR) */}
+                <div className="px-4 py-2 border-t border-slate-100 dark:border-slate-700/60 flex items-start justify-between gap-3">
                   {hasMfr ? (
-                    <>
-                      <div className="flex items-center rounded-lg border border-slate-200 dark:border-slate-700 p-0.5 bg-slate-100 dark:bg-slate-800/60">
-                        {(['weighted', 'custom'] as const).map(m => (
-                          <button
-                            key={m}
-                            type="button"
-                            onClick={() => setDistributionMethod(m)}
-                            className={`text-[11px] px-2 py-0.5 rounded-md font-medium transition-colors touch-manipulation ${
-                              distributionMethod === m
-                                ? 'bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 shadow-sm'
-                                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
-                            }`}
-                          >
-                            {m === 'weighted' ? 'Weighted' : 'Custom'}
-                          </button>
-                        ))}
-                      </div>
-                    </>
+                    <div className="flex flex-col gap-0.5 min-w-0">
+                      <span className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                        {distributionMethod === 'weighted' ? 'Weighted distribution' : 'Custom schedule'}
+                      </span>
+                      <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-snug">
+                        {distributionMethod === 'weighted'
+                          ? '20% of units in the first third · 50% at peak · 30% in the finishing stretch'
+                          : 'Units renovate at a custom pace — edit schedule to adjust'}
+                      </p>
+                    </div>
                   ) : (
                     /* SFR: show offline duration + estimated lost revenue */
                     <div className="flex items-center gap-3 min-w-0">
@@ -1242,7 +1234,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                       )}
                     </div>
                   )}
-                  <div className="ml-auto flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-2 shrink-0">
                     {!stabOpen && stabSummary && (
                       <span className="text-[11px] text-slate-400 dark:text-slate-500">{stabSummary}</span>
                     )}
