@@ -1,12 +1,14 @@
-from datetime import datetime
+import secrets
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import User
@@ -205,4 +207,86 @@ async def delete_deal(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deal not found")
 
     await db.delete(deal)
+    await db.commit()
+
+
+# ── Sharing ────────────────────────────────────────────────────────────────────
+
+class ShareRequest(BaseModel):
+    role: str  # 'partner' only in v1
+
+
+class ShareResponse(BaseModel):
+    shareToken: str
+    shareUrl: str
+    role: str
+    expiresAt: str
+
+
+@router.post("/{deal_id}/share", response_model=ShareResponse)
+async def generate_share_link(
+    deal_id: UUID,
+    payload: ShareRequest,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate or refresh a share link for a deal. Only 'partner' role is supported in v1."""
+    if payload.role != "partner":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only 'partner' role is supported.",
+        )
+
+    result = await db.execute(
+        select(SavedDeal).where(
+            SavedDeal.id == deal_id,
+            SavedDeal.user_id == current_user.id,
+        )
+    )
+    deal = result.scalar_one_or_none()
+    if not deal:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deal not found")
+
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.utcnow() + timedelta(hours=24)
+
+    deal.share_token = token
+    deal.share_role = payload.role
+    deal.share_expires_at = expires_at
+
+    await db.commit()
+
+    settings = get_settings()
+    share_url = f"{settings.frontend_url}/shared/{token}"
+
+    return ShareResponse(
+        shareToken=token,
+        shareUrl=share_url,
+        role=payload.role,
+        expiresAt=expires_at.isoformat(),
+    )
+
+
+@router.delete("/{deal_id}/share", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_share_link(
+    deal_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revoke the active share link for a deal."""
+    result = await db.execute(
+        select(SavedDeal).where(
+            SavedDeal.id == deal_id,
+            SavedDeal.user_id == current_user.id,
+        )
+    )
+    deal = result.scalar_one_or_none()
+    if not deal:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deal not found")
+
+    deal.share_token = None
+    deal.share_role = None
+    deal.share_expires_at = None
+
     await db.commit()

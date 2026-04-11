@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Pencil, Calculator, AlertTriangle, MapPin, CreditCard, Hammer, BarChart2, TrendingUp, ChevronRight, ChevronUp, Check, Zap, X } from 'lucide-react';
+import { ShareButton } from './ShareButton';
 import { Card } from '@/components/UI/Card';
 import { Button } from '@/components/UI/Button';
 import { StepProperty } from './steps/StepProperty';
@@ -1649,6 +1650,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 {saveError}
               </span>
             )}
+            {savedDealId && <ShareButton dealId={savedDealId} />}
             <Button
               variant="ghost"
               size="sm"

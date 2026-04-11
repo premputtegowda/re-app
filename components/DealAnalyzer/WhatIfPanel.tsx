@@ -288,9 +288,11 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
   // ── Anchor values from unit mix ──
   const { units, avgTargetRent, avgPreStabRent } = useMemo(() => computeAvgRents(acquisition), [acquisition]);
   const effectiveUnits = Math.max(1, units);
-  const fallbackPerUnit = (proForma.grossRent.stabilized || proForma.grossRent.t12 || 12000) / (effectiveUnits * 12);
-  const baseTargetRent = avgTargetRent > 0 ? avgTargetRent : fallbackPerUnit;
-  const basePreStabRent = avgPreStabRent > 0 ? avgPreStabRent : baseTargetRent;
+  // Derive per-unit rent from proForma.grossRent.stabilized so the What-If default
+  // exactly matches the base result (unit-mix values can diverge from the ProForma).
+  const proFormaPerUnit = (proForma.grossRent.stabilized || proForma.grossRent.t12 || 12000) / (effectiveUnits * 12);
+  const baseTargetRent = proFormaPerUnit;
+  const basePreStabRent = avgPreStabRent > 0 ? Math.min(avgPreStabRent, baseTargetRent) : baseTargetRent;
 
   const origStabilizedAnnual = proForma.grossRent.stabilized;
   const hasStabilizingYears = Object.values(proForma.yearOverrides ?? {}).some(
@@ -335,6 +337,7 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
     units,
     origStabilizedAnnual,
     defaultPreStabAnnual: defaults.preStabRentPerUnit * effectiveUnits * 12,
+    defaultFixedExpenseGrowthPct: Math.round(avgFixedGrowthPct * 4) / 4,
   };
 
   // ── Main what-if result ──
@@ -483,12 +486,12 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
 
         {/* KPI deltas — always visible above the scrollable slider area */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <KPIDelta label="Avg CoC Return" value={formatPct(whatIfResult.avgCoCReturn)}
-            delta={whatIfResult.avgCoCReturn - baseResult.avgCoCReturn}
-            deltaFormatted={formatPct(Math.abs(whatIfResult.avgCoCReturn - baseResult.avgCoCReturn))} />
           <KPIDelta label="IRR" value={whatIfResult.irr !== null ? formatPct(whatIfResult.irr) : '—'}
             delta={(whatIfResult.irr ?? 0) - (baseResult.irr ?? 0)}
             deltaFormatted={formatPct(Math.abs((whatIfResult.irr ?? 0) - (baseResult.irr ?? 0)))} />
+          <KPIDelta label="Avg CoC Return" value={formatPct(whatIfResult.avgCoCReturn)}
+            delta={whatIfResult.avgCoCReturn - baseResult.avgCoCReturn}
+            deltaFormatted={formatPct(Math.abs(whatIfResult.avgCoCReturn - baseResult.avgCoCReturn))} />
           <KPIDelta label="Equity Multiple" value={formatMultiple(whatIfResult.equityMultiple)}
             delta={whatIfResult.equityMultiple - baseResult.equityMultiple}
             deltaFormatted={`${Math.abs(whatIfResult.equityMultiple - baseResult.equityMultiple).toFixed(2)}x`} />
@@ -564,13 +567,15 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
         </>}
       </div>
 
-      {anyChanged && (
-        <button type="button" onClick={reset}
-          className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition-colors">
-          <RotateCcw size={12} />
-          Reset to original inputs
-        </button>
-      )}
+      <button type="button" onClick={reset} disabled={!anyChanged}
+        className={`flex items-center gap-1.5 text-xs transition-colors ${
+          anyChanged
+            ? 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer'
+            : 'text-slate-300 dark:text-slate-600 cursor-not-allowed'
+        }`}>
+        <RotateCcw size={12} />
+        Reset to original inputs
+      </button>
 
       {/* Break-even table — Explore mode only */}
       {panelMode === 'explore' && <div className="space-y-3">

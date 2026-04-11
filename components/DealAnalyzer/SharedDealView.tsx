@@ -1,0 +1,154 @@
+'use client';
+
+import { useState, useRef } from 'react';
+import { useRouter } from 'next/navigation';
+import { Clock, Home, ArrowRight, LogIn } from 'lucide-react';
+import { ResultsPanel } from './ResultsPanel';
+import { projectScenario } from '@/utils/dealAnalyzerCalc';
+import { useAuthStore } from '@/lib/authStore';
+import { api, ApiError } from '@/lib/api';
+import type { SavedDeal, CoCResult, CoCScenarioType, CoCScenario } from '@/types';
+import type { MCRanges, SavedMCResults } from '@/utils/monteCarlo';
+
+interface SharedDealViewProps {
+  deal: SavedDeal & { shareRole: string; expiresAt: string };
+  token: string;
+}
+
+function timeRemaining(expiresAt: string): string {
+  const ms = new Date(expiresAt).getTime() - Date.now();
+  if (ms <= 0) return 'Expired';
+  const hours = Math.floor(ms / 3_600_000);
+  const mins = Math.floor((ms % 3_600_000) / 60_000);
+  if (hours > 0) return `${hours}h ${mins}m remaining`;
+  return `${mins}m remaining`;
+}
+
+export function SharedDealView({ deal, token }: SharedDealViewProps) {
+  const router = useRouter();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+
+  const [mcRanges, setMcRanges] = useState<MCRanges | null>(
+    deal.mcRanges ? (deal.mcRanges as unknown as MCRanges) : null
+  );
+  const [mcResults, setMcResults] = useState<SavedMCResults | null>(
+    deal.mcResults ? (deal.mcResults as SavedMCResults) : null
+  );
+  const [forking, setForking] = useState(false);
+  const [forkError, setForkError] = useState<string | null>(null);
+
+  // Compute result client-side from deal inputs
+  const resultRef = useRef<CoCResult | null>(null);
+  if (!resultRef.current) {
+    const scenario: CoCScenario = {
+      id: deal.id,
+      name: 'base',
+      scenarioType: 'base' as CoCScenarioType,
+      acquisition: deal.acquisition,
+      operations: deal.operations,
+      proForma: deal.proForma,
+      refinance: deal.refinance,
+      createdAt: deal.savedAt,
+      updatedAt: deal.updatedAt,
+    };
+    // Try saved result first; fall back to recomputing
+    const savedResult = (deal.results as Partial<Record<CoCScenarioType, CoCResult>>)?.base;
+    resultRef.current = savedResult ?? projectScenario(scenario);
+  }
+  const result = resultRef.current;
+
+  async function handleAddToDashboard() {
+    if (!isAuthenticated) {
+      router.push(`/?redirect=/shared/${token}`);
+      return;
+    }
+    setForking(true);
+    setForkError(null);
+    try {
+      const { id } = await api.forkSharedDeal(token);
+      router.push(`/deal-analyzer/${id}`);
+    } catch (err) {
+      setForkError(err instanceof ApiError ? err.message : 'Failed to copy deal');
+      setForking(false);
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 pb-24">
+      {/* Shared deal banner */}
+      <div className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-4 py-3">
+        <div className="max-w-2xl mx-auto flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900/40 flex items-center justify-center flex-shrink-0">
+              <Home size={16} className="text-primary-600 dark:text-primary-400" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-slate-800 dark:text-slate-200 truncate">
+                {deal.name || deal.acquisition.propertyAddress || 'Shared Deal'}
+              </p>
+              <div className="flex items-center gap-1 text-xs text-slate-400 dark:text-slate-500">
+                <Clock size={11} />
+                <span>{timeRemaining(deal.expiresAt)}</span>
+                <span className="mx-1">·</span>
+                <span className="capitalize">{deal.shareRole} view</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex-shrink-0">
+            <span className="text-[11px] font-semibold text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded-full">
+              Read-only
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Results */}
+      <div className="max-w-2xl mx-auto px-4 pt-6 space-y-5">
+        <ResultsPanel
+          result={result}
+          acquisition={deal.acquisition}
+          operations={deal.operations}
+          proForma={deal.proForma}
+          refinance={deal.refinance}
+          mcRanges={mcRanges}
+          onMcRangesChange={setMcRanges}
+          mcResults={mcResults}
+          onMcResultsChange={setMcResults}
+        />
+
+        {/* Add to dashboard CTA */}
+        <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-5">
+          <div className="flex items-start gap-4">
+            <div className="flex-1 min-w-0">
+              <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-1">
+                Add to your dashboard
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Creates a full copy including all inputs in your account. The original is not affected.
+              </p>
+              {forkError && (
+                <p className="text-xs text-red-500 mt-2">{forkError}</p>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleAddToDashboard}
+              disabled={forking}
+              className="flex-shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors disabled:opacity-60"
+            >
+              {forking ? (
+                'Copying…'
+              ) : isAuthenticated ? (
+                <>Add <ArrowRight size={15} /></>
+              ) : (
+                <>Sign in <LogIn size={15} /></>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
