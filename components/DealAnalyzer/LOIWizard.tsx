@@ -19,6 +19,7 @@ interface LOITerms {
   contingency_inspection: boolean;
   contingency_appraisal: boolean;
   additional_terms: string;
+  buying_entity: string;
 }
 
 interface LOIWizardProps {
@@ -44,10 +45,25 @@ function TermsStep({ terms, onChange }: { terms: LOITerms; onChange: (t: LOITerm
 
   return (
     <div className="space-y-5">
+      {/* Buying Entity */}
+      <div>
+        <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+          Buying Entity <span className="font-normal text-slate-400">(optional — LLC or company name)</span>
+        </label>
+        <input
+          type="text"
+          value={terms.buying_entity}
+          onChange={e => set('buying_entity', e.target.value)}
+          placeholder="e.g. Acme Capital LLC (leave blank to use your name)"
+          className="input w-full"
+        />
+      </div>
+
+      {/* Offer Price + Earnest Money */}
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
-            Purchase Price
+            Offer Price
           </label>
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
@@ -58,6 +74,7 @@ function TermsStep({ terms, onChange }: { terms: LOITerms; onChange: (t: LOITerm
               className="input pl-7 w-full"
             />
           </div>
+          <p className="text-[10px] text-slate-400 mt-1">Pre-filled from your deal analysis</p>
         </div>
         <div>
           <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
@@ -75,6 +92,7 @@ function TermsStep({ terms, onChange }: { terms: LOITerms; onChange: (t: LOITerm
         </div>
       </div>
 
+      {/* Close Date */}
       <div>
         <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
           Proposed Close Date
@@ -87,8 +105,10 @@ function TermsStep({ terms, onChange }: { terms: LOITerms; onChange: (t: LOITerm
         />
       </div>
 
+      {/* Contingencies */}
       <div>
         <p className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-2">Contingencies</p>
+        <p className="text-[10px] text-slate-400 -mt-1 mb-2">Fewer contingencies = stronger offer to the seller</p>
         <div className="space-y-2">
           {(
             [
@@ -110,6 +130,7 @@ function TermsStep({ terms, onChange }: { terms: LOITerms; onChange: (t: LOITerm
         </div>
       </div>
 
+      {/* Additional Terms */}
       <div>
         <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
           Additional Terms <span className="font-normal text-slate-400">(optional)</span>
@@ -117,7 +138,7 @@ function TermsStep({ terms, onChange }: { terms: LOITerms; onChange: (t: LOITerm
         <textarea
           value={terms.additional_terms}
           onChange={e => set('additional_terms', e.target.value)}
-          placeholder="Any special conditions, inclusions, or notes..."
+          placeholder="Appliances to convey, leaseback request, AS-IS acceptance, etc."
           rows={3}
           className="input w-full resize-none"
         />
@@ -329,6 +350,7 @@ export function LOIWizard({ dealId, acquisition, userName, userEmail, onClose, o
     contingency_inspection: true,
     contingency_appraisal: false,
     additional_terms: '',
+    buying_entity: '',
   });
 
   const [signers, setSigners] = useState<Signer[]>([

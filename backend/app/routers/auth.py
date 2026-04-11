@@ -1,5 +1,8 @@
+import logging
 import secrets
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
 from fastapi.responses import RedirectResponse

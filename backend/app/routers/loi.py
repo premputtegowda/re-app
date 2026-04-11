@@ -37,6 +37,7 @@ class LOITermsIn(BaseModel):
     contingency_inspection: bool = True
     contingency_appraisal: bool = False
     additional_terms: str = ""
+    buying_entity: str = ""   # e.g. "Acme Capital LLC" — empty = individual
 
 
 class CreateLOIRequest(BaseModel):
@@ -139,11 +140,20 @@ async def create_loi(
     property_address = deal.acquisition_data.get("propertyAddress", "Property address not specified")
     buyer_name = current_user.name or current_user.email
 
+    # Extract deal context for richer PDF content
+    acq = deal.acquisition_data or {}
+    prop_type = acq.get("propertyType", "sfr")
+    units = int(acq.get("units", 1))
+    beds = int(acq.get("sfrBeds", 0))
+    baths = float(acq.get("sfrBaths", 0))
+    down_pct = float(acq.get("downPaymentPct", 20))
+
     # Generate PDF
     signers_list = [s.model_dump() for s in body.signers]
     pdf_bytes = generate_loi_pdf(
         property_address=property_address,
         buyer_name=buyer_name,
+        buying_entity=body.terms.buying_entity,
         purchase_price=body.terms.purchase_price,
         earnest_money=body.terms.earnest_money,
         close_date=body.terms.close_date,
@@ -152,6 +162,11 @@ async def create_loi(
         contingency_appraisal=body.terms.contingency_appraisal,
         additional_terms=body.terms.additional_terms,
         signers=signers_list,
+        property_type=prop_type,
+        units=units,
+        beds=beds,
+        baths=baths,
+        down_payment_pct=down_pct,
     )
 
     # Send to DocuSeal
