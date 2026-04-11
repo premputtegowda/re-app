@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter, usePathname } from 'next/navigation';
-import { LayoutDashboard, List, PlusCircle, Settings, ShieldCheck, Tag, Folder, TrendingUp, FilePlus } from 'lucide-react';
+import { LayoutDashboard, List, PlusCircle, Settings, ShieldCheck, Tag, Folder } from 'lucide-react';
 import { useAuthStore } from '@/lib/authStore';
 
 export function Navigation() {
@@ -14,8 +14,8 @@ export function Navigation() {
   // ── Deal Analyzer nav ──────────────────────────────────────────────────────
   if (isDealAnalyzer) {
     const dealNavItems = [
-      { href: '/deal-analyzer',          label: 'Dashboard', icon: TrendingUp },
-      { href: '/deal-analyzer/new',      label: 'New Analysis', icon: FilePlus },
+      { href: '/deal-analyzer',          label: 'Dashboard', icon: LayoutDashboard },
+      { href: '/deal-analyzer/new',      label: 'New Analysis', icon: PlusCircle },
       { href: '/deal-analyzer/settings', label: 'Settings', icon: Settings },
     ];
 

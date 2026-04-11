@@ -460,9 +460,10 @@ export function MonteCarloPanel({
     onRangesChange?.(r);
   }, [onRangesChange]);
 
-  const [results, setResults]     = useState<MCResults | null>(savedResults ? hydrateMCResults(savedResults) : null);
-  const [running, setRunning]     = useState(false);
-  const [progress, setProgress]   = useState(0);
+  const [results, setResults]       = useState<MCResults | null>(savedResults ? hydrateMCResults(savedResults) : null);
+  const [freshResults, setFreshResults] = useState(false); // briefly true after new results arrive → triggers fade-in
+  const [running, setRunning]       = useState(false);
+  const [progress, setProgress]     = useState(0);
   const [isStale, setIsStale]     = useState(false);
   const [showEditor, setShowEditor] = useState(false);
   const [draftRanges, setDraftRanges] = useState<MCRanges>(initialRanges);
@@ -521,7 +522,6 @@ export function MonteCarloPanel({
     simRunningRef.current = true;
     setRunning(true);
     setProgress(0);
-    if (isMountedRef.current) setResults(null);
     try {
       const r = await runSimulation({
         n: N_RUNS, ranges, acquisition, operations, proForma, refinance,
@@ -537,6 +537,8 @@ export function MonteCarloPanel({
       lastRunFingerprintRef.current = fp;
       if (isMountedRef.current) {
         setResults(r);
+        setFreshResults(true);
+        setTimeout(() => setFreshResults(false), 500);
         setIsStale(false);
       }
     } finally {
@@ -584,12 +586,30 @@ export function MonteCarloPanel({
         </p>
       </div>
 
-      {/* Progress */}
-      {running && <ProgressBar pct={progress} />}
+      {/* First-run: full progress bar (no previous results to show) */}
+      {running && !results && (
+        <div className="animate-fade-in">
+          <ProgressBar pct={progress} />
+        </div>
+      )}
 
-      {/* Results — vertical stack */}
-      {results && !running && (
-        <div className="space-y-5">
+      {/* Re-run: slim progress line so results stay fully visible */}
+      {running && results && (
+        <div className="space-y-1.5 animate-fade-in">
+          <div className="h-1 w-full rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+            <div className="h-full rounded-full bg-primary-500 transition-all duration-300" style={{ width: `${progress}%` }} />
+          </div>
+          <p className="text-[10px] text-slate-400 dark:text-slate-500 tabular-nums">
+            {progress < 40 ? 'Sampling market conditions…'
+              : progress < 80 ? 'Running scenarios…'
+              : 'Wrapping up…'} {Math.round(progress)}%
+          </p>
+        </div>
+      )}
+
+      {/* Results — stay mounted, fade in when fresh data arrives */}
+      {results && (
+        <div className={`space-y-5 ${freshResults ? 'animate-fade-in' : ''}`}>
           <ProbabilityCard
             results={results}
             targetCoC={targetCoC} onTargetCoCChange={setTargetCoC}
@@ -609,20 +629,46 @@ export function MonteCarloPanel({
 
       {/* Market Uncertainty Ranges */}
       <div ref={editorRef}>
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">Market Uncertainty Ranges</p>
-          <button
-            type="button"
-            onClick={() => { setDraftRanges(ranges); setShowEditor(v => !v); }}
-            className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
-            aria-label="Edit market uncertainty ranges"
-          >
-            <Pencil size={12} />
-          </button>
+
+          {showEditor ? (
+            /* Done / Cancel always visible at top when editor is open */
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  const changed = JSON.stringify(draftRanges) !== JSON.stringify(ranges);
+                  handleRangesChange(draftRanges);
+                  setShowEditor(false);
+                  if (changed) runRef.current();
+                }}
+                className="px-3 py-1 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-xs font-semibold transition-colors"
+              >
+                Done
+              </button>
+              <button
+                type="button"
+                onClick={() => { setDraftRanges(ranges); setShowEditor(false); }}
+                className="px-3 py-1 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-slate-400 text-xs font-medium transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => { setDraftRanges(ranges); setShowEditor(true); }}
+              className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+              aria-label="Edit market uncertainty ranges"
+            >
+              <Pencil size={12} />
+            </button>
+          )}
         </div>
 
         {showEditor && (
-          <div className="space-y-4 mt-2">
+          <div className="mt-2">
             <RangeEditor
               ranges={draftRanges}
               defaults={defaults}
@@ -630,26 +676,6 @@ export function MonteCarloPanel({
               onReset={() => setDraftRanges(defaults)}
               showRefiRate={refinance.enabled}
             />
-            <div className="flex items-center gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => {
-                  handleRangesChange(draftRanges);
-                  setShowEditor(false);
-                  runRef.current();
-                }}
-                className="px-4 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-xs font-semibold transition-colors"
-              >
-                Done
-              </button>
-              <button
-                type="button"
-                onClick={() => { setDraftRanges(ranges); setShowEditor(false); }}
-                className="px-4 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-slate-400 text-xs font-medium transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
           </div>
         )}
       </div>

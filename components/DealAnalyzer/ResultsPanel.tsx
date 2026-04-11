@@ -410,7 +410,7 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
 
         {/* Stress test progress — shown below metrics while simulation runs */}
         {stressRunning && (
-          <div className="mt-4 px-4 py-3 rounded-xl bg-primary-50 dark:bg-primary-900/20 border border-primary-100 dark:border-primary-800 space-y-2.5">
+          <div className="mt-4 px-4 py-3 rounded-xl bg-primary-50 dark:bg-primary-900/20 border border-primary-100 dark:border-primary-800 space-y-2.5 animate-fade-in">
             <div className="flex items-center gap-2.5">
               <svg className="w-4 h-4 text-primary-500 shrink-0 animate-spin" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -515,7 +515,7 @@ function MetricCell({ label, value, sub, mostLikely, loading, color, large }: { 
       {loading ? (
         <span className="mt-1 h-2.5 w-8 sm:w-10 rounded bg-slate-200 dark:bg-slate-600 animate-pulse" />
       ) : mostLikely ? (
-        <span className="text-[10px] tabular-nums text-slate-400 dark:text-slate-500 mt-0.5 leading-none truncate">({mostLikely})</span>
+        <span className="text-[10px] tabular-nums text-slate-400 dark:text-slate-500 mt-0.5 leading-none truncate animate-fade-in">({mostLikely})</span>
       ) : null}
       {sub && <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 mt-1 leading-tight line-clamp-2">{sub}</p>}
     </div>
