@@ -362,7 +362,7 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
         )}
 
         {/* Primary metrics — IRR takes prominence */}
-        <div className="grid grid-cols-3 gap-px bg-slate-100 dark:bg-slate-700 rounded-xl overflow-hidden">
+        <div className="grid grid-cols-3 gap-px bg-slate-100 dark:bg-slate-700 rounded-xl overflow-hidden w-full">
           <MetricCell
             label="IRR"
             value={irr !== null ? formatPct(irr) : '—'}
@@ -509,15 +509,15 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
 
 function MetricCell({ label, value, sub, mostLikely, loading, color, large }: { label: string; value: string; sub?: string; mostLikely?: string | null; loading?: boolean; color: string; large?: boolean }) {
   return (
-    <div className="bg-white dark:bg-slate-800 px-4 py-3.5 flex flex-col">
-      <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-1">{label}</p>
-      <p className={`font-bold tabular-nums leading-none ${large ? 'text-3xl' : 'text-xl'} ${color}`}>{value}</p>
+    <div className="bg-white dark:bg-slate-800 px-2.5 sm:px-4 py-3 sm:py-3.5 flex flex-col min-w-0">
+      <p className="text-[9px] sm:text-[10px] font-semibold uppercase tracking-wide sm:tracking-widest text-slate-400 dark:text-slate-500 mb-1 truncate">{label}</p>
+      <p className={`font-bold tabular-nums leading-none truncate ${large ? 'text-xl sm:text-2xl lg:text-3xl' : 'text-base sm:text-xl'} ${color}`}>{value}</p>
       {loading ? (
-        <span className="mt-1 h-3 w-10 rounded bg-slate-200 dark:bg-slate-600 animate-pulse" />
+        <span className="mt-1 h-2.5 w-8 sm:w-10 rounded bg-slate-200 dark:bg-slate-600 animate-pulse" />
       ) : mostLikely ? (
-        <span className="text-[11px] tabular-nums text-slate-400 dark:text-slate-500 mt-0.5 leading-none">({mostLikely})</span>
+        <span className="text-[10px] tabular-nums text-slate-400 dark:text-slate-500 mt-0.5 leading-none truncate">({mostLikely})</span>
       ) : null}
-      {sub && <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5 leading-tight">{sub}</p>}
+      {sub && <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-500 mt-1 leading-tight line-clamp-2">{sub}</p>}
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import React from 'react';
-import { RefreshCw, ChevronDown, ChevronUp, RotateCcw, CheckCircle2 } from 'lucide-react';
+import { RotateCcw, CheckCircle2, Pencil } from 'lucide-react';
 import { formatCurrency, formatPct, formatMultiple } from '@/utils/dealAnalyzerCalc';
 import { runSimulation, computeDefaultRanges, toSavedMCResults, hydrateMCResults, findMaxPriceAtConditions } from '@/utils/monteCarlo';
 import type { MCRanges, MCResults, SavedMCResults } from '@/utils/monteCarlo';
@@ -91,28 +91,56 @@ function ProgressBar({ pct }: { pct: number }) {
   );
 }
 
-function TargetInput({ value, onChange, step = 0.5 }: { value: number; onChange: (v: number) => void; step?: number }) {
-  const [draft, setDraft] = useState<string | null>(null);
+function InlineEditTarget({ value, onChange, suffix }: { value: number; onChange: (v: number) => void; suffix: string }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const startEdit = () => {
+    setDraft(String(value));
+    setEditing(true);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  const commit = () => {
+    const v = parseFloat(draft);
+    if (!isNaN(v) && v >= 0) onChange(v);
+    setEditing(false);
+  };
+
+  const cancel = () => setEditing(false);
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        type="number"
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') cancel(); }}
+        className="w-12 text-center text-sm font-bold tabular-nums text-primary-600 dark:text-primary-400 bg-transparent border-b border-primary-400 outline-none"
+        autoFocus
+      />
+    );
+  }
+
   return (
-    <input
-      type="number"
-      value={draft ?? value}
-      step={step}
-      min={0}
-      onChange={e => setDraft(e.target.value)}
-      onBlur={() => { const v = parseFloat(draft ?? ''); setDraft(null); if (!isNaN(v) && v >= 0) onChange(v); }}
-      onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-      className="w-10 text-center text-sm font-semibold text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/30 rounded px-1 border-none outline-none focus:ring-1 focus:ring-primary-400"
-    />
+    <button type="button" onClick={startEdit} className="inline-flex items-center gap-0.5 group cursor-text">
+      <span className="text-sm font-bold tabular-nums text-primary-600 dark:text-primary-400 border-b border-dashed border-primary-300 dark:border-primary-600 group-hover:border-primary-500">
+        {value}{suffix}
+      </span>
+    </button>
   );
 }
 
 // ── Price Guidance Card ───────────────────────────────────────────────────────
 
-function PriceGuidanceCard({ recommendedMaxPrice, conservativeMaxPrice, targetIRR, currentPrice }: {
+function PriceGuidanceCard({ recommendedMaxPrice, conservativeMaxPrice, targetIRR, onTargetIRRChange, currentPrice }: {
   recommendedMaxPrice: number | null;
   conservativeMaxPrice: number | null;
   targetIRR: number;
+  onTargetIRRChange: (v: number) => void;
   currentPrice: number;
 }) {
   const rows: Array<{ label: string; sub: string; price: number | null }> = [
@@ -123,8 +151,8 @@ function PriceGuidanceCard({ recommendedMaxPrice, conservativeMaxPrice, targetIR
   return (
     <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
       <div className="px-4 py-3 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-700">
-        <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
-          What should you pay to hit {targetIRR}% IRR?
+        <p className="text-xs font-bold text-slate-700 dark:text-slate-300 inline-flex items-center gap-1 flex-wrap">
+          What should you pay to hit <InlineEditTarget value={targetIRR} onChange={onTargetIRRChange} suffix="%" /> IRR?
         </p>
         <p className="text-[10px] text-slate-400 mt-0.5">
           Your price: {currentPrice > 0 ? formatCurrency(currentPrice) : '—'}
@@ -136,12 +164,12 @@ function PriceGuidanceCard({ recommendedMaxPrice, conservativeMaxPrice, targetIR
           const infeasible = price === null;
           const gap = price !== null && currentPrice > price ? currentPrice - price : null;
           return (
-            <div key={label} className="px-4 py-3.5 flex items-center justify-between gap-4">
-              <div>
-                <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">{label}</p>
-                <p className="text-[11px] text-slate-400 mt-0.5">{sub}</p>
+            <div key={label} className="px-4 py-3.5 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-300 leading-tight">{label}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">{sub}</p>
               </div>
-              <div className="text-right shrink-0">
+              <div className="text-right shrink-0 max-w-[45%]">
                 {infeasible ? (
                   <p className="text-xs font-semibold text-red-500 dark:text-red-400">Not achievable</p>
                 ) : works ? (
@@ -193,11 +221,12 @@ function ProbabilityCard({ results, targetCoC, onTargetCoCChange, targetIRR, onT
 
       {/* IRR probability */}
       <div className="space-y-1.5">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-slate-500 dark:text-slate-400 inline-flex items-center gap-1">
-            <TargetInput value={targetIRR} onChange={onTargetIRRChange} step={0.5} />% IRR target
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <span className="text-xs text-slate-500 dark:text-slate-400 inline-flex items-center gap-1 min-w-0">
+            <InlineEditTarget value={targetIRR} onChange={onTargetIRRChange} suffix="%" />
+            <span className="truncate">IRR target</span>
           </span>
-          <span className={`text-sm font-bold tabular-nums ${irrTextColor}`}>{probIRR}% chance</span>
+          <span className={`text-sm font-bold tabular-nums shrink-0 ${irrTextColor}`}>{probIRR}% chance</span>
         </div>
         <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
           <div className={`h-full rounded-full transition-all ${irrBarColor}`} style={{ width: `${probIRR}%` }} />
@@ -206,11 +235,12 @@ function ProbabilityCard({ results, targetCoC, onTargetCoCChange, targetIRR, onT
 
       {/* CoC probability */}
       <div className="space-y-1.5">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-slate-500 dark:text-slate-400 inline-flex items-center gap-1">
-            <TargetInput value={targetCoC} onChange={onTargetCoCChange} step={0.5} />% cash-on-cash target
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <span className="text-xs text-slate-500 dark:text-slate-400 inline-flex items-center gap-1 min-w-0">
+            <InlineEditTarget value={targetCoC} onChange={onTargetCoCChange} suffix="%" />
+            <span className="truncate">cash-on-cash target</span>
           </span>
-          <span className={`text-sm font-bold tabular-nums ${cocTextColor}`}>{probCoC}% chance</span>
+          <span className={`text-sm font-bold tabular-nums shrink-0 ${cocTextColor}`}>{probCoC}% chance</span>
         </div>
         <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
           <div className={`h-full rounded-full transition-all ${cocBarColor}`} style={{ width: `${probCoC}%` }} />
@@ -237,25 +267,30 @@ function ScenarioOutcomes({ results }: { results: MCResults }) {
   const bullData = results[bullPercentile] ?? results.p80 ?? results.p50;
 
   const scenarios = [
-    { label: 'If things go wrong', color: 'text-red-500 dark:text-red-400',              bg: 'bg-red-50 dark:bg-red-900/20',              data: bearData },
-    { label: 'Most likely',        color: 'text-primary-600 dark:text-primary-400',       bg: 'bg-primary-50 dark:bg-primary-900/20',       data: results.p50 },
-    { label: 'If things go well',  color: 'text-secondary-600 dark:text-secondary-400',   bg: 'bg-secondary-50 dark:bg-secondary-900/20',   data: bullData },
+    { label: 'Downside',    color: 'text-red-500 dark:text-red-400',            bg: 'bg-red-50 dark:bg-red-900/20',            data: bearData },
+    { label: 'Base',        color: 'text-primary-600 dark:text-primary-400',     bg: 'bg-primary-50 dark:bg-primary-900/20',     data: results.p50 },
+    { label: 'Upside',      color: 'text-secondary-600 dark:text-secondary-400', bg: 'bg-secondary-50 dark:bg-secondary-900/20', data: bullData },
+  ];
+
+  const metrics = (data: typeof bearData) => [
+    { label: 'IRR',    value: fmtIrr(data.irr) },
+    { label: 'CoC',    value: formatPct(data.avgCoCReturn) },
+    { label: 'Equity', value: formatMultiple(data.equityMultiple) },
   ];
 
   return (
     <div>
       <p className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-3">Scenario Outcomes</p>
-      <div className="grid grid-cols-3 gap-2">
+
+      {/* Mobile: stacked cards, metrics in a row; sm+: 3-column grid */}
+      <div className="space-y-2 sm:space-y-0 sm:grid sm:grid-cols-3 sm:gap-2">
         {scenarios.map(({ label, color, bg, data }) => (
-          <div key={label} className={`rounded-xl p-3 ${bg} space-y-2`}>
-            <p className={`text-[11px] font-bold leading-tight ${color}`}>{label}</p>
-            <div className="space-y-1.5">
-              {[
-                { label: 'IRR',    value: fmtIrr(data.irr) },
-                { label: 'CoC',    value: formatPct(data.avgCoCReturn) },
-                { label: 'Equity', value: formatMultiple(data.equityMultiple) },
-              ].map(({ label: l, value }) => (
-                <div key={l} className="flex justify-between items-baseline">
+          <div key={label} className={`rounded-xl p-3 ${bg}`}>
+            <p className={`text-xs font-bold mb-2 ${color}`}>{label}</p>
+            {/* On mobile: metrics flow horizontally; on sm+: stacked */}
+            <div className="flex justify-between sm:flex-col sm:space-y-1.5">
+              {metrics(data).map(({ label: l, value }) => (
+                <div key={l} className="flex flex-col sm:flex-row sm:justify-between sm:items-baseline min-w-0">
                   <span className="text-[10px] text-slate-500 dark:text-slate-400">{l}</span>
                   <span className={`text-sm font-bold tabular-nums ${color}`}>{value}</span>
                 </div>
@@ -278,12 +313,12 @@ function RiskDrivers({ results }: { results: MCResults }) {
         {results.sensitivity.map(({ key, label, correlation }) => {
           const { label: impLabel, color, width } = impactLabel(correlation);
           return (
-            <div key={key} className="flex items-center gap-3">
-              <span className="text-xs text-slate-600 dark:text-slate-400 w-36 shrink-0">{label}</span>
-              <div className="flex-1 h-2 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+            <div key={key} className="flex items-center gap-2">
+              <span className="text-xs text-slate-600 dark:text-slate-400 w-28 shrink-0 truncate">{label}</span>
+              <div className="flex-1 min-w-0 h-2 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
                 <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${width}%` }} />
               </div>
-              <span className={`text-[10px] font-semibold w-10 text-right ${
+              <span className={`text-[10px] font-semibold w-9 text-right shrink-0 ${
                 impLabel === 'High'   ? 'text-red-500 dark:text-red-400' :
                 impLabel === 'Medium' ? 'text-amber-500 dark:text-amber-400' :
                 'text-slate-400'
@@ -332,14 +367,14 @@ function RangeEditor({ ranges, defaults, onChange, onReset, showRefiRate }: {
         )}
       </div>
 
-      <div className="grid grid-cols-[1fr_80px_80px_80px] gap-x-3 items-center">
-        <span />
+      {/* Column header row */}
+      <div className="grid grid-cols-3 gap-2">
         <span className="text-[10px] font-semibold text-red-400 text-center uppercase tracking-wide">Pessimistic</span>
         <span className="text-[10px] font-semibold text-primary-400 text-center uppercase tracking-wide">Base</span>
         <span className="text-[10px] font-semibold text-secondary-500 text-center uppercase tracking-wide">Optimistic</span>
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-3">
         {fields.map(({ key, label, step, decimals, higherIsWorse }) => {
           const d = defaults[key];
           if (!d) return null;
@@ -370,26 +405,29 @@ function RangeEditor({ ranges, defaults, onChange, onReset, showRefiRate }: {
           };
 
           return (
-            <div key={key} className="grid grid-cols-[1fr_80px_80px_80px] gap-x-3 items-center">
-              <span className="text-xs text-slate-600 dark:text-slate-400">{label}</span>
-              <input type="number" value={pessDisplay} step={step}
-                onChange={e => setDraft(d2 => ({ ...d2, [pessKey]: e.target.value }))}
-                onBlur={commitPess} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                className="w-full text-center text-xs font-semibold tabular-nums rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 px-1 py-1.5 focus:outline-none focus:ring-1 focus:ring-red-400"
-              />
-              <div className="w-full text-center text-xs font-semibold tabular-nums rounded-lg bg-slate-100 dark:bg-slate-700 text-primary-600 dark:text-primary-400 px-1 py-1.5 select-none">
-                {fmt(d.mode)}
+            <div key={key} className="space-y-1.5">
+              {/* Label — always full width */}
+              <p className="text-xs font-medium text-slate-600 dark:text-slate-400">{label}</p>
+              {/* Three inputs in equal columns */}
+              <div className="grid grid-cols-3 gap-2">
+                <input type="number" value={pessDisplay} step={step}
+                  onChange={e => setDraft(d2 => ({ ...d2, [pessKey]: e.target.value }))}
+                  onBlur={commitPess} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                  className="w-full min-w-0 text-center text-xs font-semibold tabular-nums rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 px-1 py-1.5 focus:outline-none focus:ring-1 focus:ring-red-400"
+                />
+                <div className="w-full text-center text-xs font-semibold tabular-nums rounded-lg bg-slate-100 dark:bg-slate-700 text-primary-600 dark:text-primary-400 px-1 py-1.5 select-none">
+                  {fmt(d.mode)}
+                </div>
+                <input type="number" value={optimDisplay} step={step}
+                  onChange={e => setDraft(d2 => ({ ...d2, [optimKey]: e.target.value }))}
+                  onBlur={commitOptim} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                  className="w-full min-w-0 text-center text-xs font-semibold tabular-nums rounded-lg border border-secondary-200 dark:border-secondary-800 bg-secondary-50 dark:bg-secondary-900/20 text-secondary-600 dark:text-secondary-400 px-1 py-1.5 focus:outline-none focus:ring-1 focus:ring-secondary-400"
+                />
               </div>
-              <input type="number" value={optimDisplay} step={step}
-                onChange={e => setDraft(d2 => ({ ...d2, [optimKey]: e.target.value }))}
-                onBlur={commitOptim} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                className="w-full text-center text-xs font-semibold tabular-nums rounded-lg border border-secondary-200 dark:border-secondary-800 bg-secondary-50 dark:bg-secondary-900/20 text-secondary-600 dark:text-secondary-400 px-1 py-1.5 focus:outline-none focus:ring-1 focus:ring-secondary-400"
-              />
             </div>
           );
         })}
       </div>
-      <p className="text-[10px] text-slate-400 dark:text-slate-500">Re-run after changing assumptions.</p>
     </div>
   );
 }
@@ -549,69 +587,72 @@ export function MonteCarloPanel({
       {/* Progress */}
       {running && <ProgressBar pct={progress} />}
 
-      {/* Results */}
+      {/* Results — vertical stack */}
       {results && !running && (
         <div className="space-y-5">
-          <PriceGuidanceCard
-            recommendedMaxPrice={recommendedMaxPrice}
-            conservativeMaxPrice={conservativeMaxPrice}
-            targetIRR={targetIRR}
-            currentPrice={acquisition.purchasePrice}
-          />
           <ProbabilityCard
             results={results}
             targetCoC={targetCoC} onTargetCoCChange={setTargetCoC}
             targetIRR={targetIRR} onTargetIRRChange={setTargetIRR}
+          />
+          <PriceGuidanceCard
+            recommendedMaxPrice={recommendedMaxPrice}
+            conservativeMaxPrice={conservativeMaxPrice}
+            targetIRR={targetIRR}
+            onTargetIRRChange={setTargetIRR}
+            currentPrice={acquisition.purchasePrice}
           />
           <ScenarioOutcomes results={results} />
           <RiskDrivers results={results} />
         </div>
       )}
 
-      {/* Market Uncertainty Ranges toggle */}
-      {!showEditor && (
-        <button
-          type="button"
-          onClick={() => { setDraftRanges(ranges); setShowEditor(true); }}
-          className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
-        >
-          <ChevronDown size={12} />
-          Market Uncertainty Ranges
-        </button>
-      )}
-
-      {showEditor && (
-        <div className="space-y-4" ref={editorRef}>
+      {/* Market Uncertainty Ranges */}
+      <div ref={editorRef}>
+        <div className="flex items-center justify-between">
           <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">Market Uncertainty Ranges</p>
-          <RangeEditor
-            ranges={draftRanges}
-            defaults={defaults}
-            onChange={setDraftRanges}
-            onReset={() => setDraftRanges(defaults)}
-            showRefiRate={refinance.enabled}
-          />
-          <div className="flex items-center gap-2 pt-1">
-            <button
-              type="button"
-              onClick={() => {
-                handleRangesChange(draftRanges);
-                setShowEditor(false);
-                runRef.current();
-              }}
-              className="px-4 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-xs font-semibold transition-colors"
-            >
-              Done
-            </button>
-            <button
-              type="button"
-              onClick={() => { setDraftRanges(ranges); setShowEditor(false); }}
-              className="px-4 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-slate-400 text-xs font-medium transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => { setDraftRanges(ranges); setShowEditor(v => !v); }}
+            className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+            aria-label="Edit market uncertainty ranges"
+          >
+            <Pencil size={12} />
+          </button>
         </div>
-      )}
+
+        {showEditor && (
+          <div className="space-y-4 mt-2">
+            <RangeEditor
+              ranges={draftRanges}
+              defaults={defaults}
+              onChange={setDraftRanges}
+              onReset={() => setDraftRanges(defaults)}
+              showRefiRate={refinance.enabled}
+            />
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  handleRangesChange(draftRanges);
+                  setShowEditor(false);
+                  runRef.current();
+                }}
+                className="px-4 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-xs font-semibold transition-colors"
+              >
+                Done
+              </button>
+              <button
+                type="button"
+                onClick={() => { setDraftRanges(ranges); setShowEditor(false); }}
+                className="px-4 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-slate-400 text-xs font-medium transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
