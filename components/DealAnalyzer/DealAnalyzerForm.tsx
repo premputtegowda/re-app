@@ -505,8 +505,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
   const resultsRef = useRef<HTMLDivElement>(null);
   const mcSimRunRef = useRef<(() => void) | null>(null);
-  const lastCalcFingerprintRef = useRef<string | null>(null);
-  const pendingCalcTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Recompute results when opening a saved deal
   useEffect(() => {
@@ -654,51 +652,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [acquisition.propertyAddress]);
 
-  // Auto-recalculate returns (1.5s debounce) once initial calculation has been done
-  const baseFingerprint = JSON.stringify({ acquisition, operations, proForma, refinance });
-  useEffect(() => {
-    if (Object.keys(scenarioResults).length === 0) return;
-    if (lastCalcFingerprintRef.current === null) {
-      lastCalcFingerprintRef.current = baseFingerprint;
-      return;
-    }
-    if (baseFingerprint === lastCalcFingerprintRef.current) return;
-    const timer = setTimeout(() => {
-      pendingCalcTimerRef.current = null;
-      handleCalculate();
-    }, 1500);
-    pendingCalcTimerRef.current = timer;
-    return () => {
-      clearTimeout(timer);
-      pendingCalcTimerRef.current = null;
-    };
-  }, [baseFingerprint]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Fire pending recalculation immediately when page is hidden or about to unload
-  useEffect(() => {
-    const flushPending = () => {
-      if (pendingCalcTimerRef.current !== null) {
-        clearTimeout(pendingCalcTimerRef.current);
-        pendingCalcTimerRef.current = null;
-        handleCalculate();
-      }
-    };
-    const handleVisibility = () => {
-      if (document.visibilityState === 'hidden') flushPending();
-    };
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (pendingCalcTimerRef.current !== null) {
-        flushPending();
-        e.preventDefault();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibility);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Stable arrays for calculator props (must be memoized — new refs trigger external effects) ──
 
@@ -769,7 +722,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
     const updatedResults = { ...scenarioResults, [activeType]: newResult };
     setScenarioResults(updatedResults);
-    lastCalcFingerprintRef.current = JSON.stringify({ acquisition, operations, proForma, refinance });
 
     if (savedDealId) {
       const name = saveName || defaultSaveName(acquisition);
@@ -813,6 +765,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       setActiveStep(next);
       if (savedDealId) updateCurrentStep(savedDealId, next);
     }
+
+    // Recalculate returns whenever a step is completed (after initial calc)
+    if (Object.keys(scenarioResults).length > 0) handleCalculate();
   };
 
   // ── Save ──
@@ -1147,6 +1102,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 <Button variant="primary" fullWidth={!completedOpsSections.has('rent')} onClick={() => {
                   setCompletedOpsSections(prev => { const s = new Set(prev); s.add('rent'); return s; });
                   setActiveOpsSection(hasTargetRent ? 'valueAdd' : null);
+                  if (Object.keys(scenarioResults).length > 0) handleCalculate();
                 }}>Done</Button>
               </div>
             </div>
@@ -1314,6 +1270,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     } else {
                       setActiveOpsSection(null);
                     }
+                    if (Object.keys(scenarioResults).length > 0) handleCalculate();
                   }}>Done</Button>
                 </div>
               </motion.div>
@@ -1546,6 +1503,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                   <Button variant="primary" fullWidth={!completedOpsSections.has('stab')} onClick={() => {
                     setCompletedOpsSections(prev => { const s = new Set(prev); s.add('stab'); return s; });
                     setActiveOpsSection(null);
+                    if (Object.keys(scenarioResults).length > 0) handleCalculate();
                   }}>Done</Button>
                 </div>
               </motion.div>
