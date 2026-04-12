@@ -535,9 +535,9 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
 
 function MetricCell({ label, value, sub, mostLikely, loading, color, large }: { label: string; value: string; sub?: string; mostLikely?: string | null; loading?: boolean; color: string; large?: boolean }) {
   return (
-    <div className="bg-white dark:bg-slate-800 px-2.5 sm:px-4 py-3 sm:py-3.5 flex flex-col min-w-0">
+    <div className="bg-white dark:bg-slate-800 px-2 sm:px-4 py-3 sm:py-3.5 flex flex-col min-w-0">
       <p className="text-[9px] sm:text-[10px] font-semibold uppercase tracking-wide sm:tracking-widest text-slate-400 dark:text-slate-500 mb-1 truncate">{label}</p>
-      <p className={`font-bold tabular-nums leading-none truncate ${large ? 'text-xl sm:text-2xl lg:text-3xl' : 'text-base sm:text-xl'} ${color}`}>{value}</p>
+      <p className={`font-bold tabular-nums leading-none ${large ? 'text-base sm:text-2xl lg:text-3xl' : 'text-sm sm:text-xl'} ${color}`}>{value}</p>
       {loading ? (
         <span className="mt-1 h-2.5 w-8 sm:w-10 rounded bg-slate-200 dark:bg-slate-600 animate-pulse" />
       ) : mostLikely ? (
