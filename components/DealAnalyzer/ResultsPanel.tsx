@@ -494,8 +494,7 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
         </Card>
       )}
 
-      {/* Always mounted so runTriggerRef stays populated; hidden when tab inactive */}
-      <div className={activeTab === 'montecarlo' ? undefined : 'hidden'}>
+      {activeTab === 'montecarlo' && (
         <MonteCarloPanel
           acquisition={acquisition}
           operations={operations}
@@ -512,7 +511,7 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
           runTriggerRef={stressRunRef}
           openEditorRef={openEditorRef}
         />
-      </div>
+      )}
     </div>
   );
 }
