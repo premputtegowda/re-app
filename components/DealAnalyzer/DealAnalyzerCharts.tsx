@@ -11,33 +11,96 @@ import {
   Tooltip,
   ReferenceLine,
   Legend,
+  Customized,
   ResponsiveContainer,
 } from 'recharts';
 import { Card } from '@/components/UI/Card';
 import type { CoCYearlyProjection } from '@/types';
 import { formatCurrency } from '@/utils/dealAnalyzerCalc';
+import type { SavedMCResults } from '@/utils/monteCarlo';
 
 interface DealChartsProps {
   projections: CoCYearlyProjection[];
+  mcResults?: SavedMCResults | null;
 }
 
-export function DealCharts({ projections }: DealChartsProps) {
-  const exitYear = projections.length;
+// Renders purple dotted bars overlaid on the CF bars using chart internals
+function P50CFOverlay({ xAxisMap, yAxisMap, data }: any) {
+  const xAxis = xAxisMap?.[0];
+  const yAxis = yAxisMap?.['left'];
+  if (!xAxis || !yAxis) return null;
 
-  // Split cash flow into operating vs refi cash-out.
-  // Exit year proceeds are part of the deal story but not refi — keep them in operatingCF.
+  const bandwidth = xAxis.bandSize ?? xAxis.bandwidth?.() ?? 40;
+  const barW = Math.min(40, bandwidth * 0.6);
+  const zeroY = yAxis.scale(0);
+  const patternId = 'p50-dots';
+  const refiPatternId = 'p50-refi-dots';
+
+  return (
+    <g>
+      <defs>
+        <pattern id={patternId} patternUnits="userSpaceOnUse" width="6" height="6">
+          <circle cx="3" cy="3" r="1.8" fill="#1E293B" />
+        </pattern>
+        <pattern id={refiPatternId} patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="6" stroke="#6366F1" strokeWidth="2.5" />
+        </pattern>
+      </defs>
+      {data.map((d: any) => {
+        if (d.p50CF == null) return null;
+        const cx = xAxis.scale(d.year) + bandwidth / 2;
+        const x = cx - barW / 2;
+
+        // Operating CF portion
+        const opY  = yAxis.scale(d.p50CF);
+        const opTop = Math.min(opY, zeroY);
+        const opH   = Math.abs(opY - zeroY);
+
+        // Refi cash-out portion stacked on top of operating CF
+        const hasRefi = d.p50RefiCashOut > 0;
+        const refiTop = hasRefi ? yAxis.scale(d.p50CF + d.p50RefiCashOut) : 0;
+        const refiH   = hasRefi ? Math.abs(opTop - refiTop) : 0;
+
+        return (
+          <g key={d.year}>
+            <rect x={x} y={opTop} width={barW} height={opH}
+              fill={`url(#${patternId})`} stroke="#1E293B" strokeWidth={1} strokeOpacity={0.4} rx={3} />
+            {hasRefi && (
+              <rect x={x} y={refiTop} width={barW} height={refiH}
+                fill={`url(#${refiPatternId})`} stroke="#6366F1" strokeWidth={1} strokeOpacity={0.4}
+                rx={3} />
+            )}
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+export function DealCharts({ projections, mcResults }: DealChartsProps) {
+  const exitYear = projections.length;
+  const yearlyP50 = mcResults?.yearlyP50?.length ? mcResults.yearlyP50 : null;
+
   const data = projections.map((p) => {
     const isRefiYear = p.year < exitYear && p.cashOutProceeds > 0;
+    const p50Year = yearlyP50?.find(y => y.year === p.year);
+    const p50Refi = p50Year?.cashOutProceeds ?? 0;
+    const isP50RefiYear = p50Year != null && p50Refi > 0;
     return {
       ...p,
       operatingCF: isRefiYear ? p.cashFlow - p.cashOutProceeds : p.cashFlow,
       refiCashOut: isRefiYear ? p.cashOutProceeds : 0,
+      ...(p50Year ? {
+        p50CF:           isP50RefiYear ? p50Year.cashFlow - p50Refi : p50Year.cashFlow,
+        p50RefiCashOut:  p50Refi,
+        p50CoC:          p50Year.coCReturn,
+      } : {}),
     };
   });
 
-  const hasRefi    = data.some((d) => d.refiCashOut > 0);
-  const hasPosCF   = data.some((d) => d.operatingCF >= 0);
-  const hasNegCF   = data.some((d) => d.operatingCF < 0);
+  const hasRefi  = data.some((d) => d.refiCashOut > 0);
+  const hasPosCF = data.some((d) => d.operatingCF >= 0);
+  const hasNegCF = data.some((d) => d.operatingCF < 0);
 
   return (
     <Card padding="none">
@@ -56,7 +119,6 @@ export function DealCharts({ projections }: DealChartsProps) {
               axisLine={false}
               tickFormatter={(v) => `Yr ${v}`}
             />
-            {/* Left axis — dollars */}
             <YAxis
               yAxisId="left"
               orientation="left"
@@ -66,7 +128,6 @@ export function DealCharts({ projections }: DealChartsProps) {
               axisLine={false}
               tickLine={false}
             />
-            {/* Right axis — percentage */}
             <YAxis
               yAxisId="right"
               orientation="right"
@@ -79,9 +140,12 @@ export function DealCharts({ projections }: DealChartsProps) {
             <Tooltip
               contentStyle={{ fontSize: 12, borderRadius: 8, border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
               formatter={(value: number, name: string) => {
-                if (name === 'operatingCF') return [formatCurrency(value), 'Operating Cash Flow'];
+                if (name === 'operatingCF') return [formatCurrency(value), 'Cash Flow'];
                 if (name === 'refiCashOut') return [formatCurrency(value), 'Refi Cash-Out'];
                 if (name === 'coCReturn') return [`${value.toFixed(2)}%`, 'CoC Return'];
+                if (name === 'p50CoC') return [`${value.toFixed(2)}%`, 'Most Likely CoC'];
+                if (name === 'p50CF') return [formatCurrency(value), 'Most Likely CF'];
+                if (name === 'p50RefiCashOut') return [formatCurrency(value), 'Most Likely Refi Cash-Out'];
                 return [value, name];
               }}
               labelFormatter={(label) => `Year ${label}`}
@@ -90,12 +154,11 @@ export function DealCharts({ projections }: DealChartsProps) {
               wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
               content={() => (
                 <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 pt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                  {/* Cash flow swatch — split only when both signs exist */}
                   <span className="flex items-center gap-1">
                     {hasPosCF && hasNegCF ? (
                       <span className="flex flex-col">
                         <span className="inline-block w-5 h-1.5 rounded-t-sm" style={{ background: '#10B981' }} />
-                        <span className="inline-block w-5 h-1.5 rounded-b-sm" style={{ background: '#EF4444' }} />
+                        <span className="inline-block w-1.5 h-1.5 rounded-b-sm" style={{ background: '#EF4444' }} />
                       </span>
                     ) : (
                       <span className="inline-block w-5 h-3 rounded-sm" style={{ background: hasNegCF ? '#EF4444' : '#10B981' }} />
@@ -112,19 +175,24 @@ export function DealCharts({ projections }: DealChartsProps) {
                     <span className="inline-block w-5 h-0.5 rounded" style={{ background: '#F59E0B' }} />
                     CoC Return (%)
                   </span>
+                  {yearlyP50 && (
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block w-5 h-3 rounded-sm" style={{ background: '#1E293B', opacity: 0.6 }} />
+                      Most Likely (Accounts for market uncertainty)
+                    </span>
+                  )}
                 </div>
               )}
             />
-            <ReferenceLine yAxisId="left" y={0} stroke="#94A3B8" strokeDasharray="4 4" />
+            <ReferenceLine yAxisId="left" y={0} stroke="#1E293B" strokeDasharray="4 4" />
 
-            {/* Operating cash flow — green positive, red negative */}
+            {/* Actual cash flow bars */}
             <Bar yAxisId="left" dataKey="operatingCF" stackId="cf" radius={[0, 0, 0, 0]} maxBarSize={40}>
               {data.map((entry, i) => (
                 <Cell key={i} fill={entry.operatingCF >= 0 ? '#10B981' : '#EF4444'} />
               ))}
             </Bar>
 
-            {/* Refi cash-out — stacked on top in indigo */}
             {hasRefi && (
               <Bar yAxisId="left" dataKey="refiCashOut" stackId="cf" radius={[3, 3, 0, 0]} maxBarSize={40} fill="#6366F1" />
             )}
@@ -139,6 +207,26 @@ export function DealCharts({ projections }: DealChartsProps) {
               dot={{ fill: '#F59E0B', r: 3, strokeWidth: 0 }}
               activeDot={{ r: 5 }}
             />
+
+            {/* Most likely CoC — dashed line on right axis */}
+            {yearlyP50 && (
+              <Line
+                yAxisId="right"
+                type="monotone"
+                dataKey="p50CoC"
+                stroke="#1E293B"
+                strokeWidth={1.5}
+                strokeDasharray="4 3"
+                dot={{ fill: '#1E293B', r: 3, strokeWidth: 2, stroke: '#fff' }}
+                activeDot={{ r: 5 }}
+                legendType="none"
+              />
+            )}
+
+            {/* Most likely cash flow — purple dotted bars overlaid on CF bars */}
+            {yearlyP50 && (
+              <Customized component={(props: any) => <P50CFOverlay {...props} data={data} />} />
+            )}
           </ComposedChart>
         </ResponsiveContainer>
       </div>
