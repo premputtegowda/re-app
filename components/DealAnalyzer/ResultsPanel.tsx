@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback } from 'react';
-import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Card } from '@/components/UI/Card';
 import type { CoCResult, CoCAcquisition, CoCOperations, CoCRefinance, ProFormaData } from '@/types';
 import { formatCurrency, formatPct, formatMultiple } from '@/utils/dealAnalyzerCalc';
@@ -316,8 +316,6 @@ interface ResultsPanelProps {
   onMcRangesChange?: (r: MCRanges) => void;
   mcResults?: SavedMCResults | null;
   onMcResultsChange?: (r: SavedMCResults) => void;
-  baseStale?: boolean;
-  onRefreshBase?: () => void;
   /** Ref filled with the MC simulation run function — caller can trigger a run externally */
   mcSimRunRef?: React.MutableRefObject<(() => void) | null>;
 }
@@ -338,7 +336,7 @@ function computeAvgRents(acquisition: CoCAcquisition): { units: number; avgTarge
   return { units: acquisition.units || 1, avgTargetRent: 0, avgPreStabRent: 0 };
 }
 
-export function ResultsPanel({ result, acquisition, operations, proForma, refinance, mcRanges, onMcRangesChange, mcResults, onMcResultsChange, baseStale, onRefreshBase, mcSimRunRef }: ResultsPanelProps) {
+export function ResultsPanel({ result, acquisition, operations, proForma, refinance, mcRanges, onMcRangesChange, mcResults, onMcResultsChange, mcSimRunRef }: ResultsPanelProps) {
   const [activeTab, setActiveTab] = useState<ResultTab>('summary');
   const { units, avgTargetRent, avgPreStabRent } = computeAvgRents(acquisition);
   const { totalInvested, avgCoCReturn, irr, equityMultiple, peakCoCReturn, totalCashFlow } = result;
@@ -371,21 +369,6 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
           </div>
         </div>
 
-        {/* Refresh Returns banner — shown when base inputs changed */}
-        {baseStale && !stressRunning && (
-          <div className="flex items-center justify-between gap-3 mb-4 px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700">
-            <p className="text-xs text-amber-700 dark:text-amber-400">Inputs changed — results may be outdated</p>
-            <button
-              type="button"
-              onClick={() => { onRefreshBase?.(); stressRunRef.current?.(); }}
-              className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold transition-colors shrink-0"
-            >
-              <span className="absolute inset-0 rounded-lg animate-ping bg-amber-400 opacity-30 pointer-events-none" />
-              <RefreshCw size={11} />
-              Refresh Returns
-            </button>
-          </div>
-        )}
 
         {/* Primary metrics — IRR takes prominence */}
         <div className="grid grid-cols-3 gap-px bg-slate-100 dark:bg-slate-700 rounded-xl overflow-hidden w-full">
