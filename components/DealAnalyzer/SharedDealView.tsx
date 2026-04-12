@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Clock, Home, ArrowRight, LogIn } from 'lucide-react';
+import { Clock, Home, ArrowRight, LogIn, Lock } from 'lucide-react';
 import { ResultsPanel } from './ResultsPanel';
 import { projectScenario } from '@/utils/dealAnalyzerCalc';
 import { useAuthStore } from '@/lib/authStore';
@@ -26,7 +26,10 @@ function timeRemaining(expiresAt: string): string {
 
 export function SharedDealView({ deal, token }: SharedDealViewProps) {
   const router = useRouter();
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const { isAuthenticated, user } = useAuthStore((s) => ({ isAuthenticated: s.isAuthenticated, user: s.user }));
+  const features: string[] = user?.features ?? [];
+  const hasDealAnalyzer = features.includes('deal_analyzer');
+  const hasAnyAccess = features.length > 0;
 
   const [mcRanges, setMcRanges] = useState<MCRanges | null>(
     deal.mcRanges ? (deal.mcRanges as unknown as MCRanges) : null
@@ -38,13 +41,19 @@ export function SharedDealView({ deal, token }: SharedDealViewProps) {
   const [forking, setForking] = useState(false);
   const [forkError, setForkError] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [accessModal, setAccessModal] = useState<'no_deal_analyzer' | 'no_access' | null>(null);
 
-  // After login redirect, automatically prompt the user to add the deal
+  // After login redirect, check access and prompt accordingly
   useEffect(() => {
-    if (isAuthenticated && searchParams.get('prompt') === 'add') {
+    if (!isAuthenticated || searchParams.get('prompt') !== 'add') return;
+    if (!hasAnyAccess) {
+      setAccessModal('no_access');
+    } else if (!hasDealAnalyzer) {
+      setAccessModal('no_deal_analyzer');
+    } else {
       setShowConfirm(true);
     }
-  }, [isAuthenticated, searchParams]);
+  }, [isAuthenticated, searchParams, hasDealAnalyzer, hasAnyAccess]);
 
   // Compute result client-side from deal inputs
   const resultRef = useRef<CoCResult | null>(null);
@@ -60,7 +69,6 @@ export function SharedDealView({ deal, token }: SharedDealViewProps) {
       createdAt: deal.savedAt,
       updatedAt: deal.updatedAt,
     };
-    // Try saved result first; fall back to recomputing
     const savedResult = (deal.results as Partial<Record<CoCScenarioType, CoCResult>>)?.base;
     resultRef.current = savedResult ?? projectScenario(scenario);
   }
@@ -69,6 +77,14 @@ export function SharedDealView({ deal, token }: SharedDealViewProps) {
   async function handleAddToDashboard() {
     if (!isAuthenticated) {
       router.push(`/?redirect=${encodeURIComponent(`/shared/${token}?prompt=add`)}`);
+      return;
+    }
+    if (!hasAnyAccess) {
+      setAccessModal('no_access');
+      return;
+    }
+    if (!hasDealAnalyzer) {
+      setAccessModal('no_deal_analyzer');
       return;
     }
     setShowConfirm(true);
@@ -168,6 +184,7 @@ export function SharedDealView({ deal, token }: SharedDealViewProps) {
           </div>
         </div>
       </div>
+
       {/* Confirmation modal */}
       {showConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
@@ -176,7 +193,11 @@ export function SharedDealView({ deal, token }: SharedDealViewProps) {
               Add to your dashboard?
             </h2>
             <p className="text-sm text-slate-500 dark:text-slate-400">
-              This will create a full copy of <span className="font-medium text-slate-700 dark:text-slate-300">{deal.name || deal.acquisition.propertyAddress || 'this deal'}</span> in your account. The original is not affected.
+              This will create a full copy of{' '}
+              <span className="font-medium text-slate-700 dark:text-slate-300">
+                {deal.name || deal.acquisition.propertyAddress || 'this deal'}
+              </span>{' '}
+              in your account. The original is not affected.
             </p>
             <div className="flex gap-3 pt-1">
               <button
@@ -194,6 +215,54 @@ export function SharedDealView({ deal, token }: SharedDealViewProps) {
                 Yes, add it
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* No Deal Analyzer access modal */}
+      {accessModal === 'no_deal_analyzer' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-6 max-w-sm w-full space-y-4">
+            <div className="w-12 h-12 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+              <Lock size={22} className="text-amber-500" />
+            </div>
+            <h2 className="text-base font-semibold text-slate-800 dark:text-slate-200">
+              Deal Analyzer access required
+            </h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              You don't have access to the Deal Analyzer. Contact your administrator to request access, or continue to your dashboard.
+            </p>
+            <button
+              type="button"
+              onClick={() => { setAccessModal(null); router.push('/dashboard'); }}
+              className="w-full px-4 py-2.5 rounded-xl bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
+            >
+              Go to my dashboard
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* No app access modal */}
+      {accessModal === 'no_access' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-6 max-w-sm w-full space-y-4">
+            <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+              <Lock size={22} className="text-red-500" />
+            </div>
+            <h2 className="text-base font-semibold text-slate-800 dark:text-slate-200">
+              No access to DealstackRE
+            </h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Your account doesn't have access to DealstackRE. Please contact support or request access from an administrator.
+            </p>
+            <button
+              type="button"
+              onClick={() => { setAccessModal(null); router.push('/'); }}
+              className="w-full px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium transition-colors"
+            >
+              Back to home
+            </button>
           </div>
         </div>
       )}
