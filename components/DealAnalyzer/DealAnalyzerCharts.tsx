@@ -34,7 +34,6 @@ function P50CFOverlay({ xAxisMap, yAxisMap, data }: any) {
   const barW = Math.min(40, bandwidth * 0.6);
   const zeroY = yAxis.scale(0);
   const patternId = 'p50-dots';
-  const refiPatternId = 'p50-refi-dots';
 
   return (
     <g>
@@ -42,34 +41,21 @@ function P50CFOverlay({ xAxisMap, yAxisMap, data }: any) {
         <pattern id={patternId} patternUnits="userSpaceOnUse" width="6" height="6">
           <circle cx="3" cy="3" r="1.8" fill="#1E293B" />
         </pattern>
-        <pattern id={refiPatternId} patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
-          <line x1="0" y1="0" x2="0" y2="6" stroke="#6366F1" strokeWidth="2.5" />
-        </pattern>
       </defs>
       {data.map((d: any) => {
         if (d.p50CF == null) return null;
         const cx = xAxis.scale(d.year) + bandwidth / 2;
         const x = cx - barW / 2;
 
-        // Operating CF portion
-        const opY  = yAxis.scale(d.p50CF);
+        const total = d.p50CF + (d.p50RefiCashOut ?? 0);
+        const opY  = yAxis.scale(total);
         const opTop = Math.min(opY, zeroY);
         const opH   = Math.abs(opY - zeroY);
-
-        // Refi cash-out portion stacked on top of operating CF
-        const hasRefi = d.p50RefiCashOut > 0;
-        const refiTop = hasRefi ? yAxis.scale(d.p50CF + d.p50RefiCashOut) : 0;
-        const refiH   = hasRefi ? Math.abs(opTop - refiTop) : 0;
 
         return (
           <g key={d.year}>
             <rect x={x} y={opTop} width={barW} height={opH}
               fill={`url(#${patternId})`} stroke="#1E293B" strokeWidth={1} strokeOpacity={0.4} rx={3} />
-            {hasRefi && (
-              <rect x={x} y={refiTop} width={barW} height={refiH}
-                fill={`url(#${refiPatternId})`} stroke="#6366F1" strokeWidth={1} strokeOpacity={0.4}
-                rx={3} />
-            )}
           </g>
         );
       })}
