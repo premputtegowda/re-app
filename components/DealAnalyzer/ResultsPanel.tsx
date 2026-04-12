@@ -14,10 +14,10 @@ import type { MCRanges, SavedMCResults } from '@/utils/monteCarlo';
 
 function verdict(irr: number | null, avgCoC: number): { label: string; color: string } {
   const score = (irr ?? 0) * 0.6 + avgCoC * 0.4;
-  if (score >= 15) return { label: 'Strong Deal', color: 'bg-secondary-100 text-secondary-700 dark:bg-secondary-900/40 dark:text-secondary-300' };
-  if (score >= 8)  return { label: 'Solid Deal',  color: 'bg-primary-100 text-primary-700 dark:bg-primary-900/40 dark:text-primary-300' };
-  if (score >= 4)  return { label: 'Marginal',    color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' };
-  return              { label: 'Weak Deal',   color: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' };
+  if (score >= 17) return { label: 'Strong',   color: 'bg-secondary-100 text-secondary-700 dark:bg-secondary-900/40 dark:text-secondary-300' };
+  if (score >= 12) return { label: 'Solid',    color: 'bg-primary-100 text-primary-700 dark:bg-primary-900/40 dark:text-primary-300' };
+  if (score >= 7)  return { label: 'Marginal', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' };
+  return                   { label: 'Weak',    color: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' };
 }
 
 // ── Collapsible Cost Basis ──────────────────────────────────────────────────────

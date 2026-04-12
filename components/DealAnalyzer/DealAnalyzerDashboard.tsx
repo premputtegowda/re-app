@@ -23,10 +23,10 @@ function getVerdict(result: CoCResult | null): { label: string; score: number; c
   if (!result) return { label: 'Draft', score: -1, color: 'text-slate-400', badge: 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400' };
   // Score weights IRR (60%) and CoC (40%) — industry standard thresholds
   const score = (result.irr ?? 0) * 0.6 + result.avgCoCReturn * 0.4;
-  if (score >= 17) return { label: 'Exceptional', score, color: 'text-secondary-600 dark:text-secondary-400', badge: 'bg-secondary-100 dark:bg-secondary-900/40 text-secondary-700 dark:text-secondary-300' };
-  if (score >= 12) return { label: 'Strong',      score, color: 'text-primary-600 dark:text-primary-400',     badge: 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300' };
-  if (score >= 7)  return { label: 'Solid',       score, color: 'text-amber-600 dark:text-amber-400',         badge: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300' };
-  return                   { label: 'Weak',        score, color: 'text-red-600 dark:text-red-400',             badge: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300' };
+  if (score >= 17) return { label: 'Strong',   score, color: 'text-secondary-600 dark:text-secondary-400', badge: 'bg-secondary-100 dark:bg-secondary-900/40 text-secondary-700 dark:text-secondary-300' };
+  if (score >= 12) return { label: 'Solid',    score, color: 'text-primary-600 dark:text-primary-400',     badge: 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300' };
+  if (score >= 7)  return { label: 'Marginal', score, color: 'text-amber-600 dark:text-amber-400',         badge: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300' };
+  return                   { label: 'Weak',    score, color: 'text-red-600 dark:text-red-400',             badge: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300' };
 }
 
 function formatRelativeDate(iso: string): string {
@@ -44,16 +44,16 @@ function PortfolioSummary({ deals }: { deals: SavedDeal[] }) {
   if (analyses.length === 0) return null;
 
   const results = analyses.map(d => getBestResult(d)!);
-  const exceptionalCount = analyses.filter(d => getVerdict(getBestResult(d)).label === 'Exceptional').length;
   const strongCount = analyses.filter(d => getVerdict(getBestResult(d)).label === 'Strong').length;
+  const solidCount = analyses.filter(d => getVerdict(getBestResult(d)).label === 'Solid').length;
   const irrValues = results.map(r => r.irr).filter((v): v is number => v !== null);
   const bestIRR = irrValues.length > 0 ? Math.max(...irrValues) : null;
   const bestCoC = results.length > 0 ? Math.max(...results.map(r => r.avgCoCReturn)) : null;
 
   const stats = [
     { label: 'Deals Analyzed', value: analyses.length.toString() },
-    { label: 'Exceptional', value: exceptionalCount.toString() },
     { label: 'Strong', value: strongCount.toString() },
+    { label: 'Solid', value: solidCount.toString() },
     { label: 'Best IRR', value: bestIRR !== null ? formatPct(bestIRR) : '—' },
     { label: 'Best CoC', value: bestCoC !== null ? formatPct(bestCoC) : '—' },
   ];
