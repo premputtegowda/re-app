@@ -45,7 +45,11 @@ export function FeedbackButton() {
         type="button"
         onClick={() => setOpen(true)}
         title="Send feedback"
-        className="fixed bottom-20 right-4 lg:bottom-6 lg:right-6 z-40 w-12 h-12 rounded-full bg-primary-600 hover:bg-primary-700 text-white shadow-lg hover:shadow-xl transition-all flex items-center justify-center"
+        className={`fixed right-4 lg:right-6 z-[60] w-12 h-12 rounded-full bg-primary-600 hover:bg-primary-700 text-white shadow-lg hover:shadow-xl transition-all flex items-center justify-center ${
+          pathname.startsWith('/deal-analyzer/') && pathname !== '/deal-analyzer/'
+            ? 'bottom-36 lg:bottom-20'
+            : 'bottom-20 lg:bottom-6'
+        }`}
       >
         <MessageCircle size={20} />
       </button>

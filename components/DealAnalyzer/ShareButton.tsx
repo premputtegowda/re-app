@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Share2, Copy, Check, X, Clock, Users, Building2, UserCheck } from 'lucide-react';
+import { Share, Copy, Check, X, Clock, Users, Building2, UserCheck } from 'lucide-react';
 import { api, ApiError } from '@/lib/api';
 
 interface ShareButtonProps {
@@ -92,7 +92,7 @@ export function ShareButton({ dealId }: ShareButtonProps) {
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors border border-slate-200 dark:border-slate-600"
       >
-        <Share2 size={15} />
+        <Share size={15} />
         Share
         {activeLink && (
           <span className="w-2 h-2 rounded-full bg-green-500 ml-0.5" />
