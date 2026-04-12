@@ -77,7 +77,8 @@ function getStepCardData(
       const rate = acquisition.interestRate > 0 ? `${acquisition.interestRate}%` : null;
       const down = acquisition.downPaymentPct > 0 ? `${acquisition.downPaymentPct}% down` : '';
       const term = acquisition.loanTermYears > 0 ? `${acquisition.loanTermYears}yr term` : '';
-      return { primary: price, primaryExtra: rate, sub: [down, term].filter(Boolean).join(' · ') };
+      const exitYr = acquisition.projectionYears > 0 ? `Exit Yr ${acquisition.projectionYears}` : '';
+      return { primary: price, primaryExtra: rate, sub: [down, term, exitYr].filter(Boolean).join(' · ') };
     }
     case 2: {
       const hard = (acquisition.hardCostItems ?? []).reduce((s, e) => s + e.amount, 0);
@@ -278,7 +279,8 @@ function summarizeFinancing(a: CoCAcquisition): string {
   const down = a.downPaymentPct > 0 ? `${a.downPaymentPct}% down` : '';
   const rate = a.interestRate > 0 ? `${a.interestRate}%` : '';
   const term = a.loanTermYears > 0 ? `${a.loanTermYears}yr` : '';
-  return [price, down, rate, term].filter(Boolean).join(' · ');
+  const exit = a.projectionYears > 0 ? `Exit Yr ${a.projectionYears}` : '';
+  return [price, down, rate, term, exit].filter(Boolean).join(' · ');
 }
 
 function summarizeRenovation(a: CoCAcquisition): string {
@@ -1629,7 +1631,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   // ── Render ──
 
   return (
-    <div className="min-h-screen pb-24">
+    <div className="min-h-screen pb-48 lg:pb-36">
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-5">
 
         {/* Header: title + always-visible Cancel / Next / Save */}
@@ -1665,22 +1667,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
               </span>
             )}
             {savedDealId && <ShareButton dealId={savedDealId} />}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => (isDirty || hasNewDealData) ? setShowExitWarning(true) : onBack()}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              disabled={!hasAddress || (savedDealId ? !isDirty : false)}
-              onClick={() => { setSaveName(saveName || defaultSaveName(acquisition)); handleSave(); }}
-              data-testid="header-save-btn"
-            >
-              {savedDealId ? 'Update' : 'Save'}
-            </Button>
           </div>
         </div>
 
@@ -1861,9 +1847,18 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
           <div ref={resultsRef} className="pt-2 space-y-4">
             {!hasAnyResult && (
               hasAnyWarning ? (
-                <p className="text-center text-sm text-amber-600 dark:text-amber-400" data-testid="calc-missing-fields-msg">
-                  Fill in the highlighted fields to see your returns
-                </p>
+                <div className="text-center space-y-1" data-testid="calc-missing-fields-msg">
+                  <p className="text-sm text-amber-600 dark:text-amber-400">
+                    Fill in the highlighted fields to see your returns
+                  </p>
+                  <p className="text-xs text-slate-400 dark:text-slate-500">
+                    or{' '}
+                    <button type="button" onClick={onBack} className="text-primary-500 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 font-medium transition-colors">
+                      return to dashboard
+                    </button>
+                    {' '}to fill in the data later
+                  </p>
+                </div>
               ) : (
                 <Button
                   variant="primary"
@@ -1921,74 +1916,73 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         const hasML   = p50 !== null;
 
         return (
-          <div className="fixed bottom-0 left-0 right-0 z-30 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 shadow-[0_-4px_16px_rgba(0,0,0,0.06)]">
-            <div className="max-w-2xl mx-auto px-4 pt-3 pb-2">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-start gap-4 min-w-0">
+          <div className="fixed bottom-[60px] lg:bottom-0 left-0 right-0 z-50 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 shadow-[0_-4px_16px_rgba(0,0,0,0.06)]">
+            <div className="max-w-2xl mx-auto px-3 pt-2.5" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
+              <div className="flex items-start justify-center lg:justify-between gap-3">
+
+                {/* Metrics */}
+                <div className="flex items-start w-full lg:w-auto gap-0 lg:gap-3">
 
                   {/* IRR */}
-                  <div className="flex flex-col">
-                    <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider">IRR</p>
-                    <p className={`text-sm font-bold tabular-nums ${currentResult.irr == null ? 'text-slate-400' : currentResult.irr >= 8 ? 'text-secondary-600 dark:text-secondary-400' : currentResult.irr < 0 ? 'text-red-500' : 'text-slate-700 dark:text-slate-300'}`}>
+                  <div className="flex flex-col flex-1 lg:flex-none lg:shrink-0 items-center lg:items-start">
+                    <p className="text-[9px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wide">IRR</p>
+                    <p className={`text-[13px] font-bold tabular-nums leading-tight ${currentResult.irr == null ? 'text-slate-400' : currentResult.irr >= 8 ? 'text-secondary-600 dark:text-secondary-400' : currentResult.irr < 0 ? 'text-red-500' : 'text-slate-700 dark:text-slate-300'}`}>
                       {currentResult.irr == null ? '—' : `${currentResult.irr.toFixed(2)}%`}
+                      {hasML && mlIRR != null && <span className="lg:hidden text-[10px] font-normal text-slate-400 dark:text-slate-500 ml-0.5">{`(${mlIRR.toFixed(2)}%)`}</span>}
                     </p>
-                    <p className="text-[10px] tabular-nums text-slate-400 dark:text-slate-500">
-                      {hasML && mlIRR != null ? `(${mlIRR.toFixed(2)}%)` : <span className="invisible">—</span>}
-                    </p>
+                    {hasML && mlIRR != null && <p className="hidden lg:block text-[9px] tabular-nums text-slate-400 dark:text-slate-500">{`(${mlIRR.toFixed(2)}%)`}</p>}
                   </div>
 
-                  <div className="w-px h-12 bg-slate-200 dark:bg-slate-700 shrink-0" />
+                  <div className="w-px bg-slate-200 dark:bg-slate-700 shrink-0 self-stretch" />
 
                   {/* Avg CoC */}
-                  <div className="flex flex-col">
-                    <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider">Avg CoC</p>
-                    <p className={`text-sm font-bold tabular-nums ${currentResult.avgCoCReturn >= 6 ? 'text-secondary-600 dark:text-secondary-400' : currentResult.avgCoCReturn < 0 ? 'text-red-500' : 'text-slate-700 dark:text-slate-300'}`}>
+                  <div className="flex flex-col flex-1 lg:flex-none lg:shrink-0 items-center lg:items-start">
+                    <p className="text-[9px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wide">Avg CoC</p>
+                    <p className={`text-[13px] font-bold tabular-nums leading-tight ${currentResult.avgCoCReturn >= 6 ? 'text-secondary-600 dark:text-secondary-400' : currentResult.avgCoCReturn < 0 ? 'text-red-500' : 'text-slate-700 dark:text-slate-300'}`}>
                       {currentResult.avgCoCReturn.toFixed(2)}%
+                      {hasML && mlCoC != null && <span className="lg:hidden text-[10px] font-normal text-slate-400 dark:text-slate-500 ml-0.5">{`(${mlCoC.toFixed(2)}%)`}</span>}
                     </p>
-                    <p className="text-[10px] tabular-nums text-slate-400 dark:text-slate-500">
-                      {hasML && mlCoC != null ? `(${mlCoC.toFixed(2)}%)` : <span className="invisible">—</span>}
-                    </p>
+                    {hasML && mlCoC != null && <p className="hidden lg:block text-[9px] tabular-nums text-slate-400 dark:text-slate-500">{`(${mlCoC.toFixed(2)}%)`}</p>}
                   </div>
 
-                  <div className="w-px h-12 bg-slate-200 dark:bg-slate-700 shrink-0" />
+                  <div className="w-px bg-slate-200 dark:bg-slate-700 shrink-0 self-stretch" />
 
                   {/* Equity Multiple */}
-                  <div className="flex flex-col">
-                    <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider">Equity ×</p>
-                    <p className={`text-sm font-bold tabular-nums ${currentResult.equityMultiple >= 1.5 ? 'text-primary-600 dark:text-primary-400' : currentResult.equityMultiple < 1 ? 'text-red-500' : 'text-slate-700 dark:text-slate-300'}`}>
+                  <div className="flex flex-col flex-1 lg:flex-none lg:shrink-0 items-center lg:items-start">
+                    <p className="text-[9px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wide">Equity ×</p>
+                    <p className={`text-[13px] font-bold tabular-nums leading-tight ${currentResult.equityMultiple >= 1.5 ? 'text-primary-600 dark:text-primary-400' : currentResult.equityMultiple < 1 ? 'text-red-500' : 'text-slate-700 dark:text-slate-300'}`}>
                       {currentResult.equityMultiple.toFixed(2)}×
+                      {hasML && mlEM != null && <span className="lg:hidden text-[10px] font-normal text-slate-400 dark:text-slate-500 ml-0.5">{`(${mlEM.toFixed(2)}×)`}</span>}
                     </p>
-                    <p className="text-[10px] tabular-nums text-slate-400 dark:text-slate-500">
-                      {hasML && mlEM != null ? `(${mlEM.toFixed(2)}×)` : <span className="invisible">—</span>}
-                    </p>
+                    {hasML && mlEM != null && <p className="hidden lg:block text-[9px] tabular-nums text-slate-400 dark:text-slate-500">{`(${mlEM.toFixed(2)}×)`}</p>}
                   </div>
 
-                  <div className="w-px h-12 bg-slate-200 dark:bg-slate-700 shrink-0 hidden sm:block" />
+                  <div className="w-px bg-slate-200 dark:bg-slate-700 shrink-0 self-stretch hidden sm:block" />
 
-                  {/* Avg Mo. CF */}
-                  <div className="hidden sm:flex flex-col">
-                    <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider">Avg Mo. CF</p>
-                    <p className={`text-sm font-bold tabular-nums ${avgMoCF >= 0 ? 'text-secondary-600 dark:text-secondary-400' : 'text-red-500'}`}>
+                  {/* Avg Mo. CF — hidden on mobile */}
+                  <div className="hidden sm:flex flex-col flex-1 lg:flex-none lg:shrink-0 items-center lg:items-start">
+                    <p className="text-[9px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wide">Avg Mo. CF</p>
+                    <p className={`text-[13px] font-bold tabular-nums leading-tight ${avgMoCF >= 0 ? 'text-secondary-600 dark:text-secondary-400' : 'text-red-500'}`}>
                       {fmt(avgMoCF)}
+                      {hasML && mlMoCF != null && <span className="lg:hidden text-[10px] font-normal text-slate-400 dark:text-slate-500 ml-0.5">{`(${fmt(mlMoCF)})`}</span>}
                     </p>
-                    <p className="text-[10px] tabular-nums text-slate-400 dark:text-slate-500">
-                      {hasML && mlMoCF != null ? `(${fmt(mlMoCF)})` : <span className="invisible">—</span>}
-                    </p>
+                    {hasML && mlMoCF != null && <p className="hidden lg:block text-[9px] tabular-nums text-slate-400 dark:text-slate-500">{`(${fmt(mlMoCF)})`}</p>}
                   </div>
 
                 </div>
 
+                {/* Dashboard link — desktop only, mobile has nav bar below */}
                 <button
                   type="button"
-                  onClick={() => { setActiveStep(4); setEditingStep(null); }}
-                  className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 text-xs font-semibold hover:bg-primary-100 dark:hover:bg-primary-900/50 transition-colors"
+                  onClick={onBack}
+                  className="hidden lg:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 text-xs font-semibold hover:bg-primary-100 dark:hover:bg-primary-900/50 transition-colors shrink-0 whitespace-nowrap"
                 >
-                  View Charts ↗
+                  ← Dashboard
                 </button>
               </div>
-              {/* Legend — only shown after simulation has been run */}
+
               {hasML && (
-                <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">( ) = most likely (simulation p50)</p>
+                <p className="text-[7px] text-slate-400 dark:text-slate-500 mt-0.5">( ) = most likely accounting for market uncertainty</p>
               )}
             </div>
           </div>
