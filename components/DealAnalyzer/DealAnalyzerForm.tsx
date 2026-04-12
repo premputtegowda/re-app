@@ -505,6 +505,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
   const resultsRef = useRef<HTMLDivElement>(null);
   const mcSimRunRef = useRef<(() => void) | null>(null);
+  const calcDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Recompute results when opening a saved deal
   useEffect(() => {
@@ -707,6 +708,16 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
   // ── Calculate ──
 
+  // Debounced recalculate — resets timer if user hits Done on another section quickly
+  const scheduleCalculate = () => {
+    if (Object.keys(scenarioResults).length === 0) return;
+    if (calcDebounceRef.current) clearTimeout(calcDebounceRef.current);
+    calcDebounceRef.current = setTimeout(() => {
+      calcDebounceRef.current = null;
+      handleCalculate();
+    }, 2000);
+  };
+
   const handleCalculate = () => {
     const scenario: CoCScenario = {
       id: Date.now().toString(36),
@@ -737,10 +748,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
     // Re-run simulation whenever base results are refreshed
     mcSimRunRef.current?.();
-
-    setTimeout(() => {
-      resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 150);
   };
 
   // ── Step continue ──
@@ -766,8 +773,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       if (savedDealId) updateCurrentStep(savedDealId, next);
     }
 
-    // Recalculate returns whenever a step is completed (after initial calc)
-    if (Object.keys(scenarioResults).length > 0) handleCalculate();
+    // Schedule recalculate with debounce so rapid Done clicks don't fire multiple times
+    scheduleCalculate();
   };
 
   // ── Save ──
@@ -1102,7 +1109,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 <Button variant="primary" fullWidth={!completedOpsSections.has('rent')} onClick={() => {
                   setCompletedOpsSections(prev => { const s = new Set(prev); s.add('rent'); return s; });
                   setActiveOpsSection(hasTargetRent ? 'valueAdd' : null);
-                  if (Object.keys(scenarioResults).length > 0) handleCalculate();
+                  scheduleCalculate();
                 }}>Done</Button>
               </div>
             </div>
@@ -1270,7 +1277,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     } else {
                       setActiveOpsSection(null);
                     }
-                    if (Object.keys(scenarioResults).length > 0) handleCalculate();
+                    scheduleCalculate();
                   }}>Done</Button>
                 </div>
               </motion.div>
@@ -1503,7 +1510,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                   <Button variant="primary" fullWidth={!completedOpsSections.has('stab')} onClick={() => {
                     setCompletedOpsSections(prev => { const s = new Set(prev); s.add('stab'); return s; });
                     setActiveOpsSection(null);
-                    if (Object.keys(scenarioResults).length > 0) handleCalculate();
+                    scheduleCalculate();
                   }}>Done</Button>
                 </div>
               </motion.div>
