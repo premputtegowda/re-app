@@ -39,6 +39,7 @@ export interface MCRanges {
   renoOverrunPct:    MCRange; // 0 = base cost, 30 = 30% overrun
   interestRate:      MCRange;
   refiRate:          MCRange; // refinance interest rate — only meaningful when refinance.enabled
+  arv?:              MCRange; // ARV uncertainty — only when exitMethod is 'value' and arv > 0
 }
 
 export interface MCRunResult {
@@ -54,6 +55,7 @@ export interface MCRunResult {
     renoOverrunPct:    number;
     interestRate:      number;
     refiRate:          number;
+    arv:               number;
   };
 }
 
@@ -68,6 +70,13 @@ export interface MCHistogramBucket {
   count:  number;
 }
 
+export interface MCYearlyP50 {
+  year:             number;
+  cashFlow:         number;
+  coCReturn:        number;
+  cashOutProceeds:  number; // median refi cash-out for this year (0 for non-refi years)
+}
+
 export interface MCResults {
   n:                    number;
   sorted:               MCRunResult[]; // by IRR ascending
@@ -77,6 +86,7 @@ export interface MCResults {
   irrBuckets:           MCHistogramBucket[];
   irrMin:               number;
   irrMax:               number;
+  yearlyP50:            MCYearlyP50[]; // median cash flow & CoC per projection year
 }
 
 /** Serialisable subset of MCResults — replaces the large `sorted` array with compact per-run data. */
@@ -111,13 +121,15 @@ export function hydrateMCResults(saved: SavedMCResults): MCResults {
   // Guard: pre-compactRuns saved data (old format) won't have this array
   const sorted = (saved.compactRuns ?? []).map(({ irr, coc }) => ({
     irr, avgCoCReturn: coc, equityMultiple: 0, totalCashFlow: 0,
-    sampled: { targetRentPerUnit: 0, vacancyPct: 0, rentGrowthPct: 0, exitCapRate: 0, renoOverrunPct: 0, interestRate: 0, refiRate: 0 },
+    sampled: { targetRentPerUnit: 0, vacancyPct: 0, rentGrowthPct: 0, exitCapRate: 0, renoOverrunPct: 0, interestRate: 0, refiRate: 0, arv: 0 },
   }));
   // Back-fill p30/p70 for results saved before those percentiles were added
   const saved_ = saved as unknown as MCResults;
   const p30 = saved_.p30 ?? saved_.p20 ?? saved_.p50;
   const p70 = saved_.p70 ?? saved_.p80 ?? saved_.p50;
-  return { ...saved, sorted, p30, p70 };
+  // Back-fill yearlyP50 for results saved before this field was added
+  const yearlyP50 = (saved_.yearlyP50 ?? []).map(y => ({ ...y, cashOutProceeds: y.cashOutProceeds ?? 0 }));
+  return { ...saved, sorted, p30, p70, yearlyP50 };
 }
 
 // ── Default ranges ────────────────────────────────────────────────────────────
@@ -148,6 +160,11 @@ export function computeDefaultRanges(
   const rate   = acquisition.interestRate        ?? 7;
   const refi   = refinance?.enabled ? (refinance.newInterestRate ?? rate) : rate;
 
+  const arvRound = (v: number) => Math.round(v / 1000) * 1000;
+  const arvRange: MCRange | undefined = acquisition.arv > 0 && acquisition.exitMethod !== 'capRate'
+    ? { min: arvRound(acquisition.arv * 0.85), mode: acquisition.arv, max: arvRound(acquisition.arv * 1.15) }
+    : undefined;
+
   return {
     targetRentPerUnit: { min: rent * 0.85,          mode: rent,   max: rent * 1.10 },
     vacancyPct:        { min: Math.max(0, vac - 2),  mode: vac,    max: vac + 8 },
@@ -156,6 +173,7 @@ export function computeDefaultRanges(
     renoOverrunPct:    { min: 0,                      mode: 0,      max: 30 },
     interestRate:      { min: rate - 0.5,             mode: rate,   max: rate + 2.0 },
     refiRate:          { min: refi - 0.5,             mode: refi,   max: refi + 2.0 },
+    ...(arvRange ? { arv: arvRange } : {}),
   };
 }
 
@@ -242,7 +260,7 @@ function runOnce(
   origStabilizedAnnual:   number,
   origDefaultPreStabAnnual: number,
   avgPreStabPerUnit:      number,
-): MCRunResult {
+): MCRunResultInternal {
   const rent     = sampleTriangular(ranges.targetRentPerUnit.min, ranges.targetRentPerUnit.mode, ranges.targetRentPerUnit.max);
   const vac      = sampleTriangular(ranges.vacancyPct.min,        ranges.vacancyPct.mode,        ranges.vacancyPct.max);
   const growth   = sampleTriangular(ranges.rentGrowthPct.min,     ranges.rentGrowthPct.mode,     ranges.rentGrowthPct.max);
@@ -252,17 +270,20 @@ function runOnce(
   // ranges.refiRate may be absent in ranges saved before this field was added
   const refiRateRange = ranges.refiRate ?? { min: rate, mode: rate, max: rate };
   const refiRate = sampleTriangular(refiRateRange.min, refiRateRange.mode, refiRateRange.max);
+  // ARV — sampled when exit method is 'value' and range is defined
+  const arvSampled = ranges.arv ? sampleTriangular(ranges.arv.min, ranges.arv.mode, ranges.arv.max) : acquisition.arv;
 
   // When every sampled value equals its mode, use the original data objects directly.
   // This guarantees bit-identical cash flows to the base case — no reconstruction drift.
   const atBase =
-    rent     === ranges.targetRentPerUnit.mode &&
-    vac      === ranges.vacancyPct.mode        &&
-    growth   === ranges.rentGrowthPct.mode     &&
-    cap      === ranges.exitCapRate.mode       &&
-    renoOver === ranges.renoOverrunPct.mode    &&
-    rate     === ranges.interestRate.mode      &&
-    refiRate === refiRateRange.mode;
+    rent       === ranges.targetRentPerUnit.mode &&
+    vac        === ranges.vacancyPct.mode        &&
+    growth     === ranges.rentGrowthPct.mode     &&
+    cap        === ranges.exitCapRate.mode       &&
+    renoOver   === ranges.renoOverrunPct.mode    &&
+    rate       === ranges.interestRate.mode      &&
+    refiRate   === refiRateRange.mode            &&
+    arvSampled === (ranges.arv?.mode ?? acquisition.arv);
 
   const baseScenario: CoCScenario = {
     id: 'mc', name: 'MC', scenarioType: 'base',
@@ -271,12 +292,13 @@ function runOnce(
   };
 
   if (atBase) {
-    const r = projectScenario(baseScenario);
+    const r = projectScenario(baseScenario, { dynamicRefiValue: true });
     return {
       irr: r.irr ?? -999, avgCoCReturn: r.avgCoCReturn,
       equityMultiple: r.equityMultiple, totalCashFlow: r.totalCashFlow,
       sampled: { targetRentPerUnit: rent, vacancyPct: vac, rentGrowthPct: growth,
-                 exitCapRate: cap, renoOverrunPct: renoOver, interestRate: rate, refiRate },
+                 exitCapRate: cap, renoOverrunPct: renoOver, interestRate: rate, refiRate, arv: arvSampled },
+      _yearlyProjections: r.yearlyProjections.map(p => ({ cashFlow: p.cashFlow, coCReturn: p.coCReturn, cashOutProceeds: p.cashOutProceeds })),
     };
   }
 
@@ -295,6 +317,7 @@ function runOnce(
       ...acquisition,
       interestRate: rate,
       exitCapRate:  cap,
+      arv:          arvSampled,
       hardCostItems: acquisition.hardCostItems.map(item => ({ ...item, amount: item.amount * renoMultiplier })),
       softCostItems: acquisition.softCostItems.map(item => ({ ...item, amount: item.amount * renoMultiplier })),
     },
@@ -312,14 +335,20 @@ function runOnce(
     createdAt: '', updatedAt: '',
   };
 
-  const r = projectScenario(scenario);
+  const r = projectScenario(scenario, { dynamicRefiValue: true });
   return {
     irr:            r.irr ?? -999,
     avgCoCReturn:   r.avgCoCReturn,
     equityMultiple: r.equityMultiple,
     totalCashFlow:  r.totalCashFlow,
-    sampled: { targetRentPerUnit: rent, vacancyPct: vac, rentGrowthPct: growth, exitCapRate: cap, renoOverrunPct: renoOver, interestRate: rate, refiRate },
+    sampled: { targetRentPerUnit: rent, vacancyPct: vac, rentGrowthPct: growth, exitCapRate: cap, renoOverrunPct: renoOver, interestRate: rate, refiRate, arv: arvSampled },
+    _yearlyProjections: r.yearlyProjections.map(p => ({ cashFlow: p.cashFlow, coCReturn: p.coCReturn, cashOutProceeds: p.cashOutProceeds })),
   };
+}
+
+// ── Internal run result — carries yearly projections during simulation, stripped before storage ──
+interface MCRunResultInternal extends MCRunResult {
+  _yearlyProjections: Array<{ cashFlow: number; coCReturn: number; cashOutProceeds: number }>;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -345,20 +374,30 @@ export async function runSimulation(opts: RunSimulationOptions): Promise<MCResul
   const origStabilizedAnnual     = proForma.grossRent.stabilized;
   const origDefaultPreStabAnnual = avgPreStabPerUnit * Math.max(1, units) * 12;
 
-  const all: MCRunResult[] = [];
+  const all: MCRunResultInternal[] = [];
   const CHUNK = 1000;
 
   for (let i = 0; i < n; i += CHUNK) {
     const end = Math.min(i + CHUNK, n);
     for (let j = i; j < end; j++) {
-      all.push(runOnce(ranges, acquisition, operations, proForma, refinance, units, origStabilizedAnnual, origDefaultPreStabAnnual, avgPreStabPerUnit));
+      all.push(runOnce(ranges, acquisition, operations, proForma, refinance, units, origStabilizedAnnual, origDefaultPreStabAnnual, avgPreStabPerUnit) as MCRunResultInternal);
     }
     onProgress?.((end / n) * 100);
     await new Promise(r => setTimeout(r, 0)); // yield to event loop
   }
 
-  // Sort by IRR ascending
-  const sorted = [...all].sort((a, b) => a.irr - b.irr);
+  // Compute per-year median cash flow, CoC, and refi cash-out across all runs
+  const yearCount = all[0]?._yearlyProjections?.length ?? 0;
+  const yearlyP50: MCYearlyP50[] = Array.from({ length: yearCount }, (_, i) => {
+    const cfs   = all.map(r => r._yearlyProjections[i].cashFlow).sort((a, b) => a - b);
+    const cocs  = all.map(r => r._yearlyProjections[i].coCReturn).sort((a, b) => a - b);
+    const cops  = all.map(r => r._yearlyProjections[i].cashOutProceeds).sort((a, b) => a - b);
+    const mid   = Math.floor(cfs.length / 2);
+    return { year: i + 1, cashFlow: cfs[mid], coCReturn: cocs[mid], cashOutProceeds: cops[mid] };
+  });
+
+  // Sort by IRR ascending (strip internal _yearlyProjections)
+  const sorted = [...all].sort((a, b) => a.irr - b.irr) as MCRunResult[];
 
   // Sensitivity: |Pearson r| of each input with IRR
   const irrs = all.map(r => r.irr);
@@ -396,6 +435,7 @@ export async function runSimulation(opts: RunSimulationOptions): Promise<MCResul
     irrBuckets: computeHistogram(validIrrs),
     irrMin: validIrrs.length ? Math.min(...validIrrs) : 0,
     irrMax: validIrrs.length ? Math.max(...validIrrs) : 0,
+    yearlyP50,
   };
 }
 
@@ -519,6 +559,10 @@ export function computeDeterministicPrices(
 ): { recommendedMaxPrice: number | null; conservativeMaxPrice: number | null } {
   const refiRange = ranges.refiRate ?? { min: ranges.interestRate.mode, mode: ranges.interestRate.mode, max: ranges.interestRate.mode };
 
+  const arvRange = ranges.arv;
+  const arvMode = arvRange ? triangularQuantile(arvRange.min, arvRange.mode, arvRange.max, 0.50) : 0;
+  const arvConservative = arvRange ? triangularQuantile(arvRange.min, arvRange.mode, arvRange.max, 0.20) : 0;
+
   // P50 (median) of each triangular distribution — accounts for range skewness
   const modeSampled: MCRunResult['sampled'] = {
     targetRentPerUnit: triangularQuantile(ranges.targetRentPerUnit.min, ranges.targetRentPerUnit.mode, ranges.targetRentPerUnit.max, 0.50),
@@ -528,6 +572,7 @@ export function computeDeterministicPrices(
     renoOverrunPct:    triangularQuantile(ranges.renoOverrunPct.min,    ranges.renoOverrunPct.mode,    ranges.renoOverrunPct.max,    0.50),
     interestRate:      triangularQuantile(ranges.interestRate.min,      ranges.interestRate.mode,      ranges.interestRate.max,      0.50),
     refiRate:          triangularQuantile(refiRange.min,                refiRange.mode,                refiRange.max,                0.50),
+    arv:               arvMode,
   };
 
   // Pessimistic: worse-than-base values at ~80th percentile of the bad tail
@@ -539,6 +584,7 @@ export function computeDeterministicPrices(
     renoOverrunPct:    triangularQuantile(ranges.renoOverrunPct.min,    ranges.renoOverrunPct.mode,    ranges.renoOverrunPct.max,    0.80),
     interestRate:      triangularQuantile(ranges.interestRate.min,      ranges.interestRate.mode,      ranges.interestRate.max,      0.80),
     refiRate:          triangularQuantile(refiRange.min,                refiRange.mode,                refiRange.max,                0.80),
+    arv:               arvConservative,
   };
 
   const args = [acquisition, operations, proForma, refinance, units, avgPreStabPerUnit] as const;

@@ -123,7 +123,7 @@ export function calculateIRR(cashFlows: number[]): number | null {
   return null;
 }
 
-export function projectScenario(scenario: CoCScenario): CoCResult {
+export function projectScenario(scenario: CoCScenario, opts?: { dynamicRefiValue?: boolean }): CoCResult {
   const { acquisition, operations, refinance } = scenario;
   const pf = scenario.proForma;
 
@@ -285,7 +285,14 @@ export function projectScenario(scenario: CoCScenario): CoCResult {
 
     let cashOutProceeds = 0;
     if (refinance.enabled && year === refinance.refiYear && !refiHappened) {
-      const newLoanAmount = (refinance.refiMarketValue || acquisition.arv) * (refinance.newLTV / 100);
+      // For cap rate exit, derive refi property value from current-year NOI ÷ exit cap rate.
+      // This is always dynamic — there is no static market value to enter when using cap rate.
+      // For ARV exit, use the explicitly entered refi market value, falling back to ARV.
+      const refiPropertyValue =
+        acquisition.exitMethod === 'capRate' && acquisition.exitCapRate > 0
+          ? noi / (acquisition.exitCapRate / 100)
+          : (refinance.refiMarketValue || acquisition.arv);
+      const newLoanAmount = refiPropertyValue * (refinance.newLTV / 100);
       const refiCosts = newLoanAmount * ((refinance.refiCostPct ?? 0) / 100);
       cashOutProceeds = Math.max(0, newLoanAmount - loanBalance - refiCosts);
 
@@ -349,10 +356,13 @@ export function projectScenario(scenario: CoCScenario): CoCResult {
   const irrDecimal = calculateIRR(irrCashFlows);
   const irr = irrDecimal !== null ? irrDecimal * 100 : null;
 
-  // Total proceeds (cash flows + terminal equity) / total invested
-  // Uses the same irrCashFlows series for consistency with IRR
-  const totalProceeds = irrCashFlows.slice(1).reduce((sum, cf) => sum + cf, 0);
-  const equityMultiple = totalInvested > 0 ? totalProceeds / totalInvested : 0;
+  // EM = (Operating Cash Flow + Refi Proceeds + Sale Proceeds) / Total Equity Invested
+  const totalOperatingCF = yearlyProjections.reduce((sum, p) => sum + (p.noi - p.debtService), 0);
+  const totalRefiProceeds = yearlyProjections.reduce((sum, p) => sum + p.cashOutProceeds, 0);
+  const saleProceeds = terminalEquity;
+  const equityMultiple = totalInvested > 0
+    ? (totalOperatingCF + totalRefiProceeds + saleProceeds) / totalInvested
+    : 0;
 
   const avgCoCReturn =
     yearlyProjections.reduce((sum, p) => sum + p.coCReturn, 0) / yearlyProjections.length;

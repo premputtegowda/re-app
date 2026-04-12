@@ -502,6 +502,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       saveName !== (initialDeal?.name ?? ''));
 
   const resultsRef = useRef<HTMLDivElement>(null);
+  const mcSimRunRef = useRef<(() => void) | null>(null);
   const [baseStale, setBaseStale] = useState(false);
   const lastCalcFingerprintRef = useRef<string | null>(null);
 
@@ -746,6 +747,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         ...(enriched ? { calcState: enriched } : {}),
       }, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined);
     }
+
+    // Re-run simulation whenever base results are refreshed
+    mcSimRunRef.current?.();
 
     setTimeout(() => {
       resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1534,6 +1538,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
             onAcquisitionChange={updateAcquisition}
             onRefinanceChange={updateRefinance}
             showWarnings={isVisited}
+            computedRefiValue={computedRefiValue}
           />
         );
     }
@@ -1590,7 +1595,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         if (method === 'capRate' && acquisition.exitCapRate === 0) return 'incomplete';
         if (method === 'value' && acquisition.arv === 0) return 'incomplete';
         if (refinance.enabled && (
-          !refinance.refiMarketValue ||
+          (method !== 'capRate' && !refinance.refiMarketValue) ||
           !refinance.refiYear ||
           !refinance.newLTV ||
           !refinance.newInterestRate ||
@@ -1607,6 +1612,15 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
   const currentResult = scenarioResults[activeType] ?? null;
   const hasAnyResult = Object.keys(scenarioResults).length > 0;
+
+  // When exit method is cap rate, derive refi property value from the projection's NOI at refi year
+  const computedRefiValue: number | null = (() => {
+    if ((acquisition.exitMethod ?? 'value') !== 'capRate') return null;
+    if (!acquisition.exitCapRate || !refinance.refiYear) return null;
+    const noi = currentResult?.yearlyProjections?.[refinance.refiYear - 1]?.noi;
+    if (!noi || noi <= 0) return null;
+    return Math.round(noi / (acquisition.exitCapRate / 100));
+  })();
   const hasAddress = acquisition.propertyAddress.trim().length > 0;
   const hasNewDealData = !savedDealId && (hasAddress || acquisition.purchasePrice > 0);
   const allStepsCompleted = [0, 1, 2, 3, 4].every(id => completedSteps.has(id));
@@ -1615,7 +1629,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   // ── Render ──
 
   return (
-    <div className="min-h-screen pb-24 overflow-x-hidden">
+    <div className="min-h-screen pb-24">
       <div className="max-w-2xl mx-auto px-4 py-6 space-y-5">
 
         {/* Header: title + always-visible Cancel / Next / Save */}
@@ -1883,6 +1897,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     onMcResultsChange={setMcResults}
                     baseStale={baseStale}
                     onRefreshBase={handleCalculate}
+                    mcSimRunRef={mcSimRunRef}
                   />
                 </div>
               </>
@@ -1890,6 +1905,95 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
           </div>
         )}
       </div>
+
+      {/* ── Fixed bottom hero bar — visible on all steps once results exist ── */}
+      {currentResult && (() => {
+        const projs = currentResult.yearlyProjections;
+        const avgMoCF = projs.length > 0 ? projs.reduce((s, p) => s + p.cashFlow, 0) / projs.length / 12 : 0;
+        const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
+
+        // Most likely = p50 from simulation if available, otherwise null (hidden)
+        const p50 = mcResults ? mcResults.p50 : null;
+        const mlIRR   = p50 ? p50.irr : null;
+        const mlCoC   = p50 ? p50.avgCoCReturn : null;
+        const mlEM    = p50 ? p50.equityMultiple : null;
+        const mlMoCF  = p50 ? p50.totalCashFlow / projs.length / 12 : null;
+        const hasML   = p50 !== null;
+
+        return (
+          <div className="fixed bottom-0 left-0 right-0 z-30 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 shadow-[0_-4px_16px_rgba(0,0,0,0.06)]">
+            <div className="max-w-2xl mx-auto px-4 pt-3 pb-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-4 min-w-0">
+
+                  {/* IRR */}
+                  <div className="flex flex-col">
+                    <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider">IRR</p>
+                    <p className={`text-sm font-bold tabular-nums ${currentResult.irr == null ? 'text-slate-400' : currentResult.irr >= 8 ? 'text-secondary-600 dark:text-secondary-400' : currentResult.irr < 0 ? 'text-red-500' : 'text-slate-700 dark:text-slate-300'}`}>
+                      {currentResult.irr == null ? '—' : `${currentResult.irr.toFixed(2)}%`}
+                    </p>
+                    <p className="text-[10px] tabular-nums text-slate-400 dark:text-slate-500">
+                      {hasML && mlIRR != null ? `(${mlIRR.toFixed(2)}%)` : <span className="invisible">—</span>}
+                    </p>
+                  </div>
+
+                  <div className="w-px h-12 bg-slate-200 dark:bg-slate-700 shrink-0" />
+
+                  {/* Avg CoC */}
+                  <div className="flex flex-col">
+                    <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider">Avg CoC</p>
+                    <p className={`text-sm font-bold tabular-nums ${currentResult.avgCoCReturn >= 6 ? 'text-secondary-600 dark:text-secondary-400' : currentResult.avgCoCReturn < 0 ? 'text-red-500' : 'text-slate-700 dark:text-slate-300'}`}>
+                      {currentResult.avgCoCReturn.toFixed(2)}%
+                    </p>
+                    <p className="text-[10px] tabular-nums text-slate-400 dark:text-slate-500">
+                      {hasML && mlCoC != null ? `(${mlCoC.toFixed(2)}%)` : <span className="invisible">—</span>}
+                    </p>
+                  </div>
+
+                  <div className="w-px h-12 bg-slate-200 dark:bg-slate-700 shrink-0" />
+
+                  {/* Equity Multiple */}
+                  <div className="flex flex-col">
+                    <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider">Equity ×</p>
+                    <p className={`text-sm font-bold tabular-nums ${currentResult.equityMultiple >= 1.5 ? 'text-primary-600 dark:text-primary-400' : currentResult.equityMultiple < 1 ? 'text-red-500' : 'text-slate-700 dark:text-slate-300'}`}>
+                      {currentResult.equityMultiple.toFixed(2)}×
+                    </p>
+                    <p className="text-[10px] tabular-nums text-slate-400 dark:text-slate-500">
+                      {hasML && mlEM != null ? `(${mlEM.toFixed(2)}×)` : <span className="invisible">—</span>}
+                    </p>
+                  </div>
+
+                  <div className="w-px h-12 bg-slate-200 dark:bg-slate-700 shrink-0 hidden sm:block" />
+
+                  {/* Avg Mo. CF */}
+                  <div className="hidden sm:flex flex-col">
+                    <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider">Avg Mo. CF</p>
+                    <p className={`text-sm font-bold tabular-nums ${avgMoCF >= 0 ? 'text-secondary-600 dark:text-secondary-400' : 'text-red-500'}`}>
+                      {fmt(avgMoCF)}
+                    </p>
+                    <p className="text-[10px] tabular-nums text-slate-400 dark:text-slate-500">
+                      {hasML && mlMoCF != null ? `(${fmt(mlMoCF)})` : <span className="invisible">—</span>}
+                    </p>
+                  </div>
+
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => { setActiveStep(4); setEditingStep(null); }}
+                  className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 text-xs font-semibold hover:bg-primary-100 dark:hover:bg-primary-900/50 transition-colors"
+                >
+                  View Charts ↗
+                </button>
+              </div>
+              {/* Legend — only shown after simulation has been run */}
+              {hasML && (
+                <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">( ) = most likely (simulation p50)</p>
+              )}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

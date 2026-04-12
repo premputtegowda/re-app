@@ -37,15 +37,25 @@ function computeFingerprint(
   acquisition: CoCAcquisition,
   proForma: ProFormaData,
   ranges: MCRanges,
+  refinance: CoCRefinance,
 ): string {
   return JSON.stringify({
     price:        acquisition.purchasePrice,
     interestRate: acquisition.interestRate,
+    exitMethod:   acquisition.exitMethod ?? 'value',
     exitCapRate:  acquisition.exitCapRate,
+    arv:          acquisition.arv,
     hardCosts:    (acquisition.hardCostItems ?? []).reduce((s, i) => s + i.amount, 0),
     rent:         proForma.grossRent.stabilized,
     vacancy:      proForma.vacancyPct.stabilized,
     ranges:       Object.entries(ranges).map(([k, v]) => `${k}:${v.min}-${v.mode}-${v.max}`).join(','),
+    refiEnabled:  refinance.enabled,
+    refiYear:     refinance.enabled ? refinance.refiYear : 0,
+    refiLTV:      refinance.enabled ? refinance.newLTV : 0,
+    refiRate:     refinance.enabled ? refinance.newInterestRate : 0,
+    refiTerm:     refinance.enabled ? refinance.newLoanTermYears : 0,
+    refiCost:     refinance.enabled ? (refinance.refiCostPct ?? 0) : 0,
+    refiMV:       refinance.enabled ? refinance.refiMarketValue : 0,
   });
 }
 
@@ -333,26 +343,28 @@ function RiskDrivers({ results }: { results: MCResults }) {
 
 // ── Assumption Editor ─────────────────────────────────────────────────────────
 
-function RangeEditor({ ranges, defaults, onChange, onReset, showRefiRate }: {
-  ranges:       MCRanges;
-  defaults:     MCRanges;
-  onChange:     (r: MCRanges) => void;
-  onReset:      () => void;
-  showRefiRate: boolean;
+function RangeEditor({ ranges, defaults, onChange, onReset, showRefiRate, showArvRange }: {
+  ranges:        MCRanges;
+  defaults:      MCRanges;
+  onChange:      (r: MCRanges) => void;
+  onReset:       () => void;
+  showRefiRate:  boolean;
+  showArvRange:  boolean;
 }) {
   const [draft, setDraft] = useState<Partial<Record<string, string>>>({});
-  const fields: Array<{ key: keyof MCRanges; label: string; step: number; decimals: number; higherIsWorse: boolean }> = [
+  const fields: Array<{ key: keyof MCRanges; label: string; step: number; decimals: number; higherIsWorse: boolean; scale?: number }> = [
     { key: 'targetRentPerUnit', label: 'Rent / unit ($/mo)',   step: 25,    decimals: 0, higherIsWorse: false },
     { key: 'vacancyPct',        label: 'Vacancy Rate (%)',     step: 0.5,   decimals: 1, higherIsWorse: true  },
     { key: 'rentGrowthPct',     label: 'Rent Growth / yr (%)', step: 0.25,  decimals: 2, higherIsWorse: false },
     { key: 'exitCapRate',       label: 'Exit Cap Rate (%)',    step: 0.25,  decimals: 2, higherIsWorse: true  },
     { key: 'renoOverrunPct',    label: 'Reno Overrun Max (%)', step: 5,     decimals: 0, higherIsWorse: true  },
     { key: 'interestRate',      label: 'Interest Rate (%)',    step: 0.125, decimals: 3, higherIsWorse: true  },
-    ...(showRefiRate ? [{ key: 'refiRate' as keyof MCRanges, label: 'Refi Rate (%)', step: 0.125, decimals: 3, higherIsWorse: true }] : []),
+    ...(showRefiRate  ? [{ key: 'refiRate' as keyof MCRanges, label: 'Refi Rate (%)',       step: 0.125, decimals: 3, higherIsWorse: true,  scale: 1    }] : []),
+    ...(showArvRange  ? [{ key: 'arv'      as keyof MCRanges, label: 'Exit Value ARV ($K)', step: 50,    decimals: 0, higherIsWorse: false, scale: 1000 }] : []),
   ];
 
   const changed = (Object.keys(ranges) as (keyof MCRanges)[]).some(
-    k => ranges[k].min !== defaults[k].min || ranges[k].max !== defaults[k].max
+    k => defaults[k] && (ranges[k]!.min !== defaults[k]!.min || ranges[k]!.max !== defaults[k]!.max)
   );
 
   return (
@@ -375,11 +387,11 @@ function RangeEditor({ ranges, defaults, onChange, onReset, showRefiRate }: {
       </div>
 
       <div className="space-y-3">
-        {fields.map(({ key, label, step, decimals, higherIsWorse }) => {
+        {fields.map(({ key, label, step, decimals, higherIsWorse, scale = 1 }) => {
           const d = defaults[key];
           if (!d) return null;
           const r = ranges[key] ?? d;
-          const fmt = (v: number) => parseFloat(v.toFixed(decimals)).toString();
+          const fmt = (v: number) => parseFloat((v / scale).toFixed(decimals)).toString();
           const pessField = higherIsWorse ? 'max' : 'min';
           const optimField = higherIsWorse ? 'min' : 'max';
           const pessKey = `${key}_pess`;
@@ -388,7 +400,7 @@ function RangeEditor({ ranges, defaults, onChange, onReset, showRefiRate }: {
           const optimDisplay = draft[optimKey] ?? fmt(r[optimField]);
 
           const commitPess = () => {
-            const v = parseFloat(draft[pessKey] ?? '');
+            const v = parseFloat(draft[pessKey] ?? '') * scale;
             setDraft(d2 => { const n = { ...d2 }; delete n[pessKey]; return n; });
             if (!isNaN(v)) {
               const clamped = higherIsWorse ? Math.max(v, d.mode) : Math.min(v, d.mode);
@@ -396,7 +408,7 @@ function RangeEditor({ ranges, defaults, onChange, onReset, showRefiRate }: {
             }
           };
           const commitOptim = () => {
-            const v = parseFloat(draft[optimKey] ?? '');
+            const v = parseFloat(draft[optimKey] ?? '') * scale;
             setDraft(d2 => { const n = { ...d2 }; delete n[optimKey]; return n; });
             if (!isNaN(v)) {
               const clamped = higherIsWorse ? Math.min(v, d.mode) : Math.max(v, d.mode);
@@ -416,7 +428,7 @@ function RangeEditor({ ranges, defaults, onChange, onReset, showRefiRate }: {
                   className="w-full min-w-0 text-center text-xs font-semibold tabular-nums rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 px-1 py-1.5 focus:outline-none focus:ring-1 focus:ring-red-400"
                 />
                 <div className="w-full text-center text-xs font-semibold tabular-nums rounded-lg bg-slate-100 dark:bg-slate-700 text-primary-600 dark:text-primary-400 px-1 py-1.5 select-none">
-                  {fmt(d.mode)}
+                  {fmt(d.mode)}{scale > 1 ? 'K' : ''}
                 </div>
                 <input type="number" value={optimDisplay} step={step}
                   onChange={e => setDraft(d2 => ({ ...d2, [optimKey]: e.target.value }))}
@@ -485,18 +497,21 @@ export function MonteCarloPanel({
 
   // Fingerprint of current inputs
   const fingerprint = useMemo(
-    () => computeFingerprint(acquisition, proForma, ranges),
-    [acquisition, proForma, ranges],
+    () => computeFingerprint(acquisition, proForma, ranges, refinance),
+    [acquisition, proForma, ranges, refinance],
   );
 
   // Track fingerprint at last run — initialize from saved results
   const lastRunFingerprintRef = useRef<string | null>(savedResults?.inputFingerprint ?? null);
 
-  // Detect staleness whenever fingerprint changes (but not on first mount before any run)
+  // Detect staleness and auto-re-run whenever inputs change (debounced so rapid edits don't thrash)
   useEffect(() => {
-    if (lastRunFingerprintRef.current !== null && fingerprint !== lastRunFingerprintRef.current) {
-      setIsStale(true);
-    }
+    if (lastRunFingerprintRef.current === null || fingerprint === lastRunFingerprintRef.current) return;
+    setIsStale(true);
+    const timer = setTimeout(() => {
+      if (!simRunningRef.current) runRef.current();
+    }, 1500);
+    return () => clearTimeout(timer);
   }, [fingerprint]);
 
   // Lift stale state to parent
@@ -527,7 +542,7 @@ export function MonteCarloPanel({
         n: N_RUNS, ranges, acquisition, operations, proForma, refinance,
         units, avgPreStabPerUnit, onProgress: pct => { if (isMountedRef.current) setProgress(pct); },
       });
-      const fp = computeFingerprint(acquisition, proForma, ranges);
+      const fp = computeFingerprint(acquisition, proForma, ranges, refinance);
       const bearRun = r[bearPercentile] ?? r.p20 ?? r.p50;
       const args = [acquisition, operations, proForma, refinance, units, avgPreStabPerUnit] as const;
       const recMax  = findMaxPriceAtConditions(r.p50.sampled,    targetIRR, ...args);
@@ -675,6 +690,7 @@ export function MonteCarloPanel({
               onChange={setDraftRanges}
               onReset={() => setDraftRanges(defaults)}
               showRefiRate={refinance.enabled}
+              showArvRange={acquisition.exitMethod !== 'capRate' && acquisition.arv > 0}
             />
           </div>
         )}

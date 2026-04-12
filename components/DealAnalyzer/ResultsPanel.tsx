@@ -132,30 +132,52 @@ function SectionLabel({ label, amber }: { label: string; amber?: boolean }) {
 // ── Exit Summary ────────────────────────────────────────────────────────────────
 
 function ExitSummary({ result }: { result: CoCResult }) {
-  const { yearlyProjections } = result;
+  const { yearlyProjections, totalInvested, equityMultiple } = result;
   const terminalPropertyValue = result.terminalPropertyValue ?? 0;
   const exitClosingCosts = result.exitClosingCosts ?? 0;
   const terminalEquity = result.terminalEquity ?? 0;
   const final = yearlyProjections[yearlyProjections.length - 1];
   if (!final) return null;
 
-  const totalProceeds = final.cashFlow + terminalEquity;
+  const exitYear = final.year;
+  const priorCF = yearlyProjections.slice(0, -1).reduce((sum, p) => sum + (p.noi - p.debtService), 0);
+  const exitYearCF = final.noi - final.debtService;
+  const totalRefiProceeds = yearlyProjections.reduce((sum, p) => sum + p.cashOutProceeds, 0);
+  const totalProceeds = priorCF + exitYearCF + totalRefiProceeds + terminalEquity;
 
   return (
     <Card padding="none">
       <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700">
-        <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Exit — Yr {final.year}</h3>
+        <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">Exit — Yr {exitYear}</h3>
       </div>
       <div className="px-4 py-3">
+        {/* Sale proceeds */}
         <ExitRow label="Sale Price" value={formatCurrency(terminalPropertyValue)} />
         <ExitRow label="Loan Balance" value={`(${formatCurrency(final.loanBalance)})`} muted />
         <ExitRow label="Selling Costs" value={`(${formatCurrency(exitClosingCosts)})`} muted />
         <div className="border-t border-slate-100 dark:border-slate-700 mt-2 pt-2">
-          <ExitRow label="Net Equity" value={formatCurrency(terminalEquity)} bold />
+          <ExitRow label="Sale Proceeds" value={formatCurrency(terminalEquity)} bold />
         </div>
-        <ExitRow label={`Cash Flow (Yr ${final.year})`} value={formatCurrency(final.cashFlow)} />
-        <div className="border-t border-slate-200 dark:border-slate-600 mt-2 pt-2">
+
+        {/* Cash flows */}
+        <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">
+          {exitYear > 1 && (
+            <ExitRow label={`Cash Flow (Yr 1–${exitYear - 1})`} value={formatCurrency(priorCF)} />
+          )}
+          <ExitRow label={`Cash Flow (Yr ${exitYear})`} value={formatCurrency(exitYearCF)} />
+          {totalRefiProceeds > 0 && (
+            <ExitRow label="Refi Cash-Out" value={formatCurrency(totalRefiProceeds)} />
+          )}
+        </div>
+
+        {/* Total proceeds + EM */}
+        <div className="border-t border-slate-200 dark:border-slate-600 mt-2 pt-2 space-y-1">
           <ExitRow label="Total Proceeds" value={formatCurrency(totalProceeds)} bold highlight />
+          <ExitRow label="Total Invested" value={`(${formatCurrency(totalInvested)})`} muted />
+          <div className="flex justify-between items-baseline pt-1">
+            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Equity Multiple</span>
+            <span className="text-sm font-bold tabular-nums text-primary-600 dark:text-primary-400">{formatMultiple(equityMultiple)}</span>
+          </div>
         </div>
       </div>
     </Card>
@@ -296,6 +318,8 @@ interface ResultsPanelProps {
   onMcResultsChange?: (r: SavedMCResults) => void;
   baseStale?: boolean;
   onRefreshBase?: () => void;
+  /** Ref filled with the MC simulation run function — caller can trigger a run externally */
+  mcSimRunRef?: React.MutableRefObject<(() => void) | null>;
 }
 
 function computeAvgRents(acquisition: CoCAcquisition): { units: number; avgTargetRent: number; avgPreStabRent: number } {
@@ -314,7 +338,7 @@ function computeAvgRents(acquisition: CoCAcquisition): { units: number; avgTarge
   return { units: acquisition.units || 1, avgTargetRent: 0, avgPreStabRent: 0 };
 }
 
-export function ResultsPanel({ result, acquisition, operations, proForma, refinance, mcRanges, onMcRangesChange, mcResults, onMcResultsChange, baseStale, onRefreshBase }: ResultsPanelProps) {
+export function ResultsPanel({ result, acquisition, operations, proForma, refinance, mcRanges, onMcRangesChange, mcResults, onMcResultsChange, baseStale, onRefreshBase, mcSimRunRef }: ResultsPanelProps) {
   const [activeTab, setActiveTab] = useState<ResultTab>('summary');
   const { units, avgTargetRent, avgPreStabRent } = computeAvgRents(acquisition);
   const { totalInvested, avgCoCReturn, irr, equityMultiple, peakCoCReturn, totalCashFlow } = result;
@@ -323,7 +347,9 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
   // Stress test state lifted from MonteCarloPanel
   const [stressRunning, setStressRunning]   = useState(false);
   const [stressProgress, setStressProgress] = useState(0);
-  const stressRunRef = useRef<(() => void) | null>(null);
+  const internalRunRef = useRef<(() => void) | null>(null);
+  // Use external ref if provided so callers (e.g. handleCalculate) can trigger simulation
+  const stressRunRef = mcSimRunRef ?? internalRunRef;
   const openEditorRef = useRef<(() => void) | null>(null);
 
   const handleRunningChange = useCallback((running: boolean, progress: number) => {
@@ -334,7 +360,7 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
   return (
     <div className="space-y-4">
 
-      {/* ── Hero scoreboard (always visible) ── */}
+      {/* ── Hero scoreboard ── */}
       <Card>
         {/* Verdict + invested */}
         <div className="flex items-center justify-between mb-4">
@@ -465,7 +491,7 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
 
       {activeTab === 'projections' && (
         <div className="space-y-4">
-          <DealCharts projections={result.yearlyProjections} />
+          <DealCharts projections={result.yearlyProjections} mcResults={mcResults} />
           <ProjectionTable result={result} />
         </div>
       )}

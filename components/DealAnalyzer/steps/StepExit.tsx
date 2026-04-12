@@ -11,16 +11,23 @@ interface StepExitProps {
   onAcquisitionChange: (field: keyof CoCAcquisition, value: unknown) => void;
   onRefinanceChange: (field: keyof CoCRefinance, value: number | boolean) => void;
   showWarnings?: boolean;
+  /** When exit method is cap rate, the refi property value is derived from NOI ÷ cap rate at the refi year. */
+  computedRefiValue?: number | null;
 }
 
-export function StepExit({ acquisition, refinance, onAcquisitionChange, onRefinanceChange, showWarnings = false }: StepExitProps) {
+export function StepExit({ acquisition, refinance, onAcquisitionChange, onRefinanceChange, showWarnings = false, computedRefiValue }: StepExitProps) {
   const [refiOpen, setRefiOpen] = useState(refinance.enabled);
   const projectionYears = acquisition.projectionYears || 5;
   const method = acquisition.exitMethod ?? 'value';
+  const isCapRate = method === 'capRate';
+
+  // Effective refi property value — for cap rate exits it's computed from NOI; for value exits user enters it
+  const effectiveRefiValue = isCapRate ? (computedRefiValue ?? null) : (refinance.refiMarketValue || null);
 
   const refiEnabled = refinance.enabled;
   const warn = showWarnings && refiEnabled;
-  const missingMarketValue  = warn && !refinance.refiMarketValue;
+  // Market value is not required when using cap rate — it's derived automatically
+  const missingMarketValue  = warn && !isCapRate && !refinance.refiMarketValue;
   const missingYear         = warn && !refinance.refiYear;
   const missingLTV          = warn && !refinance.newLTV;
   const missingInterestRate = warn && !refinance.newInterestRate;
@@ -136,17 +143,28 @@ export function StepExit({ acquisition, refinance, onAcquisitionChange, onRefina
 
             {refiEnabled && (
               <div className="space-y-4 pl-7">
-                <Input
-                  label="Market Value at Refi ($)"
-                  type="number"
-                  fullWidth
-                  min={0}
-                  placeholder="e.g. 400,000"
-                  value={refinance.refiMarketValue || ''}
-                  onChange={(e) => onRefinanceChange('refiMarketValue', Number(e.target.value))}
-                  helperText="Property value at time of refinancing"
-                  warning={missingMarketValue}
-                />
+                {isCapRate ? (
+                  effectiveRefiValue != null && refinance.refiYear > 0 && (
+                    <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 px-4 py-3">
+                      <p className="text-xs font-semibold text-blue-700 dark:text-blue-300 mb-0.5">Refi value auto-calculated</p>
+                      <p className="text-xs text-blue-600 dark:text-blue-400">
+                        Based on your exit cap rate, the estimated refinance property value at Year {refinance.refiYear} will be <strong>${effectiveRefiValue.toLocaleString()}</strong>.
+                      </p>
+                    </div>
+                  )
+                ) : (
+                  <Input
+                    label="Market Value at Refi ($)"
+                    type="number"
+                    fullWidth
+                    min={0}
+                    placeholder="e.g. 400,000"
+                    value={refinance.refiMarketValue || ''}
+                    onChange={(e) => onRefinanceChange('refiMarketValue', Number(e.target.value))}
+                    helperText="Property value at time of refinancing"
+                    warning={missingMarketValue}
+                  />
+                )}
 
                 <div>
                   <p className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-2 flex items-center gap-1">
@@ -183,8 +201,8 @@ export function StepExit({ acquisition, refinance, onAcquisitionChange, onRefina
                     placeholder="e.g. 75"
                     value={refinance.newLTV || ''}
                     onChange={(e) => onRefinanceChange('newLTV', Number(e.target.value))}
-                    helperText={refinance.refiMarketValue > 0
-                      ? `= $${Math.round(refinance.refiMarketValue * (refinance.newLTV / 100)).toLocaleString()} loan`
+                    helperText={effectiveRefiValue != null && effectiveRefiValue > 0
+                      ? `= $${Math.round(effectiveRefiValue * (refinance.newLTV / 100)).toLocaleString()} loan`
                       : undefined}
                     warning={missingLTV}
                   />
@@ -225,8 +243,8 @@ export function StepExit({ acquisition, refinance, onAcquisitionChange, onRefina
                     value={refinance.refiCostPct ?? 2}
                     onChange={(e) => onRefinanceChange('refiCostPct', Number(e.target.value))}
                     helperText={(() => {
-                      const loan = refinance.refiMarketValue > 0 && refinance.newLTV > 0
-                        ? refinance.refiMarketValue * (refinance.newLTV / 100)
+                      const loan = effectiveRefiValue != null && effectiveRefiValue > 0 && refinance.newLTV > 0
+                        ? effectiveRefiValue * (refinance.newLTV / 100)
                         : 0;
                       return loan > 0
                         ? `= $${Math.round(loan * ((refinance.refiCostPct ?? 2) / 100)).toLocaleString()}`
