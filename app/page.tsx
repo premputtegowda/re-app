@@ -10,7 +10,7 @@ function HomeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get('redirect') ?? '/dashboard';
-  const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
+  const { isAuthenticated, isLoading, checkAuth, error } = useAuthStore();
 
   useEffect(() => {
     checkAuth();
@@ -21,6 +21,16 @@ function HomeContent() {
       router.replace(redirectTo);
     }
   }, [isLoading, isAuthenticated, router, redirectTo]);
+
+  // If access request was submitted/pending and we came from a shared link,
+  // redirect back so the user can see the deal and the confirmation banner
+  useEffect(() => {
+    if ((error === 'ACCESS_REQUEST_SUBMITTED' || error === 'ACCESS_REQUEST_PENDING') &&
+        redirectTo.startsWith('/shared/')) {
+      const sep = redirectTo.includes('?') ? '&' : '?';
+      router.replace(`${redirectTo}${sep}access_requested=true`);
+    }
+  }, [error, redirectTo, router]);
 
   if (isLoading) {
     return (

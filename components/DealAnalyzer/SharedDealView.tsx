@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Clock, Home, ArrowRight, LogIn, Lock } from 'lucide-react';
+import { Clock, Home, ArrowRight, LogIn, CheckCircle2 } from 'lucide-react';
 import { ResultsPanel } from './ResultsPanel';
 import { projectScenario } from '@/utils/dealAnalyzerCalc';
 import { useAuthStore } from '@/lib/authStore';
@@ -26,7 +26,8 @@ function timeRemaining(expiresAt: string): string {
 
 export function SharedDealView({ deal, token }: SharedDealViewProps) {
   const router = useRouter();
-  const { isAuthenticated, user } = useAuthStore((s) => ({ isAuthenticated: s.isAuthenticated, user: s.user }));
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const user = useAuthStore((s) => s.user);
   const features: string[] = user?.features ?? [];
   const hasDealAnalyzer = features.includes('deal_analyzer');
   const hasAnyAccess = features.length > 0;
@@ -41,19 +42,27 @@ export function SharedDealView({ deal, token }: SharedDealViewProps) {
   const [forking, setForking] = useState(false);
   const [forkError, setForkError] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
-  const [accessModal, setAccessModal] = useState<'no_deal_analyzer' | 'no_access' | null>(null);
+  const [accessBanner, setAccessBanner] = useState<string | null>(null);
 
   // After login redirect, check access and prompt accordingly
   useEffect(() => {
+    // Unauthenticated user whose access request was just submitted (403 on login)
+    if (searchParams.get('access_requested') === 'true') {
+      setAccessBanner("Your access request has been submitted! We'll review it and notify you at dealstackre.com once approved. You can still view this deal.");
+      setTimeout(() => setAccessBanner(null), 6000);
+      return;
+    }
     if (!isAuthenticated || searchParams.get('prompt') !== 'add') return;
     if (!hasAnyAccess) {
-      setAccessModal('no_access');
+      setAccessBanner(`Your access request has been submitted! We'll review it and notify you at ${user?.email ?? 'your email'} once approved.`);
+      setTimeout(() => setAccessBanner(null), 6000);
     } else if (!hasDealAnalyzer) {
-      setAccessModal('no_deal_analyzer');
+      setAccessBanner(`Your request for Deal Analyzer access has been submitted! We'll notify you at ${user?.email ?? 'your email'} once it's approved.`);
+      setTimeout(() => setAccessBanner(null), 6000);
     } else {
       setShowConfirm(true);
     }
-  }, [isAuthenticated, searchParams, hasDealAnalyzer, hasAnyAccess]);
+  }, [isAuthenticated, searchParams, hasDealAnalyzer, hasAnyAccess, user?.email]);
 
   // Compute result client-side from deal inputs
   const resultRef = useRef<CoCResult | null>(null);
@@ -79,12 +88,13 @@ export function SharedDealView({ deal, token }: SharedDealViewProps) {
       router.push(`/?redirect=${encodeURIComponent(`/shared/${token}?prompt=add`)}`);
       return;
     }
-    if (!hasAnyAccess) {
-      setAccessModal('no_access');
-      return;
-    }
-    if (!hasDealAnalyzer) {
-      setAccessModal('no_deal_analyzer');
+    if (!hasAnyAccess || !hasDealAnalyzer) {
+      // Access request was already submitted on login — just show the banner again
+      const msg = !hasAnyAccess
+        ? `Your access request has been submitted! We'll review it and notify you at ${user?.email ?? 'your email'} once approved.`
+        : `Your request for Deal Analyzer access has been submitted! We'll notify you at ${user?.email ?? 'your email'} once it's approved.`;
+      setAccessBanner(msg);
+      setTimeout(() => setAccessBanner(null), 6000);
       return;
     }
     setShowConfirm(true);
@@ -110,6 +120,16 @@ export function SharedDealView({ deal, token }: SharedDealViewProps) {
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 pb-24">
+      {/* Access request confirmation banner */}
+      {accessBanner && (
+        <div className="bg-secondary-600 text-white px-4 py-3">
+          <div className="max-w-2xl mx-auto flex items-center gap-3">
+            <CheckCircle2 size={16} className="shrink-0" />
+            <p className="text-sm">{accessBanner}</p>
+          </div>
+        </div>
+      )}
+
       {/* Shared deal banner */}
       <div className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-4 py-3">
         <div className="max-w-2xl mx-auto flex items-center justify-between gap-4">
@@ -219,53 +239,6 @@ export function SharedDealView({ deal, token }: SharedDealViewProps) {
         </div>
       )}
 
-      {/* No Deal Analyzer access modal */}
-      {accessModal === 'no_deal_analyzer' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-6 max-w-sm w-full space-y-4">
-            <div className="w-12 h-12 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
-              <Lock size={22} className="text-amber-500" />
-            </div>
-            <h2 className="text-base font-semibold text-slate-800 dark:text-slate-200">
-              Deal Analyzer access required
-            </h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              You don't have access to the Deal Analyzer. Contact your administrator to request access, or continue to your dashboard.
-            </p>
-            <button
-              type="button"
-              onClick={() => { setAccessModal(null); router.push('/dashboard'); }}
-              className="w-full px-4 py-2.5 rounded-xl bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors"
-            >
-              Go to my dashboard
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* No app access modal */}
-      {accessModal === 'no_access' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-6 max-w-sm w-full space-y-4">
-            <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
-              <Lock size={22} className="text-red-500" />
-            </div>
-            <h2 className="text-base font-semibold text-slate-800 dark:text-slate-200">
-              No access to DealstackRE
-            </h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              Your account doesn't have access to DealstackRE. Please contact support or request access from an administrator.
-            </p>
-            <button
-              type="button"
-              onClick={() => { setAccessModal(null); router.push('/'); }}
-              className="w-full px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium transition-colors"
-            >
-              Back to home
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
