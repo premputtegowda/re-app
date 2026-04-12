@@ -505,8 +505,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
   const resultsRef = useRef<HTMLDivElement>(null);
   const mcSimRunRef = useRef<(() => void) | null>(null);
-  const [baseStale, setBaseStale] = useState(false);
   const lastCalcFingerprintRef = useRef<string | null>(null);
+  const pendingCalcTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Recompute results when opening a saved deal
   useEffect(() => {
@@ -654,17 +654,51 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [acquisition.propertyAddress]);
 
-  // Mark base returns as stale when inputs change since last calculation
+  // Auto-recalculate returns (1.5s debounce) once initial calculation has been done
   const baseFingerprint = JSON.stringify({ acquisition, operations, proForma, refinance });
   useEffect(() => {
     if (Object.keys(scenarioResults).length === 0) return;
-    // Initialize on first render — not stale yet
     if (lastCalcFingerprintRef.current === null) {
       lastCalcFingerprintRef.current = baseFingerprint;
       return;
     }
-    if (baseFingerprint !== lastCalcFingerprintRef.current) setBaseStale(true);
+    if (baseFingerprint === lastCalcFingerprintRef.current) return;
+    const timer = setTimeout(() => {
+      pendingCalcTimerRef.current = null;
+      handleCalculate();
+    }, 1500);
+    pendingCalcTimerRef.current = timer;
+    return () => {
+      clearTimeout(timer);
+      pendingCalcTimerRef.current = null;
+    };
   }, [baseFingerprint]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fire pending recalculation immediately when page is hidden or about to unload
+  useEffect(() => {
+    const flushPending = () => {
+      if (pendingCalcTimerRef.current !== null) {
+        clearTimeout(pendingCalcTimerRef.current);
+        pendingCalcTimerRef.current = null;
+        handleCalculate();
+      }
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') flushPending();
+    };
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (pendingCalcTimerRef.current !== null) {
+        flushPending();
+        e.preventDefault();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Stable arrays for calculator props (must be memoized — new refs trigger external effects) ──
 
@@ -736,7 +770,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     const updatedResults = { ...scenarioResults, [activeType]: newResult };
     setScenarioResults(updatedResults);
     lastCalcFingerprintRef.current = JSON.stringify({ acquisition, operations, proForma, refinance });
-    setBaseStale(false);
 
     if (savedDealId) {
       const name = saveName || defaultSaveName(acquisition);
@@ -1890,8 +1923,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     onMcRangesChange={setMcRanges}
                     mcResults={mcResults}
                     onMcResultsChange={setMcResults}
-                    baseStale={baseStale}
-                    onRefreshBase={handleCalculate}
                     mcSimRunRef={mcSimRunRef}
                   />
                 </div>
