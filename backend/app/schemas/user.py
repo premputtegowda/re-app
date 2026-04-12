@@ -24,16 +24,8 @@ class UserResponse(BaseModel):
     is_admin: bool
     has_complimentary_access: bool
     features: List[str]
-    gmail_connected: bool = False
-    gmail_sender_email: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
     class Config:
         from_attributes = True
-
-    @classmethod
-    def model_validate(cls, obj, **kwargs):
-        data = super().model_validate(obj, **kwargs)
-        data.gmail_connected = bool(getattr(obj, "gmail_refresh_token", None))
-        return data

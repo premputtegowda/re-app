@@ -34,11 +34,6 @@ class Settings(BaseSettings):
     r2_secret_access_key: str = ""
     r2_bucket_name: str = ""
 
-    # DocuSeal e-signature
-    docuseal_api_key: str = ""
-    docuseal_base_url: str = "https://api.docuseal.com"
-    docuseal_webhook_secret: str = ""
-
     # Email (SMTP)
     smtp_enabled: bool = False
     smtp_host: str = "smtp.gmail.com"
