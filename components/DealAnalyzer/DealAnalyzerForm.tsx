@@ -1631,7 +1631,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
   return (
     <div className="min-h-screen pb-48 lg:pb-36">
-      <div className="max-w-2xl mx-auto px-4 py-6 space-y-5">
+      <div className="max-w-4xl mx-auto px-4 py-6 space-y-5">
 
         {/* Header: title + always-visible Cancel / Next / Save */}
         <div className="flex items-center justify-between gap-4">
@@ -1931,7 +1931,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
         return (
           <div className="fixed bottom-[60px] lg:bottom-0 left-0 right-0 z-50 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 shadow-[0_-4px_16px_rgba(0,0,0,0.06)]">
-            <div className="max-w-2xl mx-auto px-3 pt-2.5" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
+            <div className="max-w-4xl mx-auto px-3 pt-2.5" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
               <div className="flex items-start justify-center lg:justify-between gap-3">
 
                 {/* Metrics */}

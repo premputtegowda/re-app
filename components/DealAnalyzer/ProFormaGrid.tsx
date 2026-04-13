@@ -326,7 +326,8 @@ interface ProFormaGridProps {
   purchasePrice?: number; // used to derive propertyTaxRatePct when user enters property tax dollar amount
 }
 
-const PAGE_SIZE = 3;
+const PAGE_SIZE_MOBILE = 4; // T12 + 3 years per page on mobile
+const PAGE_SIZE_DESKTOP = 6; // T12 + 5 years = 6 columns per page
 
 export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings = false, inPlaceRent, targetRent, units = 1, purchasePrice = 0 }: ProFormaGridProps) {
   const [newExpenseName, setNewExpenseName] = useState('');
@@ -359,8 +360,9 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
     { type: 't12' },
     ...Array.from({ length: projectionYears }, (_, i) => ({ type: 'year' as const, year: i + 1 })),
   ];
-  const totalPages = Math.ceil(allCols.length / PAGE_SIZE);
-  const visibleCols = allCols.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const pageSize = isMobile ? PAGE_SIZE_MOBILE : PAGE_SIZE_DESKTOP;
+  const totalPages = Math.ceil(allCols.length / pageSize);
+  const visibleCols = allCols.slice(page * pageSize, (page + 1) * pageSize);
   const exitYear = projectionYears;
   const totalCols = 1 + visibleCols.length; // sticky label + visible cols
 
@@ -739,7 +741,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
   // ── Page dot indicator — any override in that page's years? ──
 
   function pageHasOverride(p: number): boolean {
-    return allCols.slice(p * PAGE_SIZE, (p + 1) * PAGE_SIZE).some(col => {
+    return allCols.slice(p * pageSize, (p + 1) * pageSize).some(col => {
       if (col.type !== 'year') return false;
       const ov = data.yearOverrides?.[col.year];
       if (!ov) return false;
@@ -1117,12 +1119,12 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
         <div className="grid grid-cols-2 gap-3">
           {/* T12 */}
           <div>
-            <p className="text-[10px] font-semibold uppercase text-slate-400 mb-1">T12</p>
+            <p className="text-[10px] font-semibold uppercase text-slate-400 mb-1 text-right">T12</p>
             <Cell value={t12Val} onChange={onT12} format={fmt} />
           </div>
           {/* Year cell */}
           <div>
-            <div className="flex items-center gap-1 mb-1">
+            <div className="flex items-center justify-end gap-1 mb-1">
               <p className="text-[10px] font-semibold uppercase text-slate-400">
                 Yr {mobileYear}{mobileYear === projectionYears ? ' ★' : ''}
               </p>
@@ -1241,11 +1243,11 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <p className="text-[10px] font-semibold uppercase text-slate-400 mb-1">T12</p>
+            <p className="text-[10px] font-semibold uppercase text-slate-400 mb-1 text-right">T12</p>
             <Cell value={expense.t12Value} onChange={v => updateExpense(expense.id, { t12Value: v })} format={fmt} />
           </div>
           <div>
-            <div className="flex items-center gap-1 mb-1">
+            <div className="flex items-center justify-end gap-1 mb-1">
               <p className="text-[10px] font-semibold uppercase text-slate-400">
                 Yr {mobileYear}{mobileYear === projectionYears ? ' ★' : ''}
               </p>
@@ -1461,9 +1463,9 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
         </div>
       )}
 
-      <div className="overflow-x-auto overflow-y-auto w-full flex-1 border border-slate-200 dark:border-slate-700 rounded-xl">
+      <div className="overflow-x-hidden overflow-y-auto w-full flex-1 border border-slate-200 dark:border-slate-700 rounded-xl">
         <div>
-          <table className="w-full border-collapse text-sm" style={{ minWidth: 120 + 120 * visibleCols.length }}>
+          <table className="w-full border-collapse text-sm">
 
             {/* Headers */}
             <thead>
