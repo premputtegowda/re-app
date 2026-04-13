@@ -219,11 +219,13 @@ function ProbabilityCard({ results, targetCoC, onTargetCoCChange, targetIRR, onT
   const probBoth = Math.round(results.sorted.filter(r => r.irr > -900 && r.irr >= targetIRR - EPS && r.avgCoCReturn >= targetCoC - EPS).length / results.n * 100);
   const probNegCF  = Math.round(results.sorted.filter(r => r.avgCoCReturn < 0).length / results.n * 100);
   const probNegIRR = Math.round(results.sorted.filter(r => r.irr > -900 && r.irr < 0).length / results.n * 100);
-  const probTotalLoss = Math.round(results.sorted.filter(r => r.equityMultiple <= 0).length / results.n * 100);
+  // Only compute total capital loss if EM data is available (old saved results have em=0 placeholder)
+  const hasEMData = results.sorted.some(r => r.equityMultiple > 0);
+  const probTotalLoss = hasEMData ? Math.round(results.sorted.filter(r => r.equityMultiple <= 0).length / results.n * 100) : -1;
 
   const barColor = probBoth >= 70 ? 'bg-secondary-500' : probBoth >= 50 ? 'bg-amber-400' : 'bg-red-400';
   const textColor = probBoth >= 70 ? 'text-secondary-600 dark:text-secondary-400' : probBoth >= 50 ? 'text-amber-600 dark:text-amber-400' : 'text-red-500';
-  const hasRisk = probNegCF > 5 || probNegIRR > 5 || probTotalLoss > 0;
+  const hasRisk = probNegCF > 5 || probNegIRR > 5 || (probTotalLoss > 0 && probTotalLoss !== -1);
 
   return (
     <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-4">
@@ -259,7 +261,7 @@ function ProbabilityCard({ results, targetCoC, onTargetCoCChange, targetIRR, onT
               <span className="font-semibold">{probNegIRR}%</span> chance of negative total return
             </p>
           )}
-          {probTotalLoss > 0 && (
+          {probTotalLoss > 0 && probTotalLoss !== -1 && (
             <p className="text-[11px] text-red-700 dark:text-red-300 font-semibold">
               {probTotalLoss}% chance of total capital loss
             </p>
@@ -627,7 +629,8 @@ export function MonteCarloPanel({
       <div>
         <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Deal Stress Test</p>
         <p className="text-xs text-slate-400 mt-0.5">
-          Simulates thousands of market conditions to pressure-test your deal
+          Simulates thousands of market conditions to pressure-test your deal.
+          Not a prediction — results are statistical inferences based on the market uncertainty ranges you define.
         </p>
       </div>
 

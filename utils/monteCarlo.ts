@@ -146,7 +146,7 @@ export interface MCResults {
 
 /** Serialisable subset of MCResults — replaces the large `sorted` array with compact per-run data. */
 export interface SavedMCResults extends Omit<MCResults, 'sorted'> {
-  compactRuns: Array<{ irr: number; coc: number }>;
+  compactRuns: Array<{ irr: number; coc: number; em?: number }>;
   /** Max purchase price at P50 (median) conditions — recommended target. Null = not achievable. */
   recommendedMaxPrice?: number | null;
   /** Max purchase price at P20 (conservative, ~80% confidence) conditions. Null = not achievable. */
@@ -168,14 +168,14 @@ export function toSavedMCResults(
   inputFingerprint?: string | null,
 ): SavedMCResults {
   const { sorted, ...rest } = r;
-  return { ...rest, compactRuns: sorted.map(run => ({ irr: run.irr, coc: run.avgCoCReturn })), recommendedMaxPrice, conservativeMaxPrice, targetIRR, targetCoC, inputFingerprint };
+  return { ...rest, compactRuns: sorted.map(run => ({ irr: run.irr, coc: run.avgCoCReturn, em: run.equityMultiple })), recommendedMaxPrice, conservativeMaxPrice, targetIRR, targetCoC, inputFingerprint };
 }
 
 export function hydrateMCResults(saved: SavedMCResults): MCResults {
   // Reconstruct a minimal `sorted` from compactRuns (only irr/avgCoCReturn needed for prob filters)
   // Guard: pre-compactRuns saved data (old format) won't have this array
-  const sorted = (saved.compactRuns ?? []).map(({ irr, coc }) => ({
-    irr, avgCoCReturn: coc, equityMultiple: 0, totalCashFlow: 0,
+  const sorted = (saved.compactRuns ?? []).map(({ irr, coc, em }) => ({
+    irr, avgCoCReturn: coc, equityMultiple: em ?? 0, totalCashFlow: 0,
     sampled: { targetRentPerUnit: 0, vacancyPct: 0, rentGrowthPct: 0, exitCapRate: 0, renoOverrunPct: 0, interestRate: 0, refiRate: 0, expenseGrowthPct: 0, arv: 0 },
   }));
   // Back-fill p30/p70 for results saved before those percentiles were added
