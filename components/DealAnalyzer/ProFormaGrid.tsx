@@ -6,6 +6,7 @@ import { Plus, X, RotateCcw, ChevronLeft, ChevronRight, TrendingUp, AlertTriangl
 import type { ProFormaData, ProFormaItem } from '@/types';
 import { computeEGI } from '@/utils/dealAnalyzerCalc';
 import { makeChainedValue, makeChainedExpenseValue } from '@/utils/proFormaChaining';
+import { makeProFormaProjector } from '@/utils/proFormaYearCalc';
 
 // ── Expenses that must keep their type (no $ ↔ % toggle allowed) ─────────────
 
@@ -632,6 +633,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
 
   const chainedValue = makeChainedValue(data.yearOverrides);
   const chainedExpenseValue = makeChainedExpenseValue(data.yearOverrides);
+  const projector = makeProFormaProjector(data);
 
   const setGrossRent = useCallback((field: keyof typeof data.grossRent, value: number | null) => {
     const u = { ...data.grossRent, [field]: value };
@@ -727,36 +729,9 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
 
   const cl = { t12: data.creditLossPct?.t12 ?? 0, stabilized: data.creditLossPct?.stabilized ?? 0 };
 
-  function getEGIForYear(year: number): number {
-    const rentOv = data.yearOverrides?.[year];
-    const rent = (rentOv?.grossRent !== undefined && rentOv?.grossRentSystem !== true)
-      ? rentOv.grossRent
-      : chainedValue('grossRent', 'grossRentGrowthPct', data.grossRent.stabilized, data.grossRent.growthPct, year);
-    const other = data.yearOverrides?.[year]?.otherIncome ?? chainedValue('otherIncome', 'otherIncomeGrowthPct', 0, data.otherIncome.growthPct, year);
-    const vac   = data.yearOverrides?.[year]?.vacancyPct   ?? chainedValue('vacancyPct',   null, 0, 0, year);
-    const clv   = data.yearOverrides?.[year]?.creditLossPct ?? chainedValue('creditLossPct', null, 0, 0, year);
-    return computeEGI(rent, other, vac, clv);
-  }
-
-  function getEffectivePctForYear(expenseId: string, stabilizedPct: number, year: number): number {
-    let lastPct = stabilizedPct;
-    for (let y = 1; y <= year; y++) {
-      const ov = data.yearOverrides?.[y]?.expenses?.[expenseId];
-      if (ov !== undefined) lastPct = ov;
-    }
-    return lastPct;
-  }
-
-  function getOpExForYear(year: number, egi: number): number {
-    return data.expenses.reduce((sum, e) => {
-      if (e.isPercentOfEGI) {
-        const pct = getEffectivePctForYear(e.id, e.stabilizedValue, year);
-        return sum + egi * (pct / 100);
-      }
-      const ov = data.yearOverrides?.[year]?.expenses?.[e.id];
-      return sum + (ov !== undefined ? ov : chainedExpenseValue(e, year));
-    }, 0);
-  }
+  const getEGIForYear              = (year: number)                                    => projector.getEGIForYear(year);
+  const getOpExForYear             = (year: number, egi: number)                       => projector.getOpExForYear(year, egi);
+  const getEffectivePctForYear     = (id: string, stabilizedPct: number, year: number) => projector.getEffectivePctForExpense(id, stabilizedPct, year);
 
   function getT12EGI() { return computeEGI(data.grossRent.t12, data.otherIncome.t12, data.vacancyPct.t12, cl.t12); }
   function getT12OpEx(t12egi: number) { return data.expenses.reduce((s, e) => s + (e.isPercentOfEGI ? t12egi * (e.t12Value / 100) : e.t12Value), 0); }
@@ -1092,9 +1067,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
       value = t12Val;
     } else {
       if (col.year === exitYear) cellBg = highlight ? 'bg-primary-50/40 dark:bg-primary-900/10' : '';
-      const egi = col.year === 1
-        ? computeEGI(data.yearOverrides?.[1]?.grossRent ?? data.grossRent.stabilized, data.yearOverrides?.[1]?.otherIncome ?? 0, data.yearOverrides?.[1]?.vacancyPct ?? 0, data.yearOverrides?.[1]?.creditLossPct ?? 0)
-        : getEGIForYear(col.year);
+      const egi = getEGIForYear(col.year);
       value = highlight ? (egi - getOpExForYear(col.year, egi)) : egi; // reused for both EGI and NOI
     }
 
@@ -1228,9 +1201,8 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
 
   function MobileExpenseRow({ expense }: { expense: ProFormaItem }) {
     const fmt = expense.isPercentOfEGI ? 'percent' : 'currency';
-    const egi = mobileYear === 1
-      ? computeEGI(data.yearOverrides?.[1]?.grossRent ?? data.grossRent.stabilized, data.yearOverrides?.[1]?.otherIncome ?? 0, data.yearOverrides?.[1]?.vacancyPct ?? 0, data.yearOverrides?.[1]?.creditLossPct ?? 0)
-      : getEGIForYear(mobileYear);
+    const isCapEx = expense.name === 'CapEx Reserves' && !expense.isPercentOfEGI;
+    const egi = getEGIForYear(mobileYear);
     const hasExpOverride = expenseRowHasOverride(expense.id);
     const expChainBrokenHere = mobileYear > 1 && isExpenseChainBroken(expense.id, mobileYear);
     return (
@@ -1285,12 +1257,6 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
             {mobileYear === 1 ? (
               <div className="space-y-1">
                 <Cell value={expense.stabilizedValue} onChange={v => updateExpense(expense.id, { stabilizedValue: v })} format={fmt} />
-                {!expense.isPercentOfEGI && (
-                  <div className="flex items-center gap-0.5">
-                    <Cell value={expense.growthPct} onChange={v => updateExpense(expense.id, { growthPct: v })} format="growthPct" />
-                    <span className="text-[10px] text-slate-400">/yr</span>
-                  </div>
-                )}
               </div>
             ) : (
               <div className="space-y-1">
@@ -1311,7 +1277,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                         onYearOnly={v => applyExpenseYearOnly(mobileYear, expense.id, v)}
                         cascadeDelay={(mobileYear - 1) * 50}
                         />
-                      {!expense.isPercentOfEGI && (
+                      {!expense.isPercentOfEGI && !isCapEx && (
                         <div className="flex items-center gap-0.5">
                           <Cell value={yrGrowth} onChange={() => {}} onCommit={(v) => {
                             setExpenseYearGrowthPct(mobileYear, expense.id, v);
@@ -1334,9 +1300,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
   }
 
   if (isMobile) {
-    const mobileEGI = mobileYear === 1
-      ? computeEGI(data.yearOverrides?.[1]?.grossRent ?? data.grossRent.stabilized, data.yearOverrides?.[1]?.otherIncome ?? 0, data.yearOverrides?.[1]?.vacancyPct ?? 0, data.yearOverrides?.[1]?.creditLossPct ?? 0)
-      : getEGIForYear(mobileYear);
+    const mobileEGI = getEGIForYear(mobileYear);
     const mobileOpEx = mobileYear === 1 ? getOpExForYear(1, mobileEGI) : getOpExForYear(mobileYear, mobileEGI);
 
     return (
@@ -1611,9 +1575,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                   <span className="text-xs font-bold uppercase tracking-wide text-slate-600 dark:text-slate-400">Eff. Gross Income</span>
                 </td>
                 {visibleCols.map((col, i) => {
-                  const val = col.type === 't12' ? t12EGI : col.year === 1
-                    ? computeEGI(data.yearOverrides?.[1]?.grossRent ?? data.grossRent.stabilized, data.yearOverrides?.[1]?.otherIncome ?? 0, data.yearOverrides?.[1]?.vacancyPct ?? 0, data.yearOverrides?.[1]?.creditLossPct ?? 0)
-                    : getEGIForYear(col.year);
+                  const val = col.type === 't12' ? t12EGI : getEGIForYear(col.year);
                   return <td key={`egi-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap bg-slate-50 dark:bg-slate-700/30"><span className="text-sm font-bold tabular-nums text-slate-700 dark:text-slate-300">{fmt$(val)}</span></td>;
                 })}
               </tr>
@@ -1680,9 +1642,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                       }
 
                       const { year } = col;
-                      const egi = year === 1
-                        ? computeEGI(data.yearOverrides?.[1]?.grossRent ?? data.grossRent.stabilized, data.yearOverrides?.[1]?.otherIncome ?? 0, data.yearOverrides?.[1]?.vacancyPct ?? 0, data.yearOverrides?.[1]?.creditLossPct ?? 0)
-                        : getEGIForYear(year);
+                      const egi = getEGIForYear(year);
 
                       if (year === 1) {
                         const cell = (
@@ -1702,12 +1662,6 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                                   <Cell value={expense.stabilizedValue} onChange={v => isPropertyTax ? updatePropertyTaxExpense(expense.id, { stabilizedValue: v }) : updateExpense(expense.id, { stabilizedValue: v })} format={fmt} />
                                   {expense.isPercentOfEGI && egi > 0 && <span className="text-[10px] text-slate-400 tabular-nums">{fmt$(egi * expense.stabilizedValue / 100)}</span>}
                                 </>
-                              )}
-                              {!expense.isPercentOfEGI && !isCapEx && (
-                                <div className="flex items-center gap-0.5">
-                                  <Cell value={expense.growthPct} onChange={v => updateExpense(expense.id, { growthPct: v })} format="growthPct" />
-                                  <span className="text-[10px] text-slate-400">/yr</span>
-                                </div>
                               )}
                             </div>
                           </td>
@@ -1791,9 +1745,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                   <span className="text-xs font-bold uppercase tracking-wide text-slate-600 dark:text-slate-400">Total OpEx</span>
                 </td>
                 {visibleCols.map((col, i) => {
-                  const egi = col.type === 't12' ? t12EGI : col.year === 1
-                    ? computeEGI(data.yearOverrides?.[1]?.grossRent ?? data.grossRent.stabilized, data.yearOverrides?.[1]?.otherIncome ?? 0, data.yearOverrides?.[1]?.vacancyPct ?? 0, data.yearOverrides?.[1]?.creditLossPct ?? 0)
-                    : getEGIForYear(col.year);
+                  const egi = col.type === 't12' ? t12EGI : getEGIForYear(col.year);
                   const val = col.type === 't12' ? t12OpEx : getOpExForYear(col.year, egi);
                   return <td key={`opex-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap bg-slate-50 dark:bg-slate-700/30"><span className="text-sm font-bold tabular-nums text-slate-700 dark:text-slate-300">{fmt$(val)}</span></td>;
                 })}
@@ -1805,9 +1757,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                   <span className="text-xs font-bold uppercase tracking-wide text-primary-700 dark:text-primary-300">NOI</span>
                 </td>
                 {visibleCols.map((col, i) => {
-                  const egi = col.type === 't12' ? t12EGI : col.year === 1
-                    ? computeEGI(data.yearOverrides?.[1]?.grossRent ?? data.grossRent.stabilized, data.yearOverrides?.[1]?.otherIncome ?? 0, data.yearOverrides?.[1]?.vacancyPct ?? 0, data.yearOverrides?.[1]?.creditLossPct ?? 0)
-                    : getEGIForYear(col.year);
+                  const egi = col.type === 't12' ? t12EGI : getEGIForYear(col.year);
                   const opex = col.type === 't12' ? t12OpEx : getOpExForYear(col.year, egi);
                   const val = egi - opex;
                   return <td key={`noi-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap bg-primary-50 dark:bg-primary-900/20"><span className="text-sm font-bold tabular-nums text-primary-700 dark:text-primary-300">{fmt$(val)}</span></td>;

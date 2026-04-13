@@ -479,6 +479,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const [savedDealId, setSavedDealId] = useState<string | null>(initialDeal?.id ?? null);
   const [saveName, setSaveName] = useState(initialDeal?.name ?? '');
   const [editingTitle, setEditingTitle] = useState(false);
+  const titleBeforeEdit = useRef('');
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showExitWarning, setShowExitWarning] = useState(false);
 
@@ -1635,19 +1636,36 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         {/* Header: title + always-visible Cancel / Next / Save */}
         <div className="flex items-center justify-between gap-4">
           {editingTitle ? (
-            <input
-              autoFocus
-              type="text"
-              value={saveName}
-              onChange={e => setSaveName(e.target.value)}
-              onBlur={() => { if (!saveName.trim()) setSaveName(defaultSaveName(acquisition)); setEditingTitle(false); }}
-              onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') { if (!saveName.trim()) setSaveName(defaultSaveName(acquisition)); setEditingTitle(false); } }}
-              className="flex-1 text-lg font-semibold bg-transparent border-b-2 border-primary-500 outline-none text-slate-900 dark:text-white min-w-0"
-            />
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+              <input
+                autoFocus
+                type="text"
+                value={saveName}
+                onChange={e => setSaveName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { if (!saveName.trim()) setSaveName(defaultSaveName(acquisition)); setEditingTitle(false); } if (e.key === 'Escape') { setSaveName(titleBeforeEdit.current); setEditingTitle(false); } }}
+                className="flex-1 text-lg font-semibold bg-transparent border-b-2 border-primary-500 outline-none text-slate-900 dark:text-white min-w-0"
+              />
+              <button
+                type="button"
+                onClick={() => { if (!saveName.trim()) setSaveName(defaultSaveName(acquisition)); setEditingTitle(false); }}
+                className="p-1 rounded-full hover:bg-emerald-100 dark:hover:bg-emerald-900/30 text-emerald-500 transition-colors shrink-0"
+                title="Confirm"
+              >
+                <Check size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => { setSaveName(titleBeforeEdit.current); setEditingTitle(false); }}
+                className="p-1 rounded-full hover:bg-red-100 dark:hover:bg-red-900/30 text-red-400 transition-colors shrink-0"
+                title="Cancel"
+              >
+                <X size={16} />
+              </button>
+            </div>
           ) : (
             <button
               type="button"
-              onClick={() => { if (!saveName) setSaveName(acquisition.propertyAddress.trim() || defaultSaveName(acquisition)); setEditingTitle(true); }}
+              onClick={() => { const current = saveName || acquisition.propertyAddress.trim() || defaultSaveName(acquisition); if (!saveName) setSaveName(current); titleBeforeEdit.current = current; setEditingTitle(true); }}
               className="group flex items-center gap-1.5 min-w-0 text-left"
               title="Click to rename"
             >

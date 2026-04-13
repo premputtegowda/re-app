@@ -22,15 +22,15 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
       available: true,
     },
     {
+      icon: Calculator,
+      title: 'Deal Analyzer',
+      description: 'Analyze deals with data-driven price guidance — model cash flows, assess uncertainty, and know the right price before you buy.',
+      available: true,
+    },
+    {
       icon: BarChart2,
       title: 'Market Research',
       description: 'Track unemployment, population growth, rent trends, vacancy rates, and supply vs. demand to identify the strongest markets.',
-      available: false,
-    },
-    {
-      icon: Calculator,
-      title: 'Deal Analyzer',
-      description: 'Model cash flow, cap rates, and returns across your portfolio to evaluate deals with confidence.',
       available: false,
     },
   ];

@@ -4,8 +4,8 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import React from 'react';
 import { RotateCcw, CheckCircle2, Pencil } from 'lucide-react';
 import { formatCurrency, formatPct, formatMultiple } from '@/utils/dealAnalyzerCalc';
-import { runSimulation, computeDefaultRanges, toSavedMCResults, hydrateMCResults, findMaxPriceAtConditions } from '@/utils/monteCarlo';
-import type { MCRanges, MCResults, SavedMCResults } from '@/utils/monteCarlo';
+import { runSimulation, computeDefaultRanges, rangesToMCRangeDefaults, toSavedMCResults, hydrateMCResults, findMaxPriceAtConditions } from '@/utils/monteCarlo';
+import type { MCRanges, MCResults, MCPercentileMetrics, SavedMCResults } from '@/utils/monteCarlo';
 import type { CoCAcquisition, CoCOperations, CoCRefinance, ProFormaData } from '@/types';
 import { useDealSettingsStore, BEAR_OPTIONS, BULL_OPTIONS } from '@/lib/dealSettingsStore';
 
@@ -216,53 +216,54 @@ function ProbabilityCard({ results, targetCoC, onTargetCoCChange, targetIRR, onT
   targetIRR: number; onTargetIRRChange: (v: number) => void;
 }) {
   const EPS = 0.005;
-  const probCoC = Math.round(results.sorted.filter(r => r.avgCoCReturn >= targetCoC - EPS).length / results.n * 100);
-  const probIRR = Math.round(results.sorted.filter(r => r.irr > -900 && r.irr >= targetIRR - EPS).length / results.n * 100);
-  const probLoss = Math.round(results.sorted.filter(r => r.avgCoCReturn < 0).length / results.n * 100);
+  const probBoth = Math.round(results.sorted.filter(r => r.irr > -900 && r.irr >= targetIRR - EPS && r.avgCoCReturn >= targetCoC - EPS).length / results.n * 100);
+  const probNegCF  = Math.round(results.sorted.filter(r => r.avgCoCReturn < 0).length / results.n * 100);
+  const probNegIRR = Math.round(results.sorted.filter(r => r.irr > -900 && r.irr < 0).length / results.n * 100);
+  const probTotalLoss = Math.round(results.sorted.filter(r => r.equityMultiple <= 0).length / results.n * 100);
 
-  const irrBarColor = probIRR >= 70 ? 'bg-secondary-500' : probIRR >= 50 ? 'bg-amber-400' : 'bg-red-400';
-  const cocBarColor = probCoC >= 70 ? 'bg-secondary-500' : probCoC >= 50 ? 'bg-amber-400' : 'bg-red-400';
-  const irrTextColor = probIRR >= 70 ? 'text-secondary-600 dark:text-secondary-400' : probIRR >= 50 ? 'text-amber-600 dark:text-amber-400' : 'text-red-500';
-  const cocTextColor = probCoC >= 70 ? 'text-secondary-600 dark:text-secondary-400' : probCoC >= 50 ? 'text-amber-600 dark:text-amber-400' : 'text-red-500';
+  const barColor = probBoth >= 70 ? 'bg-secondary-500' : probBoth >= 50 ? 'bg-amber-400' : 'bg-red-400';
+  const textColor = probBoth >= 70 ? 'text-secondary-600 dark:text-secondary-400' : probBoth >= 50 ? 'text-amber-600 dark:text-amber-400' : 'text-red-500';
+  const hasRisk = probNegCF > 5 || probNegIRR > 5 || probTotalLoss > 0;
 
   return (
     <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-4">
       <p className="text-xs font-bold text-slate-700 dark:text-slate-300">How likely is this deal to work?</p>
 
-      {/* IRR probability */}
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <span className="text-xs text-slate-500 dark:text-slate-400 inline-flex items-center gap-1 min-w-0">
-            <InlineEditTarget value={targetIRR} onChange={onTargetIRRChange} suffix="%" />
-            <span className="truncate">IRR target</span>
-          </span>
-          <span className={`text-sm font-bold tabular-nums shrink-0 ${irrTextColor}`}>{probIRR}% chance</span>
+      <div className="space-y-2">
+        <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 flex-wrap">
+          <span>Hitting</span>
+          <InlineEditTarget value={targetIRR} onChange={onTargetIRRChange} suffix="%" />
+          <span>IRR</span>
+          <span>&</span>
+          <InlineEditTarget value={targetCoC} onChange={onTargetCoCChange} suffix="%" />
+          <span>CoC</span>
         </div>
-        <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
-          <div className={`h-full rounded-full transition-all ${irrBarColor}`} style={{ width: `${probIRR}%` }} />
-        </div>
-      </div>
-
-      {/* CoC probability */}
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <span className="text-xs text-slate-500 dark:text-slate-400 inline-flex items-center gap-1 min-w-0">
-            <InlineEditTarget value={targetCoC} onChange={onTargetCoCChange} suffix="%" />
-            <span className="truncate">cash-on-cash target</span>
-          </span>
-          <span className={`text-sm font-bold tabular-nums shrink-0 ${cocTextColor}`}>{probCoC}% chance</span>
-        </div>
-        <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
-          <div className={`h-full rounded-full transition-all ${cocBarColor}`} style={{ width: `${probCoC}%` }} />
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex-1 h-3 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+            <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${probBoth}%` }} />
+          </div>
+          <span className={`text-lg font-bold tabular-nums shrink-0 ${textColor}`}>{probBoth}%</span>
         </div>
       </div>
 
-      {/* Loss probability callout */}
-      {probLoss > 5 && (
-        <div className="rounded-lg bg-red-50 dark:bg-red-900/20 px-3 py-2">
-          <p className="text-[11px] text-red-600 dark:text-red-400">
-            <span className="font-semibold">{probLoss}% chance of negative cash flow</span> across all simulated scenarios
-          </p>
+      {/* Risk callouts */}
+      {hasRisk && (
+        <div className="rounded-lg bg-red-50 dark:bg-red-900/20 px-3 py-2 space-y-1">
+          {probNegCF > 5 && (
+            <p className="text-[11px] text-red-600 dark:text-red-400">
+              <span className="font-semibold">{probNegCF}%</span> chance of negative cash flow
+            </p>
+          )}
+          {probNegIRR > 5 && (
+            <p className="text-[11px] text-red-600 dark:text-red-400">
+              <span className="font-semibold">{probNegIRR}%</span> chance of negative total return
+            </p>
+          )}
+          {probTotalLoss > 0 && (
+            <p className="text-[11px] text-red-700 dark:text-red-300 font-semibold">
+              {probTotalLoss}% chance of total capital loss
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -278,7 +279,7 @@ function ScenarioOutcomes({ results }: { results: MCResults }) {
 
   const scenarios = [
     { label: 'Downside',    color: 'text-red-500 dark:text-red-400',            bg: 'bg-red-50 dark:bg-red-900/20',            data: bearData },
-    { label: 'Base',        color: 'text-primary-600 dark:text-primary-400',     bg: 'bg-primary-50 dark:bg-primary-900/20',     data: results.p50 },
+    { label: 'Median',      color: 'text-primary-600 dark:text-primary-400',     bg: 'bg-primary-50 dark:bg-primary-900/20',     data: results.p50 },
     { label: 'Upside',      color: 'text-secondary-600 dark:text-secondary-400', bg: 'bg-secondary-50 dark:bg-secondary-900/20', data: bullData },
   ];
 
@@ -343,22 +344,24 @@ function RiskDrivers({ results }: { results: MCResults }) {
 
 // ── Assumption Editor ─────────────────────────────────────────────────────────
 
-function RangeEditor({ ranges, defaults, onChange, onReset, showRefiRate, showArvRange }: {
-  ranges:        MCRanges;
-  defaults:      MCRanges;
-  onChange:      (r: MCRanges) => void;
-  onReset:       () => void;
-  showRefiRate:  boolean;
-  showArvRange:  boolean;
+function RangeEditor({ ranges, defaults, onChange, onReset, onSaveAsDefaults, showRefiRate, showArvRange }: {
+  ranges:             MCRanges;
+  defaults:           MCRanges;
+  onChange:           (r: MCRanges) => void;
+  onReset:            () => void;
+  onSaveAsDefaults:   () => void;
+  showRefiRate:       boolean;
+  showArvRange:       boolean;
 }) {
   const [draft, setDraft] = useState<Partial<Record<string, string>>>({});
   const fields: Array<{ key: keyof MCRanges; label: string; step: number; decimals: number; higherIsWorse: boolean; scale?: number }> = [
     { key: 'targetRentPerUnit', label: 'Rent / unit ($/mo)',   step: 25,    decimals: 0, higherIsWorse: false },
-    { key: 'vacancyPct',        label: 'Vacancy Rate (%)',     step: 0.5,   decimals: 1, higherIsWorse: true  },
-    { key: 'rentGrowthPct',     label: 'Rent Growth / yr (%)', step: 0.25,  decimals: 2, higherIsWorse: false },
-    { key: 'exitCapRate',       label: 'Exit Cap Rate (%)',    step: 0.25,  decimals: 2, higherIsWorse: true  },
-    { key: 'renoOverrunPct',    label: 'Reno Overrun Max (%)', step: 5,     decimals: 0, higherIsWorse: true  },
-    { key: 'interestRate',      label: 'Interest Rate (%)',    step: 0.125, decimals: 3, higherIsWorse: true  },
+    { key: 'vacancyPct',        label: 'Vacancy Rate (%)',           step: 0.5,   decimals: 1, higherIsWorse: true  },
+    { key: 'rentGrowthPct',     label: 'Rent Growth (%)',            step: 0.25,  decimals: 2, higherIsWorse: false },
+    { key: 'exitCapRate',       label: 'Exit Cap Rate (%)',          step: 0.25,  decimals: 2, higherIsWorse: true  },
+    { key: 'renoOverrunPct',    label: 'Reno Overrun Max (%)',       step: 5,     decimals: 0, higherIsWorse: true  },
+    { key: 'expenseGrowthPct',  label: 'Expense Growth (%)',         step: 0.25,  decimals: 2, higherIsWorse: true  },
+    { key: 'interestRate',      label: 'Interest Rate (%)',         step: 0.125, decimals: 3, higherIsWorse: true  },
     ...(showRefiRate  ? [{ key: 'refiRate' as keyof MCRanges, label: 'Refi Rate (%)',       step: 0.125, decimals: 3, higherIsWorse: true,  scale: 1    }] : []),
     ...(showArvRange  ? [{ key: 'arv'      as keyof MCRanges, label: 'Exit Value ARV ($K)', step: 50,    decimals: 0, higherIsWorse: false, scale: 1000 }] : []),
   ];
@@ -371,12 +374,18 @@ function RangeEditor({ ranges, defaults, onChange, onReset, showRefiRate, showAr
     <div className="space-y-4 pt-4 border-t border-slate-100 dark:border-slate-700">
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Adjust assumptions</p>
-        {changed && (
-          <button type="button" onClick={onReset}
-            className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
-            <RotateCcw size={10} /> Reset
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={onSaveAsDefaults}
+            className="text-[11px] text-primary-500 hover:text-primary-700 dark:hover:text-primary-300 transition-colors font-medium">
+            Save as my defaults
           </button>
-        )}
+          {changed && (
+            <button type="button" onClick={onReset}
+              className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+              <RotateCcw size={10} /> Reset
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Column header row */}
@@ -399,20 +408,24 @@ function RangeEditor({ ranges, defaults, onChange, onReset, showRefiRate, showAr
           const pessDisplay = draft[pessKey] ?? fmt(r[pessField]);
           const optimDisplay = draft[optimKey] ?? fmt(r[optimField]);
 
+          // If the committed value rounds to the same displayed string as the mode,
+          // snap to the exact mode — prevents a tiny non-zero range when the user
+          // types the displayed (rounded) mode value into the pessimistic/optimistic field.
+          const snapToMode = (v: number) => fmt(v) === fmt(d.mode) ? d.mode : v;
           const commitPess = () => {
             const v = parseFloat(draft[pessKey] ?? '') * scale;
             setDraft(d2 => { const n = { ...d2 }; delete n[pessKey]; return n; });
             if (!isNaN(v)) {
-              const clamped = higherIsWorse ? Math.max(v, d.mode) : Math.min(v, d.mode);
-              onChange({ ...ranges, [key]: { ...r, [pessField]: clamped } });
+              const clamped = snapToMode(higherIsWorse ? Math.max(v, d.mode) : Math.min(v, d.mode));
+              onChange({ ...ranges, [key]: { ...r, mode: d.mode, [pessField]: clamped } });
             }
           };
           const commitOptim = () => {
             const v = parseFloat(draft[optimKey] ?? '') * scale;
             setDraft(d2 => { const n = { ...d2 }; delete n[optimKey]; return n; });
             if (!isNaN(v)) {
-              const clamped = higherIsWorse ? Math.min(v, d.mode) : Math.max(v, d.mode);
-              onChange({ ...ranges, [key]: { ...r, [optimField]: clamped } });
+              const clamped = snapToMode(Math.max(v, d.mode));
+              onChange({ ...ranges, [key]: { ...r, mode: d.mode, [optimField]: clamped } });
             }
           };
 
@@ -453,21 +466,37 @@ export function MonteCarloPanel({
   savedResults, onResultsChange,
   onStaleChange, onRunningChange, runTriggerRef, openEditorRef,
 }: MonteCarloPanelProps) {
+  const { mcRangeDefaults, setMCRangeDefaults } = useDealSettingsStore();
   const defaults = useMemo(
-    () => computeDefaultRanges(acquisition, proForma, avgTargetRentPerUnit, units, refinance),
+    () => computeDefaultRanges(acquisition, proForma, avgTargetRentPerUnit, units, refinance, mcRangeDefaults),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [acquisition, proForma, avgTargetRentPerUnit, units, refinance, mcRangeDefaults],
   );
 
   const initialRanges = savedRanges ?? defaults;
   const [ranges, setRanges] = useState<MCRanges>(initialRanges);
+  const rangesRef = useRef<MCRanges>(initialRanges);
+  const [draftRangesState, setDraftRangesState] = useState<MCRanges>(initialRanges);
 
+  // Track whether the user has explicitly customized ranges in the editor.
+  // Until they do, base values auto-sync when ProForma inputs change.
+  const userCustomizedRef = useRef(savedRanges !== null);
+
+  // When defaults recompute (ProForma changed) and user hasn't customized, sync ranges.
   useEffect(() => {
-    onRangesChange?.(initialRanges);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (!userCustomizedRef.current) {
+      setRanges(defaults);
+      setDraftRangesState(defaults);
+      onRangesChange?.(defaults);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaults]);
+
+  useEffect(() => { rangesRef.current = ranges; }, [ranges]);
 
   const handleRangesChange = useCallback((r: MCRanges) => {
+    userCustomizedRef.current = true;
+    rangesRef.current = r;
     setRanges(r);
     onRangesChange?.(r);
   }, [onRangesChange]);
@@ -478,7 +507,7 @@ export function MonteCarloPanel({
   const [progress, setProgress]     = useState(0);
   const [isStale, setIsStale]     = useState(false);
   const [showEditor, setShowEditor] = useState(false);
-  const [draftRanges, setDraftRanges] = useState<MCRanges>(initialRanges);
+  const [draftRanges, setDraftRanges] = [draftRangesState, setDraftRangesState];
   const editorRef = useRef<HTMLDivElement>(null);
 
   // Restore targets from last saved run
@@ -532,17 +561,18 @@ export function MonteCarloPanel({
     };
   }, [results, bearPercentile, targetIRR, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit]);
 
-  const run = useCallback(async () => {
+  const run = useCallback(async (effectiveRanges?: MCRanges) => {
     if (simRunningRef.current) return;
     simRunningRef.current = true;
     setRunning(true);
     setProgress(0);
+    const activeRanges = effectiveRanges ?? rangesRef.current;
     try {
       const r = await runSimulation({
-        n: N_RUNS, ranges, acquisition, operations, proForma, refinance,
+        n: N_RUNS, ranges: activeRanges, acquisition, operations, proForma, refinance,
         units, avgPreStabPerUnit, onProgress: pct => { if (isMountedRef.current) setProgress(pct); },
       });
-      const fp = computeFingerprint(acquisition, proForma, ranges, refinance);
+      const fp = computeFingerprint(acquisition, proForma, activeRanges, refinance);
       const bearRun = r[bearPercentile] ?? r.p20 ?? r.p50;
       const args = [acquisition, operations, proForma, refinance, units, avgPreStabPerUnit] as const;
       const recMax  = findMaxPriceAtConditions(r.p50.sampled,    targetIRR, ...args);
@@ -560,7 +590,7 @@ export function MonteCarloPanel({
       simRunningRef.current = false;
       if (isMountedRef.current) setRunning(false);
     }
-  }, [ranges, targetIRR, targetCoC, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit, onResultsChange]);
+  }, [targetIRR, targetCoC, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit, onResultsChange]);
 
   // Keep latest run fn in a ref so the unmount cleanup always calls the current version
   const runRef = useRef(run);
@@ -656,7 +686,7 @@ export function MonteCarloPanel({
                   const changed = JSON.stringify(draftRanges) !== JSON.stringify(ranges);
                   handleRangesChange(draftRanges);
                   setShowEditor(false);
-                  if (changed) runRef.current();
+                  if (changed) runRef.current(draftRanges);
                 }}
                 className="px-3 py-1 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-xs font-semibold transition-colors"
               >
@@ -688,7 +718,8 @@ export function MonteCarloPanel({
               ranges={draftRanges}
               defaults={defaults}
               onChange={setDraftRanges}
-              onReset={() => setDraftRanges(defaults)}
+              onReset={() => { handleRangesChange(defaults); setDraftRanges(defaults); userCustomizedRef.current = false; }}
+              onSaveAsDefaults={() => setMCRangeDefaults(rangesToMCRangeDefaults(draftRanges))}
               showRefiRate={refinance.enabled}
               showArvRange={acquisition.exitMethod !== 'capRate' && acquisition.arv > 0}
             />

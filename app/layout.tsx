@@ -17,7 +17,7 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: 'DealstackRE',
-  description: 'Real Estate Professional Status Hours Tracking Application',
+  description: 'Research markets, track REPS hours, and analyze deals with confidence — the all-in-one toolkit for real estate investors.',
   icons: {
     icon: [
       { url: '/icon.svg', type: 'image/svg+xml' },

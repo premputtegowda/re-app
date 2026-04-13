@@ -31,6 +31,49 @@ export interface MCRange {
   max: number;
 }
 
+/**
+ * User-configurable default range deltas for Monte Carlo assumptions.
+ * These control how wide the pessimistic/optimistic bands are relative to the base.
+ * "Pct" variables are in percentage points; "Pts" variables are in rate points.
+ */
+export interface MCRangeDefaults {
+  // % variables (percentage-point offsets from base)
+  rentPessimisticPct:         number; // how far below base rent (% of base, e.g. 15 = −15%)
+  rentOptimisticPct:          number; // how far above base rent (% of base, e.g. 10 = +10%)
+  vacancyPessimisticPts:      number; // pts above base vacancy (e.g. 8)
+  vacancyOptimisticPts:       number; // pts below base vacancy (e.g. 2)
+  rentGrowthPessimisticPts:   number; // pts below base growth (e.g. 1)
+  rentGrowthOptimisticPts:    number; // pts above base growth (e.g. 2)
+  expenseGrowthPessimisticPts: number; // pts above base expense growth (e.g. 2)
+  expenseGrowthOptimisticPts: number; // pts below base expense growth (e.g. 1)
+  renoOverrunMaxPct:          number; // max reno overrun % (e.g. 30)
+  // Rate variables (points)
+  exitCapRatePessimisticPts:  number; // pts above base cap rate (e.g. 1.5)
+  exitCapRateOptimisticPts:   number; // pts below base cap rate (e.g. 0.5)
+  interestRatePessimisticPts: number; // pts above base rate (e.g. 2.0)
+  interestRateOptimisticPts:  number; // pts below base rate (e.g. 0.5)
+  refiRatePessimisticPts:     number; // pts above base refi rate
+  refiRateOptimisticPts:      number; // pts below base refi rate
+}
+
+export const MC_RANGE_DEFAULTS: MCRangeDefaults = {
+  rentPessimisticPct:          15,
+  rentOptimisticPct:            5,
+  vacancyPessimisticPts:        8,
+  vacancyOptimisticPts:         2,
+  rentGrowthPessimisticPts:     2,
+  rentGrowthOptimisticPts:      1,
+  expenseGrowthPessimisticPts:  2,
+  expenseGrowthOptimisticPts:   1,
+  renoOverrunMaxPct:           30,
+  exitCapRatePessimisticPts:    2,
+  exitCapRateOptimisticPts:   0.5,
+  interestRatePessimisticPts:   0,
+  interestRateOptimisticPts:    0,
+  refiRatePessimisticPts:       2,
+  refiRateOptimisticPts:      0.5,
+};
+
 export interface MCRanges {
   targetRentPerUnit: MCRange;
   vacancyPct:        MCRange;
@@ -39,6 +82,7 @@ export interface MCRanges {
   renoOverrunPct:    MCRange; // 0 = base cost, 30 = 30% overrun
   interestRate:      MCRange;
   refiRate:          MCRange; // refinance interest rate — only meaningful when refinance.enabled
+  expenseGrowthPct?: MCRange; // annual growth rate for fixed-dollar expenses
   arv?:              MCRange; // ARV uncertainty — only when exitMethod is 'value' and arv > 0
 }
 
@@ -55,6 +99,7 @@ export interface MCRunResult {
     renoOverrunPct:    number;
     interestRate:      number;
     refiRate:          number;
+    expenseGrowthPct:  number;
     arv:               number;
   };
 }
@@ -77,10 +122,20 @@ export interface MCYearlyP50 {
   cashOutProceeds:  number; // median refi cash-out for this year (0 for non-refi years)
 }
 
+/** Independent percentiles for each metric (sorted independently, not from a single run). */
+export interface MCPercentileMetrics {
+  irr:             number;
+  avgCoCReturn:    number;
+  equityMultiple:  number;
+}
+
 export interface MCResults {
   n:                    number;
   sorted:               MCRunResult[]; // by IRR ascending
   p10: MCRunResult; p20: MCRunResult; p30: MCRunResult; p50: MCRunResult; p70: MCRunResult; p80: MCRunResult; p90: MCRunResult;
+  /** Independent percentiles — each metric sorted separately so P50 CoC = true CoC median. */
+  independentP10: MCPercentileMetrics; independentP20: MCPercentileMetrics; independentP30: MCPercentileMetrics;
+  independentP50: MCPercentileMetrics; independentP70: MCPercentileMetrics; independentP80: MCPercentileMetrics; independentP90: MCPercentileMetrics;
   probPositiveCashFlow: number; // % of runs avgCoCReturn > 0
   sensitivity:          MCSensitivity[];
   irrBuckets:           MCHistogramBucket[];
@@ -121,7 +176,7 @@ export function hydrateMCResults(saved: SavedMCResults): MCResults {
   // Guard: pre-compactRuns saved data (old format) won't have this array
   const sorted = (saved.compactRuns ?? []).map(({ irr, coc }) => ({
     irr, avgCoCReturn: coc, equityMultiple: 0, totalCashFlow: 0,
-    sampled: { targetRentPerUnit: 0, vacancyPct: 0, rentGrowthPct: 0, exitCapRate: 0, renoOverrunPct: 0, interestRate: 0, refiRate: 0, arv: 0 },
+    sampled: { targetRentPerUnit: 0, vacancyPct: 0, rentGrowthPct: 0, exitCapRate: 0, renoOverrunPct: 0, interestRate: 0, refiRate: 0, expenseGrowthPct: 0, arv: 0 },
   }));
   // Back-fill p30/p70 for results saved before those percentiles were added
   const saved_ = saved as unknown as MCResults;
@@ -129,7 +184,18 @@ export function hydrateMCResults(saved: SavedMCResults): MCResults {
   const p70 = saved_.p70 ?? saved_.p80 ?? saved_.p50;
   // Back-fill yearlyP50 for results saved before this field was added
   const yearlyP50 = (saved_.yearlyP50 ?? []).map(y => ({ ...y, cashOutProceeds: y.cashOutProceeds ?? 0 }));
-  return { ...saved, sorted, p30, p70, yearlyP50 };
+  // Back-fill independent percentiles for results saved before this field was added
+  const fallbackIndependent = (p: MCRunResult): MCPercentileMetrics => ({
+    irr: p.irr, avgCoCReturn: p.avgCoCReturn, equityMultiple: p.equityMultiple,
+  });
+  const independentP10 = saved_.independentP10 ?? fallbackIndependent(saved_.p10 ?? saved_.p50);
+  const independentP20 = saved_.independentP20 ?? fallbackIndependent(saved_.p20 ?? saved_.p50);
+  const independentP30 = saved_.independentP30 ?? fallbackIndependent(p30);
+  const independentP50 = saved_.independentP50 ?? fallbackIndependent(saved_.p50);
+  const independentP70 = saved_.independentP70 ?? fallbackIndependent(p70);
+  const independentP80 = saved_.independentP80 ?? fallbackIndependent(saved_.p80 ?? saved_.p50);
+  const independentP90 = saved_.independentP90 ?? fallbackIndependent(saved_.p90 ?? saved_.p50);
+  return { ...saved, sorted, p30, p70, yearlyP50, independentP10, independentP20, independentP30, independentP50, independentP70, independentP80, independentP90 };
 }
 
 // ── Default ranges ────────────────────────────────────────────────────────────
@@ -141,24 +207,91 @@ export function hydrateMCResults(saved: SavedMCResults): MCResults {
  * - Renovation: only overruns, never under (0 / +30%)
  * - Exit cap: expansion is the big IRR killer (+1.5 / −0.5)
  */
+// ── Base value helpers — use the projector's actual input parameters, not derived outputs ──
+
+/**
+ * The base rent growth rate — what makeChainedValue uses for years without explicit overrides.
+ * This is the correct parameter to vary in simulation; Year-1 override is irrelevant
+ * because chainedValue returns stabilized directly for Year 1 (growth starts at Year 2).
+ */
+function getBaseGrowthRate(proForma: ProFormaData): number {
+  return proForma.grossRent.growthPct ?? 3;
+}
+
+/** The base vacancy rate used by the projector for years without explicit overrides. */
+function getBaseVacancyRate(proForma: ProFormaData): number {
+  return proForma.vacancyPct.stabilized ?? 5;
+}
+
+/**
+ * Average base growth rate across all fixed-dollar expenses.
+ * Uses each expense's base growthPct (the projector's default for years without overrides).
+ * % of EGI expenses are excluded — their cost moves with EGI automatically.
+ */
+function getBaseExpenseGrowthRate(proForma: ProFormaData): number {
+  const growing = proForma.expenses.filter(e => !e.isPercentOfEGI && e.growthPct > 0);
+  if (growing.length === 0) return 3;
+  return Math.round(growing.reduce((acc, e) => acc + e.growthPct, 0) / growing.length * 100) / 100;
+}
+
+/**
+ * Scale per-year growth and vacancy overrides multiplicatively by (sampled / base).
+ * Every year's rate moves by the same factor, preserving the relative year-to-year
+ * shape while the overall level scales with the sampled value.
+ * Falls back to the overrides unchanged when base is zero.
+ */
+function applyPerYearShifts(
+  overrides: ProFormaData['yearOverrides'],
+  sampledGrowth: number,
+  sampledVac: number,
+  baseGrowth: number,
+  baseVac: number,
+  sampledExpGrowth?: number,
+  baseExpGrowth?: number,
+): ProFormaData['yearOverrides'] {
+  const growthRatio   = baseGrowth    !== 0 ? sampledGrowth   / baseGrowth   : 1;
+  const vacRatio      = baseVac       !== 0 ? sampledVac      / baseVac      : 1;
+  const expGrowthRatio = (sampledExpGrowth !== undefined && baseExpGrowth !== undefined && baseExpGrowth !== 0)
+    ? sampledExpGrowth / baseExpGrowth : 1;
+  if (growthRatio === 1 && vacRatio === 1 && expGrowthRatio === 1) return overrides;
+
+  const result: ProFormaData['yearOverrides'] = {};
+  for (const [yearStr, ov] of Object.entries(overrides ?? {})) {
+    if (!ov) continue;
+    const y = Number(yearStr);
+    const patched = { ...ov };
+    if (ov.grossRentGrowthPct !== undefined) patched.grossRentGrowthPct = ov.grossRentGrowthPct * growthRatio;
+    if (ov.vacancyPct          !== undefined) patched.vacancyPct         = Math.max(0, ov.vacancyPct * vacRatio);
+    if (ov.expenseGrowthPcts && expGrowthRatio !== 1) {
+      const scaled: Record<string, number> = {};
+      for (const [id, rate] of Object.entries(ov.expenseGrowthPcts)) scaled[id] = rate * expGrowthRatio;
+      patched.expenseGrowthPcts = scaled;
+    }
+    result[y] = patched;
+  }
+  return result;
+}
+
 export function computeDefaultRanges(
   acquisition: CoCAcquisition,
   proForma: ProFormaData,
   avgTargetRentPerUnit: number,
   units: number,
   refinance?: CoCRefinance,
+  rangeDefaults?: MCRangeDefaults,
 ): MCRanges {
+  const d = { ...MC_RANGE_DEFAULTS, ...rangeDefaults };
   const effectiveUnits = Math.max(1, units);
-  // Derive per-unit rent from proForma.stabilized so MC base exactly matches the calculator
-  const rent   = proForma.grossRent.stabilized > 0
-    ? proForma.grossRent.stabilized / (effectiveUnits * 12)
-    : avgTargetRentPerUnit > 0 ? avgTargetRentPerUnit : 1000;
-  // Use ?? (not ||) so that legitimate 0 values aren't replaced by fallbacks
-  const vac    = proForma.vacancyPct.stabilized ?? 5;
-  const growth = proForma.grossRent.growthPct   ?? 3;
-  const cap    = acquisition.exitCapRate         ?? 6;
-  const rate   = acquisition.interestRate        ?? 7;
-  const refi   = refinance?.enabled ? (refinance.newInterestRate ?? rate) : rate;
+  // Use stabilized rent as the MC base — this is the projector's actual input (Year 1 = stabilized directly)
+  const baseRentPerUnit = proForma.grossRent.stabilized / effectiveUnits / 12;
+  const rent = baseRentPerUnit > 0 ? baseRentPerUnit : avgTargetRentPerUnit > 0 ? avgTargetRentPerUnit : 1000;
+
+  const growth    = getBaseGrowthRate(proForma);
+  const vac       = getBaseVacancyRate(proForma);
+  const expGrowth = getBaseExpenseGrowthRate(proForma);
+  const cap  = acquisition.exitCapRate ?? 6;
+  const rate = acquisition.interestRate ?? 7;
+  const refi = refinance?.enabled ? (refinance.newInterestRate ?? rate) : rate;
 
   const arvRound = (v: number) => Math.round(v / 1000) * 1000;
   const arvRange: MCRange | undefined = acquisition.arv > 0 && acquisition.exitMethod !== 'capRate'
@@ -166,14 +299,48 @@ export function computeDefaultRanges(
     : undefined;
 
   return {
-    targetRentPerUnit: { min: rent * 0.85,          mode: rent,   max: rent * 1.10 },
-    vacancyPct:        { min: Math.max(0, vac - 2),  mode: vac,    max: vac + 8 },
-    rentGrowthPct:     { min: growth - 1,             mode: growth, max: growth + 2 },
-    exitCapRate:       { min: cap - 0.5,              mode: cap,    max: cap + 1.5 },
-    renoOverrunPct:    { min: 0,                      mode: 0,      max: 30 },
-    interestRate:      { min: rate - 0.5,             mode: rate,   max: rate + 2.0 },
-    refiRate:          { min: refi - 0.5,             mode: refi,   max: refi + 2.0 },
+    targetRentPerUnit: { min: rent * (1 - d.rentPessimisticPct / 100),          mode: rent,      max: rent * (1 + d.rentOptimisticPct / 100) },
+    vacancyPct:        { min: Math.max(0, vac - d.vacancyOptimisticPts),         mode: vac,       max: vac + d.vacancyPessimisticPts },
+    rentGrowthPct:     { min: growth - d.rentGrowthPessimisticPts,               mode: growth,    max: growth + d.rentGrowthOptimisticPts },
+    exitCapRate:       { min: cap  - d.exitCapRateOptimisticPts,                 mode: cap,       max: cap  + d.exitCapRatePessimisticPts },
+    renoOverrunPct:    { min: 0,                                                  mode: 0,         max: d.renoOverrunMaxPct },
+    interestRate:      { min: rate - d.interestRateOptimisticPts,                mode: rate,      max: rate + d.interestRatePessimisticPts },
+    refiRate:          { min: refi - d.refiRateOptimisticPts,                    mode: refi,      max: refi + d.refiRatePessimisticPts },
+    expenseGrowthPct:  { min: Math.max(0, expGrowth - d.expenseGrowthOptimisticPts), mode: expGrowth, max: expGrowth + d.expenseGrowthPessimisticPts },
     ...(arvRange ? { arv: arvRange } : {}),
+  };
+}
+
+/**
+ * Reverse of computeDefaultRanges — extracts the pessimistic/optimistic deltas
+ * from a set of ranges so they can be saved as the user's global defaults.
+ */
+export function rangesToMCRangeDefaults(ranges: MCRanges): MCRangeDefaults {
+  const r = ranges;
+  const rent      = r.targetRentPerUnit;
+  const vac       = r.vacancyPct;
+  const growth    = r.rentGrowthPct;
+  const expGrowth = r.expenseGrowthPct ?? { min: 0, mode: 0, max: 0 };
+  const reno      = r.renoOverrunPct;
+  const cap       = r.exitCapRate;
+  const rate      = r.interestRate;
+  const refi      = r.refiRate ?? { min: 0, mode: 0, max: 0 };
+  return {
+    rentPessimisticPct:          rent.mode > 0 ? Math.round((rent.mode - rent.min) / rent.mode * 1000) / 10 : MC_RANGE_DEFAULTS.rentPessimisticPct,
+    rentOptimisticPct:           rent.mode > 0 ? Math.round((rent.max - rent.mode) / rent.mode * 1000) / 10 : MC_RANGE_DEFAULTS.rentOptimisticPct,
+    vacancyPessimisticPts:       Math.round((vac.max       - vac.mode)       * 10) / 10,
+    vacancyOptimisticPts:        Math.round((vac.mode      - vac.min)        * 10) / 10,
+    rentGrowthPessimisticPts:    Math.round((growth.mode   - growth.min)     * 100) / 100,
+    rentGrowthOptimisticPts:     Math.round((growth.max    - growth.mode)    * 100) / 100,
+    expenseGrowthPessimisticPts: Math.round((expGrowth.max - expGrowth.mode) * 100) / 100,
+    expenseGrowthOptimisticPts:  Math.round((expGrowth.mode- expGrowth.min)  * 100) / 100,
+    renoOverrunMaxPct:           reno.max,
+    exitCapRatePessimisticPts:   Math.round((cap.max       - cap.mode)       * 100) / 100,
+    exitCapRateOptimisticPts:    Math.round((cap.mode      - cap.min)        * 100) / 100,
+    interestRatePessimisticPts:  Math.round((rate.max      - rate.mode)      * 1000) / 1000,
+    interestRateOptimisticPts:   Math.round((rate.mode     - rate.min)       * 1000) / 1000,
+    refiRatePessimisticPts:      Math.round((refi.max      - refi.mode)      * 1000) / 1000,
+    refiRateOptimisticPts:       Math.round((refi.mode     - refi.min)       * 1000) / 1000,
   };
 }
 
@@ -270,6 +437,10 @@ function runOnce(
   // ranges.refiRate may be absent in ranges saved before this field was added
   const refiRateRange = ranges.refiRate ?? { min: rate, mode: rate, max: rate };
   const refiRate = sampleTriangular(refiRateRange.min, refiRateRange.mode, refiRateRange.max);
+  // Expense growth — sampled when range exists, otherwise defaults to base (no variation)
+  const baseExpGrowth = getBaseExpenseGrowthRate(proForma);
+  const expGrowthRange = ranges.expenseGrowthPct ?? { min: baseExpGrowth, mode: baseExpGrowth, max: baseExpGrowth };
+  const expGrowth = sampleTriangular(expGrowthRange.min, expGrowthRange.mode, expGrowthRange.max);
   // ARV — sampled when exit method is 'value' and range is defined
   const arvSampled = ranges.arv ? sampleTriangular(ranges.arv.min, ranges.arv.mode, ranges.arv.max) : acquisition.arv;
 
@@ -283,6 +454,7 @@ function runOnce(
     renoOver   === ranges.renoOverrunPct.mode    &&
     rate       === ranges.interestRate.mode      &&
     refiRate   === refiRateRange.mode            &&
+    expGrowth  === expGrowthRange.mode           &&
     arvSampled === (ranges.arv?.mode ?? acquisition.arv);
 
   const baseScenario: CoCScenario = {
@@ -297,7 +469,7 @@ function runOnce(
       irr: r.irr ?? -999, avgCoCReturn: r.avgCoCReturn,
       equityMultiple: r.equityMultiple, totalCashFlow: r.totalCashFlow,
       sampled: { targetRentPerUnit: rent, vacancyPct: vac, rentGrowthPct: growth,
-                 exitCapRate: cap, renoOverrunPct: renoOver, interestRate: rate, refiRate, arv: arvSampled },
+                 exitCapRate: cap, renoOverrunPct: renoOver, interestRate: rate, refiRate, expenseGrowthPct: expGrowth, arv: arvSampled },
       _yearlyProjections: r.yearlyProjections.map(p => ({ cashFlow: p.cashFlow, coCReturn: p.coCReturn, cashOutProceeds: p.cashOutProceeds })),
     };
   }
@@ -324,10 +496,17 @@ function runOnce(
     operations,
     proForma: {
       ...proForma,
-      grossRent: { ...proForma.grossRent, stabilized: newTargetAnnual, growthPct: growth },
-      vacancyPct: { ...proForma.vacancyPct, stabilized: vac },
+      grossRent:     { ...proForma.grossRent,     stabilized: newTargetAnnual, growthPct: growth },
+      vacancyPct:    { ...proForma.vacancyPct,    stabilized: vac },
       creditLossPct: proForma.creditLossPct ?? { t12: 0, stab: null, stabilized: 0 },
-      yearOverrides: scalePreStabOverrides(proForma, newTargetAnnual, origStabilizedAnnual, sampledPreStab, Math.max(1, units), origDefaultPreStabAnnual),
+      expenses: proForma.expenses.map(e =>
+        e.isPercentOfEGI ? e : { ...e, growthPct: baseExpGrowth !== 0 ? e.growthPct * (expGrowth / baseExpGrowth) : e.growthPct }
+      ),
+      yearOverrides: applyPerYearShifts(
+        scalePreStabOverrides(proForma, newTargetAnnual, origStabilizedAnnual, sampledPreStab, Math.max(1, units), origDefaultPreStabAnnual),
+        growth, vac, getBaseGrowthRate(proForma), getBaseVacancyRate(proForma),
+        expGrowth, baseExpGrowth,
+      ),
     },
     refinance: refinance.enabled
       ? { ...refinance, newInterestRate: refiRate }
@@ -341,7 +520,7 @@ function runOnce(
     avgCoCReturn:   r.avgCoCReturn,
     equityMultiple: r.equityMultiple,
     totalCashFlow:  r.totalCashFlow,
-    sampled: { targetRentPerUnit: rent, vacancyPct: vac, rentGrowthPct: growth, exitCapRate: cap, renoOverrunPct: renoOver, interestRate: rate, refiRate, arv: arvSampled },
+    sampled: { targetRentPerUnit: rent, vacancyPct: vac, rentGrowthPct: growth, exitCapRate: cap, renoOverrunPct: renoOver, interestRate: rate, refiRate, expenseGrowthPct: expGrowth, arv: arvSampled },
     _yearlyProjections: r.yearlyProjections.map(p => ({ cashFlow: p.cashFlow, coCReturn: p.coCReturn, cashOutProceeds: p.cashOutProceeds })),
   };
 }
@@ -399,6 +578,18 @@ export async function runSimulation(opts: RunSimulationOptions): Promise<MCResul
   // Sort by IRR ascending (strip internal _yearlyProjections)
   const sorted = [...all].sort((a, b) => a.irr - b.irr) as MCRunResult[];
 
+  // Independent percentiles — each metric sorted separately
+  const sortedByCoC = [...all].sort((a, b) => a.avgCoCReturn - b.avgCoCReturn);
+  const sortedByEM  = [...all].sort((a, b) => a.equityMultiple - b.equityMultiple);
+  function independentPercentile(p: number): MCPercentileMetrics {
+    const idx = Math.min(all.length - 1, Math.round((p / 100) * all.length));
+    return {
+      irr:            sorted[idx].irr,
+      avgCoCReturn:   sortedByCoC[idx].avgCoCReturn,
+      equityMultiple: sortedByEM[idx].equityMultiple,
+    };
+  }
+
   // Sensitivity: |Pearson r| of each input with IRR
   const irrs = all.map(r => r.irr);
   const SENSITIVITY_KEYS: Array<[keyof MCRanges, string]> = [
@@ -409,6 +600,7 @@ export async function runSimulation(opts: RunSimulationOptions): Promise<MCResul
     ['renoOverrunPct',    'Renovation Cost'],
     ['interestRate',      'Interest Rate'],
     ['refiRate',          'Refi Rate'],
+    ['expenseGrowthPct',  'Expense Growth'],
   ];
   const sensitivity: MCSensitivity[] = SENSITIVITY_KEYS
     .map(([key, label]) => ({
@@ -430,6 +622,13 @@ export async function runSimulation(opts: RunSimulationOptions): Promise<MCResul
     p70: percentileItem(sorted, 70),
     p80: percentileItem(sorted, 80),
     p90: percentileItem(sorted, 90),
+    independentP10: independentPercentile(10),
+    independentP20: independentPercentile(20),
+    independentP30: independentPercentile(30),
+    independentP50: independentPercentile(50),
+    independentP70: independentPercentile(70),
+    independentP80: independentPercentile(80),
+    independentP90: independentPercentile(90),
     probPositiveCashFlow: all.filter(r => r.avgCoCReturn > 0).length / n,
     sensitivity,
     irrBuckets: computeHistogram(validIrrs),
@@ -470,7 +669,8 @@ export function findMaxPriceAtConditions(
   if (origStabilizedAnnual === 0) return null;
 
   const origDefaultPreStabAnnual = avgPreStabPerUnit * effectiveUnits * 12;
-  const { targetRentPerUnit, vacancyPct, rentGrowthPct, exitCapRate, renoOverrunPct, interestRate } = p80sampled;
+  const { targetRentPerUnit, vacancyPct, rentGrowthPct, exitCapRate, renoOverrunPct, interestRate, expenseGrowthPct: sampledExpGrowth } = p80sampled;
+  const baseExpGrowth = getBaseExpenseGrowthRate(proForma);
 
   const newTargetAnnual = targetRentPerUnit * effectiveUnits * 12;
   const renoMultiplier  = 1 + renoOverrunPct / 100;
@@ -479,14 +679,14 @@ export function findMaxPriceAtConditions(
     : targetRentPerUnit * 0.8;
 
   function irrAtPrice(price: number): number {
-    // If property tax rate is stored, recompute the tax expense at this candidate price
-    const expenses = proForma.propertyTaxRatePct && proForma.propertyTaxRatePct > 0
-      ? proForma.expenses.map(e =>
-          e.name === 'Property Taxes' && !e.isPercentOfEGI
-            ? { ...e, stabilizedValue: price * proForma.propertyTaxRatePct! / 12 }
-            : e
-        )
-      : proForma.expenses;
+    // If property tax rate is stored, recompute the tax expense at this candidate price; also scale growth rates
+    const expenses = proForma.expenses.map(e => {
+      const withTax = (proForma.propertyTaxRatePct && proForma.propertyTaxRatePct > 0 && e.name === 'Property Taxes' && !e.isPercentOfEGI)
+        ? { ...e, stabilizedValue: price * proForma.propertyTaxRatePct! / 12 }
+        : e;
+      return withTax.isPercentOfEGI ? withTax
+        : { ...withTax, growthPct: baseExpGrowth !== 0 ? withTax.growthPct * (sampledExpGrowth / baseExpGrowth) : withTax.growthPct };
+    });
 
     const scenario: CoCScenario = {
       id: 'p80-price', name: 'P80 Price', scenarioType: 'base',
@@ -505,7 +705,11 @@ export function findMaxPriceAtConditions(
         grossRent:     { ...proForma.grossRent,     stabilized: newTargetAnnual, growthPct: rentGrowthPct },
         vacancyPct:    { ...proForma.vacancyPct,    stabilized: vacancyPct },
         creditLossPct: proForma.creditLossPct ?? { t12: 0, stab: null, stabilized: 0 },
-        yearOverrides: scalePreStabOverrides(proForma, newTargetAnnual, origStabilizedAnnual, sampledPreStab, effectiveUnits, origDefaultPreStabAnnual),
+        yearOverrides: applyPerYearShifts(
+          scalePreStabOverrides(proForma, newTargetAnnual, origStabilizedAnnual, sampledPreStab, effectiveUnits, origDefaultPreStabAnnual),
+          rentGrowthPct, vacancyPct, getBaseGrowthRate(proForma), getBaseVacancyRate(proForma),
+          sampledExpGrowth, baseExpGrowth,
+        ),
       },
       refinance,
       createdAt: '', updatedAt: '',
@@ -557,7 +761,8 @@ export function computeDeterministicPrices(
   units: number,
   avgPreStabPerUnit: number,
 ): { recommendedMaxPrice: number | null; conservativeMaxPrice: number | null } {
-  const refiRange = ranges.refiRate ?? { min: ranges.interestRate.mode, mode: ranges.interestRate.mode, max: ranges.interestRate.mode };
+  const refiRange    = ranges.refiRate         ?? { min: ranges.interestRate.mode, mode: ranges.interestRate.mode, max: ranges.interestRate.mode };
+  const expGrowRange = ranges.expenseGrowthPct ?? { min: 0, mode: 0, max: 0 };
 
   const arvRange = ranges.arv;
   const arvMode = arvRange ? triangularQuantile(arvRange.min, arvRange.mode, arvRange.max, 0.50) : 0;
@@ -572,6 +777,7 @@ export function computeDeterministicPrices(
     renoOverrunPct:    triangularQuantile(ranges.renoOverrunPct.min,    ranges.renoOverrunPct.mode,    ranges.renoOverrunPct.max,    0.50),
     interestRate:      triangularQuantile(ranges.interestRate.min,      ranges.interestRate.mode,      ranges.interestRate.max,      0.50),
     refiRate:          triangularQuantile(refiRange.min,                refiRange.mode,                refiRange.max,                0.50),
+    expenseGrowthPct:  triangularQuantile(expGrowRange.min,             expGrowRange.mode,             expGrowRange.max,             0.50),
     arv:               arvMode,
   };
 
@@ -584,6 +790,7 @@ export function computeDeterministicPrices(
     renoOverrunPct:    triangularQuantile(ranges.renoOverrunPct.min,    ranges.renoOverrunPct.mode,    ranges.renoOverrunPct.max,    0.80),
     interestRate:      triangularQuantile(ranges.interestRate.min,      ranges.interestRate.mode,      ranges.interestRate.max,      0.80),
     refiRate:          triangularQuantile(refiRange.min,                refiRange.mode,                refiRange.max,                0.80),
+    expenseGrowthPct:  triangularQuantile(expGrowRange.min,             expGrowRange.mode,             expGrowRange.max,             0.80),
     arv:               arvConservative,
   };
 
