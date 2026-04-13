@@ -2,8 +2,8 @@
 
 import { useState } from 'react';
 import { PageHeader } from '@/components/UI/PageHeader';
-import { useDealSettingsStore, BEAR_OPTIONS, BULL_OPTIONS, CONFIDENCE_OPTIONS, PROFORMA_DEFAULTS } from '@/lib/dealSettingsStore';
-import type { BearPercentile, BullPercentile, ConfidenceLevel } from '@/lib/dealSettingsStore';
+import { useDealSettingsStore, BEAR_OPTIONS, BULL_OPTIONS, CONFIDENCE_OPTIONS, PROFORMA_DEFAULTS, MC_RANGE_DEFAULTS } from '@/lib/dealSettingsStore';
+import type { BearPercentile, BullPercentile, ConfidenceLevel, MCRangeDefaults } from '@/lib/dealSettingsStore';
 
 function OptionGroup<T extends string>({
   title,
@@ -98,6 +98,78 @@ function NumberField({ label, value, onChange, suffix, prefix, hint }: {
   );
 }
 
+function RangeDefaultRow({ label, unit, pessimisticValue, optimisticValue, onPessimisticChange, onOptimisticChange, step = 0.5, decimals = 1, singleLabel, singleValue, onSingleChange }: {
+  label: string;
+  unit: string;
+  pessimisticValue?: number;
+  optimisticValue?: number;
+  onPessimisticChange?: (v: number) => void;
+  onOptimisticChange?: (v: number) => void;
+  step?: number;
+  decimals?: number;
+  // For single-value rows (e.g. reno overrun max)
+  singleLabel?: string;
+  singleValue?: number;
+  onSingleChange?: (v: number) => void;
+}) {
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+
+  const commit = (key: string, raw: string, onChange?: (v: number) => void) => {
+    const v = parseFloat(raw);
+    if (!isNaN(v) && v >= 0 && onChange) onChange(v);
+    setDrafts(d => { const n = { ...d }; delete n[key]; return n; });
+  };
+
+  const fieldCls = 'w-16 text-sm text-right font-medium tabular-nums bg-transparent border-none outline-none text-slate-800 dark:text-slate-200';
+  const wrapCls  = 'flex items-center gap-1 rounded-lg border px-2.5 py-1.5 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800';
+
+  return (
+    <div className="flex items-center justify-between gap-4 py-3 border-b border-slate-100 dark:border-slate-700 last:border-0">
+      <p className="text-sm font-medium text-slate-700 dark:text-slate-300 shrink-0">{label}</p>
+      <div className="flex items-center gap-3">
+        {singleValue !== undefined && onSingleChange ? (
+          <div className={wrapCls}>
+            <input className={fieldCls} type="number" step={step}
+              value={drafts['single'] ?? parseFloat(singleValue.toFixed(decimals)).toString()}
+              onChange={e => setDrafts(d => ({ ...d, single: e.target.value }))}
+              onBlur={() => commit('single', drafts['single'] ?? '', onSingleChange)}
+              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+            />
+            <span className="text-xs text-slate-400 shrink-0">{singleLabel ?? unit}</span>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-red-400 font-semibold uppercase tracking-wide w-16 text-right">Pessimistic</span>
+              <div className={wrapCls}>
+                <input className={fieldCls} type="number" step={step}
+                  value={drafts['pess'] ?? parseFloat((pessimisticValue ?? 0).toFixed(decimals)).toString()}
+                  onChange={e => setDrafts(d => ({ ...d, pess: e.target.value }))}
+                  onBlur={() => commit('pess', drafts['pess'] ?? '', onPessimisticChange)}
+                  onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                />
+                <span className="text-xs text-slate-400 shrink-0">{unit}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-secondary-500 font-semibold uppercase tracking-wide w-16 text-right">Optimistic</span>
+              <div className={wrapCls}>
+                <input className={fieldCls} type="number" step={step}
+                  value={drafts['optim'] ?? parseFloat((optimisticValue ?? 0).toFixed(decimals)).toString()}
+                  onChange={e => setDrafts(d => ({ ...d, optim: e.target.value }))}
+                  onBlur={() => commit('optim', drafts['optim'] ?? '', onOptimisticChange)}
+                  onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                />
+                <span className="text-xs text-slate-400 shrink-0">{unit}</span>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function DealSettings() {
   const {
     bearPercentile, setBearPercentile,
@@ -106,7 +178,10 @@ export function DealSettings() {
     defaultPropertyMgmtPct, setDefaultPropertyMgmtPct,
     defaultCapExPerUnit, setDefaultCapExPerUnit,
     defaultMaintenancePct, setDefaultMaintenancePct,
+    mcRangeDefaults, setMCRangeDefaults,
   } = useDealSettingsStore();
+
+  const setMC = (patch: Partial<MCRangeDefaults>) => setMCRangeDefaults({ ...mcRangeDefaults, ...patch });
 
   return (
     <div className="space-y-8">
@@ -143,6 +218,80 @@ export function DealSettings() {
         <button
           type="button"
           onClick={() => { setDefaultPropertyMgmtPct(PROFORMA_DEFAULTS.propertyMgmtPct); setDefaultCapExPerUnit(PROFORMA_DEFAULTS.capExPerUnit); setDefaultMaintenancePct(PROFORMA_DEFAULTS.maintenancePct); }}
+          className="mt-3 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+        >
+          Reset to defaults
+        </button>
+      </div>
+
+      {/* Monte Carlo Default Ranges */}
+      <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
+        <div className="mb-1">
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Simulation Default Ranges</h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            How far below / above the base value the pessimistic and optimistic assumptions reach.
+            Percentages are relative offsets; rate variables use points.
+          </p>
+        </div>
+
+        <div className="mt-3 mb-1">
+          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Percentages</p>
+        </div>
+        <RangeDefaultRow label="Rent / unit" unit="%"
+          pessimisticValue={mcRangeDefaults.rentPessimisticPct}
+          optimisticValue={mcRangeDefaults.rentOptimisticPct}
+          onPessimisticChange={v => setMC({ rentPessimisticPct: v })}
+          onOptimisticChange={v => setMC({ rentOptimisticPct: v })}
+        />
+        <RangeDefaultRow label="Vacancy Rate" unit="pts"
+          pessimisticValue={mcRangeDefaults.vacancyPessimisticPts}
+          optimisticValue={mcRangeDefaults.vacancyOptimisticPts}
+          onPessimisticChange={v => setMC({ vacancyPessimisticPts: v })}
+          onOptimisticChange={v => setMC({ vacancyOptimisticPts: v })}
+        />
+        <RangeDefaultRow label="Rent Growth" unit="pts"
+          pessimisticValue={mcRangeDefaults.rentGrowthPessimisticPts}
+          optimisticValue={mcRangeDefaults.rentGrowthOptimisticPts}
+          onPessimisticChange={v => setMC({ rentGrowthPessimisticPts: v })}
+          onOptimisticChange={v => setMC({ rentGrowthOptimisticPts: v })}
+        />
+        <RangeDefaultRow label="Expense Growth" unit="pts"
+          pessimisticValue={mcRangeDefaults.expenseGrowthPessimisticPts}
+          optimisticValue={mcRangeDefaults.expenseGrowthOptimisticPts}
+          onPessimisticChange={v => setMC({ expenseGrowthPessimisticPts: v })}
+          onOptimisticChange={v => setMC({ expenseGrowthOptimisticPts: v })}
+        />
+        <RangeDefaultRow label="Reno Overrun" unit="%" step={5} decimals={0}
+          singleLabel="max %"
+          singleValue={mcRangeDefaults.renoOverrunMaxPct}
+          onSingleChange={v => setMC({ renoOverrunMaxPct: v })}
+        />
+
+        <div className="mt-4 mb-1">
+          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Rate Points</p>
+        </div>
+        <RangeDefaultRow label="Exit Cap Rate" unit="pts" step={0.25} decimals={2}
+          pessimisticValue={mcRangeDefaults.exitCapRatePessimisticPts}
+          optimisticValue={mcRangeDefaults.exitCapRateOptimisticPts}
+          onPessimisticChange={v => setMC({ exitCapRatePessimisticPts: v })}
+          onOptimisticChange={v => setMC({ exitCapRateOptimisticPts: v })}
+        />
+        <RangeDefaultRow label="Interest Rate" unit="pts" step={0.25} decimals={2}
+          pessimisticValue={mcRangeDefaults.interestRatePessimisticPts}
+          optimisticValue={mcRangeDefaults.interestRateOptimisticPts}
+          onPessimisticChange={v => setMC({ interestRatePessimisticPts: v })}
+          onOptimisticChange={v => setMC({ interestRateOptimisticPts: v })}
+        />
+        <RangeDefaultRow label="Refi Rate" unit="pts" step={0.25} decimals={2}
+          pessimisticValue={mcRangeDefaults.refiRatePessimisticPts}
+          optimisticValue={mcRangeDefaults.refiRateOptimisticPts}
+          onPessimisticChange={v => setMC({ refiRatePessimisticPts: v })}
+          onOptimisticChange={v => setMC({ refiRateOptimisticPts: v })}
+        />
+
+        <button
+          type="button"
+          onClick={() => setMCRangeDefaults(MC_RANGE_DEFAULTS)}
           className="mt-3 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
         >
           Reset to defaults

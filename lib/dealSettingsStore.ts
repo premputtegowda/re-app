@@ -2,6 +2,10 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import type { MCRangeDefaults } from '@/utils/monteCarlo';
+import { MC_RANGE_DEFAULTS } from '@/utils/monteCarlo';
+export type { MCRangeDefaults };
+export { MC_RANGE_DEFAULTS };
 
 export type BearPercentile = 'p10' | 'p20' | 'p30';
 export type BullPercentile = 'p70' | 'p80' | 'p90';
@@ -39,12 +43,15 @@ interface DealSettingsState {
   defaultPropertyMgmtPct: number;
   defaultCapExPerUnit: number;
   defaultMaintenancePct: number;
+  // Monte Carlo range defaults
+  mcRangeDefaults: MCRangeDefaults;
   setBearPercentile: (p: BearPercentile) => void;
   setBullPercentile: (p: BullPercentile) => void;
   setRecommendedPriceConfidence: (level: ConfidenceLevel) => void;
   setDefaultPropertyMgmtPct: (v: number) => void;
   setDefaultCapExPerUnit: (v: number) => void;
   setDefaultMaintenancePct: (v: number) => void;
+  setMCRangeDefaults: (d: MCRangeDefaults) => void;
 }
 
 export const useDealSettingsStore = create<DealSettingsState>()(
@@ -56,12 +63,14 @@ export const useDealSettingsStore = create<DealSettingsState>()(
       defaultPropertyMgmtPct: PROFORMA_DEFAULTS.propertyMgmtPct,
       defaultCapExPerUnit: PROFORMA_DEFAULTS.capExPerUnit,
       defaultMaintenancePct: PROFORMA_DEFAULTS.maintenancePct,
+      mcRangeDefaults: MC_RANGE_DEFAULTS,
       setBearPercentile: (p) => set({ bearPercentile: p }),
       setBullPercentile: (p) => set({ bullPercentile: p }),
       setRecommendedPriceConfidence: (level) => set({ recommendedPriceConfidence: level }),
       setDefaultPropertyMgmtPct: (v) => set({ defaultPropertyMgmtPct: v }),
       setDefaultCapExPerUnit: (v) => set({ defaultCapExPerUnit: v }),
       setDefaultMaintenancePct: (v) => set({ defaultMaintenancePct: v }),
+      setMCRangeDefaults: (d) => set({ mcRangeDefaults: d }),
     }),
     { name: 'deal-settings' }
   )

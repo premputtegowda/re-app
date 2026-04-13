@@ -1,4 +1,5 @@
 import type { CoCScenario, CoCResult, CoCYearlyProjection } from '@/types';
+import { makeProFormaProjector } from './proFormaYearCalc';
 
 /**
  * Effective Gross Income (EGI).
@@ -175,80 +176,22 @@ export function projectScenario(scenario: CoCScenario, opts?: { dynamicRefiValue
   const yearlyProjections: CoCYearlyProjection[] = [];
   let cumulativeCashFlow = 0;
 
-  // Per-year chaining — track previous values and last-set growth rates
+  // Build projector once — same logic used by ProFormaGrid for display
+  const pfProjector = pf ? makeProFormaProjector(pf) : null;
+
+  // Legacy path only needs these two trackers
   let prevRentValue: number | undefined;
-  let prevOtherValue: number | undefined;
-  const prevExpenseValues: Record<string, number> = {};
-  let lastRentGrowthPct = pf ? pf.grossRent.growthPct : 0;
-  let lastOtherGrowthPct = pf ? pf.otherIncome.growthPct : 0;
-  const lastExpenseGrowthPcts: Record<string, number> = {};
-  const lastExpensePcts: Record<string, number> = {}; // for isPercentOfEGI cascading
 
   for (let year = 1; year <= (acquisition.projectionYears || 5); year++) {
     let grossRent: number;   // rent-only (matches ProFormaGrid "Gross Rent" row)
     let effectiveRent: number; // EGI = rent*(1-vac%) + otherIncome
     let opex: number;
 
-    if (pf) {
-      const override = pf.yearOverrides?.[year];
-
-      // ── Income: Year 1 = stabilized base; Year 2+ chains from previous year ──
-      let yearRent: number;
-      let yearOther: number;
-
-      if (override?.grossRentGrowthPct !== undefined) lastRentGrowthPct = override.grossRentGrowthPct;
-      if (override?.otherIncomeGrowthPct !== undefined) lastOtherGrowthPct = override.otherIncomeGrowthPct;
-
-      if (override?.grossRent !== undefined) {
-        yearRent = override.grossRent;
-      } else if (year === 1) {
-        yearRent = pf.grossRent.stabilized;
-      } else {
-        yearRent = (prevRentValue ?? pf.grossRent.stabilized) * (1 + lastRentGrowthPct / 100);
-      }
-
-      if (override?.otherIncome !== undefined) {
-        yearOther = override.otherIncome;
-      } else if (year === 1) {
-        yearOther = pf.otherIncome.stabilized;
-      } else {
-        yearOther = (prevOtherValue ?? pf.otherIncome.stabilized) * (1 + lastOtherGrowthPct / 100);
-      }
-
-      // grossRent stored as rent-only so Results "Gross Rent" matches ProFormaGrid row
-      grossRent = yearRent;
-
-      prevRentValue  = yearRent;
-      prevOtherValue = yearOther;
-
-      const vacPct = override?.vacancyPct    ?? pf.vacancyPct.stabilized;
-      const clPct  = override?.creditLossPct ?? (pf.creditLossPct?.stabilized ?? 0);
-      effectiveRent = computeEGI(yearRent, yearOther, vacPct, clPct);
-
-      // ── Expenses: Year 1 = stabilized base; Year 2+ chains ──
-      opex = pf.expenses.reduce((sum, e) => {
-        const expOverride = override?.expenses?.[e.id];
-        // Cascade growth rate: update last known rate if overridden this year
-        if (override?.expenseGrowthPcts?.[e.id] !== undefined)
-          lastExpenseGrowthPcts[e.id] = override.expenseGrowthPcts[e.id];
-        const expGrowthRate = lastExpenseGrowthPcts[e.id] ?? e.growthPct;
-
-        let annualVal: number;
-        if (expOverride !== undefined) {
-          annualVal = e.isPercentOfEGI ? effectiveRent * (expOverride / 100) : expOverride;
-          if (e.isPercentOfEGI) lastExpensePcts[e.id] = expOverride; // cascade % forward
-        } else if (e.isPercentOfEGI) {
-          const pct = lastExpensePcts[e.id] ?? e.stabilizedValue;
-          annualVal = effectiveRent * (pct / 100);
-        } else if (year === 1) {
-          annualVal = e.stabilizedValue;
-        } else {
-          annualVal = (prevExpenseValues[e.id] ?? e.stabilizedValue) * (1 + expGrowthRate / 100);
-        }
-
-        prevExpenseValues[e.id] = annualVal;
-        return sum + annualVal;
-      }, 0);
+    if (pf && pfProjector) {
+      // Use the same computation as ProFormaGrid — no separate recalculation
+      grossRent     = pfProjector.getGrossRentForYear(year);
+      effectiveRent = pfProjector.getEGIForYear(year);
+      opex          = pfProjector.getOpExForYear(year, effectiveRent);
     } else {
       // Legacy: Year 1 = target rent as-is; Year 2+ = previous year × current growth rate
       if (year === 1) {
