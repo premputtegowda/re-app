@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import React from 'react';
-import { RotateCcw, CheckCircle2, Pencil } from 'lucide-react';
+import { RotateCcw, CheckCircle2, Pencil, Info } from 'lucide-react';
 import { formatCurrency, formatPct, formatMultiple } from '@/utils/dealAnalyzerCalc';
 import { runSimulation, computeDefaultRanges, rangesToMCRangeDefaults, toSavedMCResults, hydrateMCResults, findMaxPriceAtConditions } from '@/utils/monteCarlo';
 import type { MCRanges, MCResults, MCPercentileMetrics, SavedMCResults } from '@/utils/monteCarlo';
@@ -216,58 +216,57 @@ function ProbabilityCard({ results, targetCoC, onTargetCoCChange, targetIRR, onT
   targetIRR: number; onTargetIRRChange: (v: number) => void;
 }) {
   const EPS = 0.005;
+  const probIRR  = Math.round(results.sorted.filter(r => r.irr > -900 && r.irr >= targetIRR - EPS).length / results.n * 100);
+  const probCoC  = Math.round(results.sorted.filter(r => r.avgCoCReturn >= targetCoC - EPS).length / results.n * 100);
   const probBoth = Math.round(results.sorted.filter(r => r.irr > -900 && r.irr >= targetIRR - EPS && r.avgCoCReturn >= targetCoC - EPS).length / results.n * 100);
-  const probNegCF  = Math.round(results.sorted.filter(r => r.avgCoCReturn < 0).length / results.n * 100);
-  const probNegIRR = Math.round(results.sorted.filter(r => r.irr > -900 && r.irr < 0).length / results.n * 100);
-  // Only compute total capital loss if EM data is available (old saved results have em=0 placeholder)
-  const hasEMData = results.sorted.some(r => r.equityMultiple > 0);
-  const probTotalLoss = hasEMData ? Math.round(results.sorted.filter(r => r.equityMultiple <= 0).length / results.n * 100) : -1;
 
-  const barColor = probBoth >= 70 ? 'bg-secondary-500' : probBoth >= 50 ? 'bg-amber-400' : 'bg-red-400';
-  const textColor = probBoth >= 70 ? 'text-secondary-600 dark:text-secondary-400' : probBoth >= 50 ? 'text-amber-600 dark:text-amber-400' : 'text-red-500';
-  const hasRisk = probNegCF > 5 || probNegIRR > 5 || (probTotalLoss > 0 && probTotalLoss !== -1);
+  const bar = (p: number) => p >= 70 ? 'bg-secondary-500' : p >= 50 ? 'bg-amber-400' : 'bg-red-400';
+  const txt = (p: number) => p >= 70 ? 'text-secondary-600 dark:text-secondary-400' : p >= 50 ? 'text-amber-600 dark:text-amber-400' : 'text-red-500';
+  const bothBar = probBoth >= 70 ? 'bg-primary-500' : probBoth >= 50 ? 'bg-amber-400' : 'bg-red-400';
+  const bothTxt = probBoth >= 70 ? 'text-primary-600 dark:text-primary-400' : probBoth >= 50 ? 'text-amber-600 dark:text-amber-400' : 'text-red-500';
 
   return (
     <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-4">
       <p className="text-xs font-bold text-slate-700 dark:text-slate-300">How likely is this deal to work?</p>
 
-      <div className="space-y-2">
-        <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 flex-wrap">
-          <span>Hitting</span>
-          <InlineEditTarget value={targetIRR} onChange={onTargetIRRChange} suffix="%" />
-          <span>IRR</span>
-          <span>&</span>
-          <InlineEditTarget value={targetCoC} onChange={onTargetCoCChange} suffix="%" />
-          <span>CoC</span>
+      {/* IRR probability */}
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <span className="text-xs text-slate-500 dark:text-slate-400 inline-flex items-center gap-1 min-w-0">
+            <InlineEditTarget value={targetIRR} onChange={onTargetIRRChange} suffix="%" />
+            <span className="truncate">IRR target</span>
+          </span>
+          <span className={`text-sm font-bold tabular-nums shrink-0 ${txt(probIRR)}`}>{probIRR}%</span>
         </div>
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex-1 h-3 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
-            <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${probBoth}%` }} />
-          </div>
-          <span className={`text-lg font-bold tabular-nums shrink-0 ${textColor}`}>{probBoth}%</span>
+        <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+          <div className={`h-full rounded-full transition-all ${bar(probIRR)}`} style={{ width: `${probIRR}%` }} />
         </div>
       </div>
 
-      {/* Risk callouts */}
-      {hasRisk && (
-        <div className="rounded-lg bg-red-50 dark:bg-red-900/20 px-3 py-2 space-y-1">
-          {probNegCF > 5 && (
-            <p className="text-[11px] text-red-600 dark:text-red-400">
-              <span className="font-semibold">{probNegCF}%</span> chance of negative cash flow
-            </p>
-          )}
-          {probNegIRR > 5 && (
-            <p className="text-[11px] text-red-600 dark:text-red-400">
-              <span className="font-semibold">{probNegIRR}%</span> chance of negative total return
-            </p>
-          )}
-          {probTotalLoss > 0 && probTotalLoss !== -1 && (
-            <p className="text-[11px] text-red-700 dark:text-red-300 font-semibold">
-              {probTotalLoss}% chance of total capital loss
-            </p>
-          )}
+      {/* CoC probability */}
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <span className="text-xs text-slate-500 dark:text-slate-400 inline-flex items-center gap-1 min-w-0">
+            <InlineEditTarget value={targetCoC} onChange={onTargetCoCChange} suffix="%" />
+            <span className="truncate">cash-on-cash target</span>
+          </span>
+          <span className={`text-sm font-bold tabular-nums shrink-0 ${txt(probCoC)}`}>{probCoC}%</span>
         </div>
-      )}
+        <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+          <div className={`h-full rounded-full transition-all ${bar(probCoC)}`} style={{ width: `${probCoC}%` }} />
+        </div>
+      </div>
+
+      {/* Both targets */}
+      <div className="space-y-1.5 pt-1 border-t border-slate-100 dark:border-slate-700">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Both targets met</span>
+          <span className={`text-sm font-bold tabular-nums shrink-0 ${bothTxt}`}>{probBoth}%</span>
+        </div>
+        <div className="h-2.5 w-full rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+          <div className={`h-full rounded-full transition-all ${bothBar}`} style={{ width: `${probBoth}%` }} />
+        </div>
+      </div>
     </div>
   );
 }
@@ -276,20 +275,40 @@ function ProbabilityCard({ results, targetCoC, onTargetCoCChange, targetIRR, onT
 
 function ScenarioOutcomes({ results }: { results: MCResults }) {
   const { bearPercentile, bullPercentile } = useDealSettingsStore();
-  const bearData = results[bearPercentile] ?? results.p20 ?? results.p50;
-  const bullData = results[bullPercentile] ?? results.p80 ?? results.p50;
+
+  const bearKey = `independent${bearPercentile.charAt(0).toUpperCase()}${bearPercentile.slice(1)}` as keyof MCResults;
+  const bullKey = `independent${bullPercentile.charAt(0).toUpperCase()}${bullPercentile.slice(1)}` as keyof MCResults;
+  const bear = (results[bearKey] ?? results.independentP20 ?? results.independentP50) as MCPercentileMetrics;
+  const base = results.independentP50;
+  const bull = (results[bullKey] ?? results.independentP80 ?? results.independentP50) as MCPercentileMetrics;
 
   const scenarios = [
-    { label: 'Downside',    color: 'text-red-500 dark:text-red-400',            bg: 'bg-red-50 dark:bg-red-900/20',            data: bearData },
-    { label: 'Median',      color: 'text-primary-600 dark:text-primary-400',     bg: 'bg-primary-50 dark:bg-primary-900/20',     data: results.p50 },
-    { label: 'Upside',      color: 'text-secondary-600 dark:text-secondary-400', bg: 'bg-secondary-50 dark:bg-secondary-900/20', data: bullData },
+    { label: 'If things go bad',   color: 'text-red-500 dark:text-red-400',            bg: 'bg-red-50 dark:bg-red-900/20',            data: bear },
+    { label: 'Typical market',    color: 'text-primary-600 dark:text-primary-400',     bg: 'bg-primary-50 dark:bg-primary-900/20',     data: base },
+    { label: 'If things go well', color: 'text-secondary-600 dark:text-secondary-400', bg: 'bg-secondary-50 dark:bg-secondary-900/20', data: bull },
   ];
 
-  const metrics = (data: typeof bearData) => [
+  const metrics = (data: MCPercentileMetrics) => [
     { label: 'IRR',    value: fmtIrr(data.irr) },
     { label: 'CoC',    value: formatPct(data.avgCoCReturn) },
     { label: 'Equity', value: formatMultiple(data.equityMultiple) },
   ];
+
+  // Joint probability: % of runs that hit ALL three median targets simultaneously
+  const EPS = 0.005;
+  const probJoint = Math.round(results.sorted.filter(r =>
+    r.irr > -900 &&
+    r.irr >= base.irr - EPS &&
+    r.avgCoCReturn >= base.avgCoCReturn - EPS &&
+    r.equityMultiple >= base.equityMultiple - EPS
+  ).length / results.n * 100);
+
+  // Risk warnings
+  const probNegCF  = Math.round(results.sorted.filter(r => r.avgCoCReturn < 0).length / results.n * 100);
+  const probNegIRR = Math.round(results.sorted.filter(r => r.irr > -900 && r.irr < 0).length / results.n * 100);
+  const hasEMData = results.sorted.some(r => r.equityMultiple > 0);
+  const probTotalLoss = hasEMData ? Math.round(results.sorted.filter(r => r.equityMultiple <= 0).length / results.n * 100) : -1;
+  const hasRisk = probNegCF > 5 || probNegIRR > 5 || (probTotalLoss > 0 && probTotalLoss !== -1);
 
   return (
     <div>
@@ -312,6 +331,48 @@ function ScenarioOutcomes({ results }: { results: MCResults }) {
           </div>
         ))}
       </div>
+
+      {/* Joint probability */}
+      <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-2.5">
+        <span className="font-semibold">{probJoint}%</span> chance of hitting all three median targets simultaneously
+      </p>
+
+      {/* Risk summary — always visible */}
+      <div className="flex items-center gap-3 mt-2.5 text-[10px] text-slate-400 dark:text-slate-500 tabular-nums">
+        <span>Neg. CF <span className={probNegCF > 5 ? 'font-semibold text-amber-600 dark:text-amber-400' : ''}>{probNegCF}%</span></span>
+        <span>·</span>
+        <span>Neg. IRR <span className={probNegIRR > 5 ? 'font-semibold text-amber-600 dark:text-amber-400' : ''}>{probNegIRR}%</span></span>
+        {probTotalLoss !== -1 && (
+          <>
+            <span>·</span>
+            <span>Capital loss <span className={probTotalLoss > 0 ? 'font-semibold text-red-500 dark:text-red-400' : ''}>{probTotalLoss}%</span></span>
+          </>
+        )}
+      </div>
+
+      {/* Expanded warning — only when thresholds exceeded */}
+      {hasRisk && (
+        <div className="flex items-start gap-2 mt-1.5 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/40 px-3 py-2">
+          <Info size={14} className="text-amber-500 dark:text-amber-400 shrink-0 mt-0.5" />
+          <div className="space-y-0.5">
+            {probNegCF > 5 && (
+              <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                <span className="font-semibold">{probNegCF}%</span> chance of negative cash flow
+              </p>
+            )}
+            {probNegIRR > 5 && (
+              <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                <span className="font-semibold">{probNegIRR}%</span> chance of negative total return
+              </p>
+            )}
+            {probTotalLoss > 0 && probTotalLoss !== -1 && (
+              <p className="text-[11px] text-amber-800 dark:text-amber-200 font-semibold">
+                {probTotalLoss}% chance of total capital loss
+              </p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -426,7 +487,7 @@ function RangeEditor({ ranges, defaults, onChange, onReset, onSaveAsDefaults, sh
             const v = parseFloat(draft[optimKey] ?? '') * scale;
             setDraft(d2 => { const n = { ...d2 }; delete n[optimKey]; return n; });
             if (!isNaN(v)) {
-              const clamped = snapToMode(Math.max(v, d.mode));
+              const clamped = snapToMode(higherIsWorse ? Math.min(v, d.mode) : Math.max(v, d.mode));
               onChange({ ...ranges, [key]: { ...r, mode: d.mode, [optimField]: clamped } });
             }
           };
@@ -483,13 +544,44 @@ export function MonteCarloPanel({
   // Track whether the user has explicitly customized ranges in the editor.
   // Until they do, base values auto-sync when ProForma inputs change.
   const userCustomizedRef = useRef(savedRanges !== null);
+  const prevDefaultsRef = useRef<MCRanges>(defaults);
 
-  // When defaults recompute (ProForma changed) and user hasn't customized, sync ranges.
+  // When defaults recompute (ProForma changed), re-anchor ranges.
+  // If user hasn't customized → use new defaults directly.
+  // If user has customized → preserve the point spread from old mode.
   useEffect(() => {
+    const prev = prevDefaultsRef.current;
+    prevDefaultsRef.current = defaults;
+
     if (!userCustomizedRef.current) {
       setRanges(defaults);
       setDraftRangesState(defaults);
       onRangesChange?.(defaults);
+    } else {
+      // Re-anchor: for each key, shift min/max by the same amount the mode moved
+      const reanchored = { ...ranges };
+      let changed = false;
+      for (const key of Object.keys(defaults) as (keyof MCRanges)[]) {
+        const oldD = prev[key];
+        const newD = defaults[key];
+        const r = ranges[key];
+        if (!oldD || !newD || !r) continue;
+        if (oldD.mode === newD.mode) continue; // base didn't change
+        const minSpread = r.min - oldD.mode;
+        const maxSpread = r.max - oldD.mode;
+        reanchored[key] = {
+          min: newD.mode + minSpread,
+          mode: newD.mode,
+          max: newD.mode + maxSpread,
+        };
+        changed = true;
+      }
+      if (changed) {
+        setRanges(reanchored);
+        setDraftRangesState(reanchored);
+        rangesRef.current = reanchored;
+        onRangesChange?.(reanchored);
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaults]);

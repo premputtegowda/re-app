@@ -207,31 +207,40 @@ export function hydrateMCResults(saved: SavedMCResults): MCResults {
  * - Renovation: only overruns, never under (0 / +30%)
  * - Exit cap: expansion is the big IRR killer (+1.5 / −0.5)
  */
-// ── Base value helpers — use the projector's actual input parameters, not derived outputs ──
+// ── Base value helpers — read what the projector actually uses ──
 
 /**
- * The base rent growth rate — what makeChainedValue uses for years without explicit overrides.
- * This is the correct parameter to vary in simulation; Year-1 override is irrelevant
- * because chainedValue returns stabilized directly for Year 1 (growth starts at Year 2).
+ * Rent growth rate from Year 2 (where growth first applies).
+ * Uses Year 2 override if set, otherwise the default grossRent.growthPct.
  */
 function getBaseGrowthRate(proForma: ProFormaData): number {
-  return proForma.grossRent.growthPct ?? 3;
-}
-
-/** The base vacancy rate used by the projector for years without explicit overrides. */
-function getBaseVacancyRate(proForma: ProFormaData): number {
-  return proForma.vacancyPct.stabilized ?? 5;
+  return proForma.yearOverrides?.[2]?.grossRentGrowthPct ?? proForma.grossRent.growthPct ?? 3;
 }
 
 /**
- * Average base growth rate across all fixed-dollar expenses.
- * Uses each expense's base growthPct (the projector's default for years without overrides).
+ * Vacancy rate from Year 1 — what the projector uses for the first projection year.
+ * Uses Year 1 override if set, otherwise the stabilized value.
+ */
+function getBaseVacancyRate(proForma: ProFormaData): number {
+  return proForma.yearOverrides?.[1]?.vacancyPct ?? proForma.vacancyPct.stabilized ?? 5;
+}
+
+/**
+ * Average expense growth rate from Year 2 (where growth first applies).
+ * For each fixed-dollar expense, uses the Year 2 override if set, otherwise the default growthPct.
  * % of EGI expenses are excluded — their cost moves with EGI automatically.
  */
 function getBaseExpenseGrowthRate(proForma: ProFormaData): number {
-  const growing = proForma.expenses.filter(e => !e.isPercentOfEGI && e.growthPct > 0);
-  if (growing.length === 0) return 3;
-  return Math.round(growing.reduce((acc, e) => acc + e.growthPct, 0) / growing.length * 100) / 100;
+  const yr2ExpGrowth = proForma.yearOverrides?.[2]?.expenseGrowthPcts;
+  const growing = proForma.expenses.filter(e => !e.isPercentOfEGI).filter(e => {
+    const rate = yr2ExpGrowth?.[e.id] ?? e.growthPct;
+    return rate > 0;
+  });
+  if (growing.length === 0) return 0;
+  return Math.round(growing.reduce((acc, e) => {
+    const rate = yr2ExpGrowth?.[e.id] ?? e.growthPct;
+    return acc + rate;
+  }, 0) / growing.length * 100) / 100;
 }
 
 /**
@@ -282,9 +291,8 @@ export function computeDefaultRanges(
 ): MCRanges {
   const d = { ...MC_RANGE_DEFAULTS, ...rangeDefaults };
   const effectiveUnits = Math.max(1, units);
-  // Use stabilized rent as the MC base — this is the projector's actual input (Year 1 = stabilized directly)
-  const baseRentPerUnit = proForma.grossRent.stabilized / effectiveUnits / 12;
-  const rent = baseRentPerUnit > 0 ? baseRentPerUnit : avgTargetRentPerUnit > 0 ? avgTargetRentPerUnit : 1000;
+  // Use target rent per unit (average across units) as the MC base
+  const rent = avgTargetRentPerUnit > 0 ? avgTargetRentPerUnit : (proForma.grossRent.stabilized / effectiveUnits / 12) || 1000;
 
   const growth    = getBaseGrowthRate(proForma);
   const vac       = getBaseVacancyRate(proForma);
