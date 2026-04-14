@@ -380,15 +380,17 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
     const updated: NonNullable<ProFormaData['yearOverrides']> = {};
     for (const [yStr, ye] of Object.entries(prev)) {
       const y = Number(yStr);
+      if (!ye) continue;
       const newYe = { ...ye };
       if (field === 'grossRent') {
-        // Keep Year 1 system (pre-stab) override; clear everything else
-        const isYr1System = y === 1 && newYe.grossRentSystem === true;
-        if (!isYr1System) {
+        // Keep Year 1 system override only if it's a pre-stab value (below target)
+        const isPreStab = y === 1 && newYe.grossRentSystem === true &&
+          typeof newYe.grossRent === 'number' && newYe.grossRent < data.grossRent.stabilized;
+        if (!isPreStab) {
           delete newYe[field as keyof typeof newYe];
           delete newYe.grossRentSystem;
         }
-        // Clear Year 2+ grossRent pins (let chainedValue compute them)
+        // Always clear Year 2+ grossRent pins
         if (y > 1) {
           delete newYe[field as keyof typeof newYe];
           delete newYe.grossRentSystem;
@@ -397,7 +399,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
         // other fields: keep Year 1 override as the chain base; clear Year 2+ only
         if (y > 1) delete newYe[field as keyof typeof newYe];
       }
-      updated[y] = newYe;
+      if (Object.keys(newYe).length > 0) updated[y] = newYe;
     }
     onChange({ ...data, yearOverrides: updated });
   }
