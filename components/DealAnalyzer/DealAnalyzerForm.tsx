@@ -881,9 +881,10 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
           leaseUpUnitsArr.some((u, t) => u > 0 && luScheduleTotals[t] !== u)
         );
 
+        const hasAnyUnits = someReno || someLU;
         const stepComplete =
           isValueAdd === false ||
-          (isValueAdd === true && !calcScheduleIncomplete);
+          (isValueAdd === true && hasAnyUnits && !calcScheduleIncomplete);
 
         const unitTypes = hasMfr
           ? acquisition.unitMix.map(e => ({
@@ -1546,6 +1547,16 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
               </motion.div>
             )}
             </AnimatePresence>
+
+            {/* Value-add incomplete warning */}
+            {isValueAdd === true && !stepComplete && (
+              <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40">
+                <AlertTriangle size={13} className="text-amber-500 mt-0.5 shrink-0" />
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  Value-add plan incomplete. Target rent will be used in Pro Forma for Year 1.
+                </p>
+              </div>
+            )}
 
             {/* ── Pro Forma ── */}
             <ProFormaGrid
