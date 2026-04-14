@@ -539,6 +539,7 @@ export const api = {
     mcResults?: unknown;
     currentStep?: number;
     calcState?: unknown;
+    stepNotes?: unknown;
     savedAt: string;
     updatedAt: string;
   }) {
