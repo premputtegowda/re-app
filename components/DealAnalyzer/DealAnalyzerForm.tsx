@@ -809,6 +809,31 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       if (savedDealId) updateCurrentStep(savedDealId, next);
     }
 
+    // Auto-save draft on every step completion
+    {
+      const name = saveName || defaultSaveName(acquisition);
+      const enriched = buildCalcState();
+      const stepNotesObj: Record<number, string> = {};
+      if (opsNotes.trim()) stepNotesObj[3] = opsNotes.trim();
+      const draft: DealAnalyzerDraft = {
+        acquisition, operations, proForma, refinance,
+        currentStep: editingStep !== null ? activeStep : stepId + 1,
+        visitedSteps: Array.from(new Set([...Array.from(completedSteps), stepId])),
+        activeType,
+        ...(enriched ? { calcState: enriched } : {}),
+        ...(Object.keys(stepNotesObj).length > 0 ? { stepNotes: stepNotesObj } : {}),
+      };
+
+      if (savedDealId) {
+        updateSavedDeal(savedDealId, name, scenarioResults, draft, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined);
+      } else if (acquisition.propertyAddress.trim()) {
+        const newId = saveDeal(name, draft, scenarioResults, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined);
+        setSavedDealId(newId);
+        setSaveName(name);
+        savedSnapshot.current = JSON.stringify({ acquisition, operations, proForma, refinance });
+      }
+    }
+
     // Schedule recalculate with debounce so rapid Done clicks don't fire multiple times
     scheduleCalculate();
   };
