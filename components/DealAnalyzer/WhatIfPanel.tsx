@@ -549,7 +549,7 @@ function GoalSeekPanel({ metric, target, onMetricChange, onTargetChange, default
         <div className="rounded-xl p-4 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800/30">
           <p className="text-sm font-semibold text-red-600 dark:text-red-400 mb-1">Not achievable</p>
           <p className="text-xs text-red-500 dark:text-red-400">
-            Even at the {varDef.direction === 'at_least' ? 'highest' : 'lowest'} modeled {varDef.label},{' '}
+            Even at <strong>{varDef.format(varDef.direction === 'at_least' ? varDef.searchMax : varDef.searchMin)}</strong> {varDef.label.toLowerCase()},{' '}
             this deal reaches only <strong>{bestCaseMetric.toFixed(1)}%</strong> {metric.toUpperCase()} —{' '}
             {(target - bestCaseMetric).toFixed(1)}% short.
           </p>
