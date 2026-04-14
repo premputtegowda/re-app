@@ -291,7 +291,7 @@ function GoalSeekPanel({ metric, target, onMetricChange, onTargetChange, default
         searchMin: 1, searchMax: maxRefiYear,
         format: (v: number) => `Year ${Math.round(v)}`,
         formatGap: (v: number) => `${Math.round(v)} yr${Math.round(v) !== 1 ? 's' : ''}`,
-        scan: true,
+        scan: true as true,
       },
     ] : []),
   ];
