@@ -1769,7 +1769,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
               <tr>
                 <td colSpan={totalCols} className="px-3 py-2 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-700">
                   <span className="text-[10px] text-slate-400 dark:text-slate-500">
-                    Click any value to edit · <span className="text-blue-400 font-medium">Blue</span> = override (↺ on label to reset row) · <span className="text-orange-400 font-medium inline-flex items-center gap-0.5"><Unlink size={9} /> broken chain</span> = cascade stops here · <span className="text-amber-500 font-medium">↗</span> = stabilizing · <span className="text-amber-500 font-medium">★</span> = exit year
+                    Click any value to edit · <span className="text-primary-500 font-medium inline-flex items-center gap-0.5"><RotateCcw size={8} /></span> = resets row · <span className="text-orange-400 font-medium inline-flex items-center gap-0.5"><Unlink size={9} /> broken chain</span> = cascade stops here · <span className="text-amber-500 font-medium">↗</span> = stabilizing · <span className="text-amber-500 font-medium">★</span> = exit year
                   </span>
                 </td>
               </tr>
