@@ -446,6 +446,11 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     if (initialDeal?.operations.annualRentGrowthPct) {
       pf = { ...pf, grossRent: { ...pf.grossRent, growthPct: initialDeal.operations.annualRentGrowthPct } };
     }
+    // Sync base growthPct from Year 2 override if it exists (fixes deals saved before this sync was added)
+    const yr2GrowthOverride = pf.yearOverrides?.[2]?.grossRentGrowthPct;
+    if (yr2GrowthOverride !== undefined) {
+      pf = { ...pf, grossRent: { ...pf.grossRent, growthPct: yr2GrowthOverride } };
+    }
     // Clear stale year-2 rent pin when preStab >= target (no actual gap to bridge)
     if (pf.yearOverrides?.[2]?.grossRentSystem) {
       const targetAnnual = initialDeal
