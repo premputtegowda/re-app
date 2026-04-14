@@ -381,22 +381,25 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
     for (const [yStr, ye] of Object.entries(prev)) {
       const y = Number(yStr);
       const newYe = { ...ye };
-      // grossRent: clear all years (stabilized becomes the anchor after revert)
-      // other fields: keep Year 1 override as the chain base; clear Year 2+ only
-      const shouldClear = field === 'grossRent' || y > 1;
-      if (shouldClear) {
-        delete newYe[field as keyof typeof newYe];
-        if (field === 'grossRent') delete newYe.grossRentSystem;
+      if (field === 'grossRent') {
+        // Keep Year 1 system (pre-stab) override; clear everything else
+        const isYr1System = y === 1 && newYe.grossRentSystem === true;
+        if (!isYr1System) {
+          delete newYe[field as keyof typeof newYe];
+          delete newYe.grossRentSystem;
+        }
+        // Clear Year 2+ grossRent pins (let chainedValue compute them)
+        if (y > 1) {
+          delete newYe[field as keyof typeof newYe];
+          delete newYe.grossRentSystem;
+        }
+      } else {
+        // other fields: keep Year 1 override as the chain base; clear Year 2+ only
+        if (y > 1) delete newYe[field as keyof typeof newYe];
       }
       updated[y] = newYe;
     }
-    let newData = { ...data, yearOverrides: updated };
-    if (field === 'grossRent') {
-      const yr1Override = data.yearOverrides?.[1]?.grossRent;
-      const yr1Val = typeof yr1Override === 'number' ? yr1Override : data.grossRent.stabilized;
-      newData = { ...newData, grossRent: { ...data.grossRent, stabilized: yr1Val } };
-    }
-    onChange(newData);
+    onChange({ ...data, yearOverrides: updated });
   }
 
   function expenseRowHasOverride(expenseId: string): boolean {

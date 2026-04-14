@@ -451,19 +451,17 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     if (yr2GrowthOverride !== undefined) {
       pf = { ...pf, grossRent: { ...pf.grossRent, growthPct: yr2GrowthOverride } };
     }
-    // Clear stale year-2 rent pin when preStab >= target (no actual gap to bridge)
+    // Clear stale Year 2 grossRent pin — chainedValue computes Year 2 correctly.
+    // Keep Year 2 grossRent only if it's a calculator-driven stabilizing value (below target).
     if (pf.yearOverrides?.[2]?.grossRentSystem) {
       const targetAnnual = initialDeal
         ? (initialDeal.acquisition.propertyType === 'mfr'
             ? initialDeal.acquisition.unitMix.reduce((s, e) => s + e.count * (e.rentMonthly || 0), 0) * 12
             : (initialDeal.acquisition.sfrTargetRent || 0) * 12)
         : 0;
-      const preStabAnnual = initialDeal
-        ? (initialDeal.acquisition.propertyType === 'mfr'
-            ? initialDeal.acquisition.unitMix.reduce((s, e) => s + e.count * (e.preStabRent || 0), 0) * 12
-            : (initialDeal.acquisition.sfrPreStabRent || 0) * 12)
-        : 0;
-      if (!(preStabAnnual > 0 && preStabAnnual < targetAnnual)) {
+      const yr2Rent = pf.yearOverrides[2].grossRent;
+      const isStabilizing = typeof yr2Rent === 'number' && targetAnnual > 0 && yr2Rent < targetAnnual;
+      if (!isStabilizing) {
         const { grossRent: _r, grossRentSystem: _s, ...rest } = pf.yearOverrides[2];
         const ovs = { ...pf.yearOverrides };
         if (Object.keys(rest).length) { ovs[2] = rest; } else { delete ovs[2]; }
@@ -564,17 +562,15 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
           if (!ovs[1]) delete ovs[1];
         }
       }
-      // Only pin year 2 to target when there's a pre-stab period in year 1 AND
-      // the calculator hasn't already set year 2 to a stabilizing (below-target) value.
-      const yr2AlreadyStabilizing =
-        ovs[2]?.grossRentSystem === true &&
-        typeof ovs[2]?.grossRent === 'number' &&
-        targetAnnual > 0 &&
-        ovs[2].grossRent < targetAnnual;
-      if (targetAnnual > 0 && preStabAnnual > 0 && preStabAnnual < targetAnnual && !yr2AlreadyStabilizing) {
-        ovs[2] = { ...ovs[2], grossRent: targetAnnual, grossRentSystem: true };
-      } else if (!yr2AlreadyStabilizing) {
-        if (ovs[2]) {
+      // Clear any stale Year 2 grossRent pin — chainedValue computes Year 2
+      // correctly as stabilized × (1 + yr2Growth). Only keep non-grossRent overrides.
+      if (ovs[2]) {
+        const yr2StabilizingFromCalc = ovs[2]?.grossRentSystem === true &&
+          typeof ovs[2]?.grossRent === 'number' &&
+          targetAnnual > 0 &&
+          ovs[2].grossRent < targetAnnual;
+        // Keep calculator-driven stabilizing overrides (pre-stab extending into Year 2)
+        if (!yr2StabilizingFromCalc) {
           const { grossRent: _r, grossRentSystem: _s, ...rest } = ovs[2];
           ovs[2] = Object.keys(rest).length ? rest : undefined as never;
           if (!ovs[2]) delete ovs[2];
