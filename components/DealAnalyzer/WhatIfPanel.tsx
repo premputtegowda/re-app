@@ -226,7 +226,7 @@ function GoalSeekPanel({ metric, target, onMetricChange, onTargetChange, default
     {
       key: 'rentGrowthPct', pill: 'Rent Growth', label: 'Rent growth / yr',
       worseDir: 'down', direction: 'at_least',
-      searchMin: -5, searchMax: 15,
+      searchMin: -10, searchMax: 100,
       format: formatPct,
     },
     {

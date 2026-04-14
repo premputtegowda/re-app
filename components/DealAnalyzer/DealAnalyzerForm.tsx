@@ -1265,6 +1265,24 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                         )}
                       </div>
                     )}
+
+                    {/* Warning: value-add selected but no units assigned */}
+                    {isValueAdd === true && (() => {
+                      const noReno = hasMfr
+                        ? acquisition.unitMix.every(e => (e.unitsToRenovate ?? 0) === 0)
+                        : false; // SFR always has 1 reno unit
+                      const noLU = hasMfr
+                        ? acquisition.unitMix.every(e => (e.leaseUpUnits ?? 0) === 0)
+                        : true;
+                      return noReno && noLU ? (
+                        <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40">
+                          <AlertTriangle size={13} className="text-amber-500 mt-0.5 shrink-0" />
+                          <p className="text-xs text-amber-700 dark:text-amber-400">
+                            No renovation or lease-up units specified. Target rent will be used from Year 1 since there is no stabilization period.
+                          </p>
+                        </div>
+                      ) : null;
+                    })()}
                   </div>
                 <div className="flex gap-3 px-4 pb-4 pt-2 border-t border-slate-100 dark:border-slate-700/60 mt-2">
                   {completedOpsSections.has('valueAdd') && (
