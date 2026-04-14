@@ -1108,9 +1108,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                   <Button variant="secondary" onClick={() => setActiveOpsSection(null)}>Cancel</Button>
                 )}
                 <Button variant="primary" fullWidth={!completedOpsSections.has('rent')} onClick={() => {
-                  const wasCompleted = completedOpsSections.has('rent');
+                  const vaDone = completedOpsSections.has('valueAdd');
                   setCompletedOpsSections(prev => { const s = new Set(prev); s.add('rent'); return s; });
-                  setActiveOpsSection(wasCompleted ? null : (hasTargetRent ? 'valueAdd' : null));
+                  setActiveOpsSection(hasTargetRent && !vaDone ? 'valueAdd' : null);
                   scheduleCalculate();
                 }}>Done</Button>
               </div>
@@ -1290,11 +1290,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     <Button variant="secondary" onClick={() => setActiveOpsSection(null)}>Cancel</Button>
                   )}
                   <Button variant="primary" fullWidth={!completedOpsSections.has('valueAdd')} onClick={() => {
-                    const wasCompleted = completedOpsSections.has('valueAdd');
+                    const stabDone = completedOpsSections.has('stab');
                     setCompletedOpsSections(prev => { const s = new Set(prev); s.add('valueAdd'); return s; });
-                    if (wasCompleted) {
-                      setActiveOpsSection(null);
-                    } else if (isValueAdd === true) {
+                    if (isValueAdd === true && !stabDone) {
                       setActiveOpsSection('stab');
                       setCalcCollapsed(false);
                     } else {
@@ -1330,6 +1328,15 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 className={card}
               >
                 <OpsSectionHeader num={3} title="Stabilization" isComplete={stepComplete} />
+                {/* Warning: no reno/lease-up units assigned */}
+                {hasMfr && acquisition.unitMix.every(e => (e.unitsToRenovate ?? 0) === 0 && (e.leaseUpUnits ?? 0) === 0) && (
+                  <div className="flex items-start gap-2 mx-4 mt-3 px-3 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40">
+                    <AlertTriangle size={13} className="text-amber-500 mt-0.5 shrink-0" />
+                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                      Specify renovation or lease-up units in the Value-Add Plan to build a stabilization schedule. Target rent will be used from Year 1 until units are assigned.
+                    </p>
+                  </div>
+                )}
                 {/* Distribution/revenue-loss info row */}
                 <div className="px-4 py-2 border-t border-slate-100 dark:border-slate-700/60">
                   {hasMfr ? (
