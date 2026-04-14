@@ -816,7 +816,7 @@ export function MonteCarloPanel({
               onReset={() => { handleRangesChange(defaults); setDraftRanges(defaults); userCustomizedRef.current = false; }}
               onSaveAsDefaults={() => setMCRangeDefaults(rangesToMCRangeDefaults(draftRanges))}
               showRefiRate={refinance.enabled}
-              showArvRange={acquisition.exitMethod !== 'capRate' && acquisition.arv > 0}
+              showArvRange={false}
             />
           </div>
         )}

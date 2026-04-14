@@ -90,6 +90,7 @@ function makeDeps(
     units: 1,
     origStabilizedAnnual: pf.grossRent.stabilized,
     defaultPreStabAnnual: 1_800 * 12,
+    defaultFixedExpenseGrowthPct: 2,
   };
 }
 
@@ -408,10 +409,10 @@ describe('findBreakEven', () => {
     expect(result).toBeNull();
   });
 
-  it('returns null when metric never reaches target (worseDir=up)', () => {
-    // metric stays in [10-1, 10-0] = [9,10], always > target=5
+  it('returns "beyond" when metric never reaches target (worseDir=up)', () => {
+    // metric stays in [10-1, 10-0] = [9,10], always > target=5 — deal is too strong to break
     const result = findBreakEven(decreasingBuilder, 0, 1, cocMetric, 5, 'up');
-    expect(result).toBeNull();
+    expect(result).toBe('beyond');
   });
 
   it('returns null when already above target at maximum (worseDir=down)', () => {

@@ -35,14 +35,14 @@ import {
 
 describe('simulateFromSchedule — edge cases', () => {
   it('returns zeros when unitTypes is empty', () => {
-    const result = simulateFromSchedule([], [], [], 3);
+    const result = simulateFromSchedule([], [], [], [], 3);
     expect(result.yearlyRents).toEqual([0, 0, 0]);
     expect(result.stabilizationMonth).toBe(0);
   });
 
   it('returns correct length yearlyRents matching totalYears', () => {
     const unit: UnitTypeInput = { label: 'A', count: 2, inPlaceRent: 1000, targetRent: 1500 };
-    const result = simulateFromSchedule([unit], [[2]], [0], 5);
+    const result = simulateFromSchedule([unit], [[2]], [[]], [0], 5);
     expect(result.yearlyRents).toHaveLength(5);
   });
 });
@@ -53,31 +53,31 @@ describe('simulateFromSchedule — single type, renovation', () => {
   it('units are offline during renovation (earn $0)', () => {
     // schedule: 4 units start month 1, perUnitMonths=2 → done month 3
     // mo1: started=4, done=0, inReno=4, inPlace=0 → rent=0
-    const result = simulateFromSchedule([unit], [[4]], [2], 2);
+    const result = simulateFromSchedule([unit], [[4]], [[]], [2], 2);
     expect(result.yearlyRents[0]).toBeLessThan(unit.count * unit.targetRent * 12);
   });
 
   it('units earn targetRent after renovation completes', () => {
     // schedule: all 4 start mo1, perUnitMonths=1 → done mo2
     // Yr2: 4×1500×12=72000
-    const result = simulateFromSchedule([unit], [[4]], [1], 2);
+    const result = simulateFromSchedule([unit], [[4]], [[]], [1], 2);
     const fullYearTarget = unit.count * unit.targetRent * 12;
     expect(result.yearlyRents[1]).toBeCloseTo(fullYearTarget, 0);
   });
 
   it('income in transition year is less than full target year', () => {
-    const result = simulateFromSchedule([unit], [[4]], [1], 2);
+    const result = simulateFromSchedule([unit], [[4]], [[]], [1], 2);
     expect(result.yearlyRents[0]).toBeLessThan(result.yearlyRents[1]);
   });
 
   it('stabilizationMonth = last scheduled month + perUnitMonths', () => {
     // schedule over 4 months: [1,1,1,1], perUnitMonths=2 → last done = month 4 + 2 = 6
-    const result = simulateFromSchedule([unit], [[1, 1, 1, 1]], [2], 3);
+    const result = simulateFromSchedule([unit], [[1, 1, 1, 1]], [[]], [2], 3);
     expect(result.stabilizationMonth).toBe(6);
   });
 
   it('stabilizationMonth = 0 when schedule is empty', () => {
-    const result = simulateFromSchedule([unit], [[]], [1], 2);
+    const result = simulateFromSchedule([unit], [[]], [[]], [1], 2);
     expect(result.stabilizationMonth).toBe(0);
   });
 });
@@ -89,12 +89,12 @@ describe('simulateFromSchedule — already-stable units', () => {
     // schedule: only 4 of 10 → 6 always earn targetRent
     // All 4 start mo1, perUnitMonths=0 → done mo1
     // Yr1 should equal 10×1500×12 = 180000
-    const result = simulateFromSchedule([unit], [[4]], [0], 2);
+    const result = simulateFromSchedule([unit], [[4]], [[]], [0], 2);
     expect(result.yearlyRents[0]).toBeCloseTo(10 * 1500 * 12, 0);
   });
 
   it('with perUnitMonths=0, no vacancy — income = targetRent × count × 12 immediately', () => {
-    const result = simulateFromSchedule([unit], [[10]], [0], 2);
+    const result = simulateFromSchedule([unit], [[10]], [[]], [0], 2);
     expect(result.yearlyRents[0]).toBeCloseTo(10 * 1500 * 12, 0);
   });
 });
@@ -108,20 +108,20 @@ describe('simulateFromSchedule — multi-type', () => {
   it('each type uses its own perUnitMonths independently', () => {
     // 1BR: [3] start mo1, offline 1mo → done mo2
     // 2BR: [2] start mo1, offline 3mo → done mo4
-    const result = simulateFromSchedule(types, [[3], [2]], [1, 3], 2);
+    const result = simulateFromSchedule(types, [[3], [2]], [[], []], [1, 3], 2);
     // By Yr2 all should be stable: 3×1400 + 2×1800 = 7800/mo × 12 = 93600
     expect(result.yearlyRents[1]).toBeCloseTo(93600, 0);
   });
 
   it('stabilizationMonth is the maximum across types', () => {
     // 1BR done at mo3 (sched length=2, +1 perUnit), 2BR done at mo5 (sched length=2, +3 perUnit)
-    const result = simulateFromSchedule(types, [[1, 2], [1, 1]], [1, 3], 3);
+    const result = simulateFromSchedule(types, [[1, 2], [1, 1]], [[], []], [1, 3], 3);
     expect(result.stabilizationMonth).toBe(5);
   });
 
   it('type with empty schedule contributes targetRent throughout (already stable)', () => {
     // 1BR scheduled, 2BR not scheduled → 2BR always at targetRent
-    const result = simulateFromSchedule(types, [[3], []], [1, 0], 2);
+    const result = simulateFromSchedule(types, [[3], []], [[], []], [1, 0], 2);
     // After 1BR stabilizes: Yr2 = (3×1400 + 2×1800)×12 = 93600
     expect(result.yearlyRents[1]).toBeCloseTo(93600, 0);
   });

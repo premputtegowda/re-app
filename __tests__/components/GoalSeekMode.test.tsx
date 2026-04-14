@@ -113,7 +113,7 @@ describe('WhatIfPanel — mode toggle', () => {
     const user = userEvent.setup();
     renderPanel();
     await user.click(screen.getByRole('button', { name: /goal seek/i }));
-    expect(screen.getByText('Target')).toBeInTheDocument();
+    expect(screen.getByText('Achieve')).toBeInTheDocument();
   });
 
   it('switching back to Explore mode restores the break-even table', async () => {
@@ -139,9 +139,9 @@ describe('WhatIfPanel — Goal Seek banner', () => {
     const user = userEvent.setup();
     renderPanel();
     await user.click(screen.getByRole('button', { name: /goal seek/i }));
-    // The target input defaults to 12 — clear and type 0
+    // The target input defaults to 15 — clear and type 0
     const targetInput = screen.getAllByRole('spinbutton').find(
-      el => (el as HTMLInputElement).value === '12'
+      el => (el as HTMLInputElement).value === '15'
     )!;
     await user.clear(targetInput);
     await user.type(targetInput, '0');
@@ -154,7 +154,7 @@ describe('WhatIfPanel — Goal Seek banner', () => {
     renderPanel();
     await user.click(screen.getByRole('button', { name: /goal seek/i }));
     const targetInput = screen.getAllByRole('spinbutton').find(
-      el => (el as HTMLInputElement).value === '12'
+      el => (el as HTMLInputElement).value === '15'
     )!;
     await user.clear(targetInput);
     await user.type(targetInput, '50');

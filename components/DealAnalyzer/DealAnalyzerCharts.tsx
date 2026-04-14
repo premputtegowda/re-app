@@ -39,7 +39,7 @@ function P50CFOverlay({ xAxisMap, yAxisMap, data }: any) {
     <g>
       <defs>
         <pattern id={patternId} patternUnits="userSpaceOnUse" width="6" height="6">
-          <circle cx="3" cy="3" r="1.8" fill="#1E293B" />
+          <line x1="0" y1="6" x2="6" y2="0" stroke="#1E293B" strokeWidth="1.2" />
         </pattern>
       </defs>
       {data.map((d: any) => {
@@ -163,7 +163,14 @@ export function DealCharts({ projections, mcResults }: DealChartsProps) {
                   </span>
                   {yearlyP50 && (
                     <span className="flex items-center gap-1">
-                      <span className="inline-block w-5 h-3 rounded-sm" style={{ background: '#1E293B', opacity: 0.6 }} />
+                      <svg width="20" height="12" className="shrink-0">
+                        <defs>
+                          <pattern id="legend-diag" patternUnits="userSpaceOnUse" width="6" height="6">
+                            <line x1="0" y1="6" x2="6" y2="0" stroke="#1E293B" strokeWidth="1.2" />
+                          </pattern>
+                        </defs>
+                        <rect width="20" height="12" rx="2" fill="url(#legend-diag)" stroke="#1E293B" strokeWidth="0.5" strokeOpacity="0.4" />
+                      </svg>
                       Most Likely (Accounts for market uncertainty)
                     </span>
                   )}
@@ -203,8 +210,8 @@ export function DealCharts({ projections, mcResults }: DealChartsProps) {
                 stroke="#1E293B"
                 strokeWidth={1.5}
                 strokeDasharray="4 3"
-                dot={{ fill: '#1E293B', r: 3, strokeWidth: 2, stroke: '#fff' }}
-                activeDot={{ r: 5 }}
+                dot={false}
+                activeDot={{ r: 4, fill: '#1E293B', strokeWidth: 0 }}
                 legendType="none"
               />
             )}

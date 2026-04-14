@@ -101,6 +101,7 @@ function makeDeps(pf: ProFormaData, purchasePrice = 200_000): BuildDeps {
     units: 1,
     origStabilizedAnnual: pf.grossRent.stabilized,
     defaultPreStabAnnual: 1_800 * 12,
+    defaultFixedExpenseGrowthPct: 2,
   };
 }
 
@@ -164,6 +165,7 @@ describe('buildWhatIfResult — property tax scales with purchase price', () => 
     const deps: BuildDeps = {
       acquisition: acq, operations: makeOps(), proForma: pf, refinance: makeRefinance(),
       units: 1, origStabilizedAnnual: pf.grossRent.stabilized, defaultPreStabAnnual: 1_800 * 12,
+      defaultFixedExpenseGrowthPct: 2,
     };
 
     const base   = buildWhatIfResult(makeOverrides({ purchasePrice: 200_000 }), deps);

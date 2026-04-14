@@ -1183,7 +1183,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                         cascadeDelay={(mobileYear - 1) * 50}
                         />
                       {!isPercent && growthRateKey && (
-                        <div className="flex items-center gap-0.5">
+                        <div className="flex items-center justify-end gap-0.5">
                           <Cell value={yrGrowthPct} onChange={() => {}} onCommit={(v) => {
                             setYearGrowthPct(mobileYear, growthRateKey, v);
                           }} format="growthPct" isOverridden={yrOv?.[growthRateKey] !== undefined} />
@@ -1280,7 +1280,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                         cascadeDelay={(mobileYear - 1) * 50}
                         />
                       {!expense.isPercentOfEGI && !isCapEx && (
-                        <div className="flex items-center gap-0.5">
+                        <div className="flex items-center justify-end gap-0.5">
                           <Cell value={yrGrowth} onChange={() => {}} onCommit={(v) => {
                             setExpenseYearGrowthPct(mobileYear, expense.id, v);
                           }} format="growthPct" isOverridden={data.yearOverrides?.[mobileYear]?.expenseGrowthPcts?.[expense.id] !== undefined} />
@@ -1348,11 +1348,11 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
           {/* EGI summary */}
           <div className="px-3 py-2.5 bg-slate-50 dark:bg-slate-700/30 border-b border-slate-100 dark:border-slate-700">
             <div className="grid grid-cols-2 gap-3">
-              <div>
+              <div className="text-right">
                 <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-0.5">EGI · T12</p>
                 <span className="text-sm font-bold tabular-nums text-slate-700 dark:text-slate-300">{fmt$(t12EGI)}</span>
               </div>
-              <div>
+              <div className="text-right">
                 <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-0.5">EGI · Yr {mobileYear}</p>
                 <span className="text-sm font-bold tabular-nums text-slate-700 dark:text-slate-300">{fmt$(mobileEGI)}</span>
               </div>
@@ -1384,11 +1384,11 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
           {/* Total OpEx */}
           <div className="px-3 py-2.5 bg-slate-50 dark:bg-slate-700/30 border-t border-slate-100 dark:border-slate-700">
             <div className="grid grid-cols-2 gap-3">
-              <div>
+              <div className="text-right">
                 <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-0.5">OpEx · T12</p>
                 <span className="text-sm font-bold tabular-nums text-slate-700 dark:text-slate-300">{fmt$(t12OpEx)}</span>
               </div>
-              <div>
+              <div className="text-right">
                 <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-0.5">OpEx · Yr {mobileYear}</p>
                 <span className="text-sm font-bold tabular-nums text-slate-700 dark:text-slate-300">{fmt$(mobileOpEx)}</span>
               </div>
@@ -1398,11 +1398,11 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
           {/* NOI */}
           <div className="px-3 py-2.5 bg-primary-50 dark:bg-primary-900/20 border-t border-primary-100 dark:border-primary-800/40">
             <div className="grid grid-cols-2 gap-3">
-              <div>
+              <div className="text-right">
                 <p className="text-[10px] font-bold uppercase tracking-wide text-primary-600 dark:text-primary-400 mb-0.5">NOI · T12</p>
                 <span className="text-sm font-bold tabular-nums text-primary-700 dark:text-primary-300">{fmt$(t12EGI - t12OpEx)}</span>
               </div>
-              <div>
+              <div className="text-right">
                 <p className="text-[10px] font-bold uppercase tracking-wide text-primary-600 dark:text-primary-400 mb-0.5">NOI · Yr {mobileYear}</p>
                 <span className="text-sm font-bold tabular-nums text-primary-700 dark:text-primary-300">{fmt$(mobileEGI - mobileOpEx)}</span>
               </div>

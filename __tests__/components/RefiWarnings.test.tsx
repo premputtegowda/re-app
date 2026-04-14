@@ -64,8 +64,12 @@ vi.mock('@/utils/dealAnalyzerCalc', async (importOriginal) => {
   return {
     ...actual,
     projectScenario: vi.fn(() => ({
-      avgCoCReturn: 0.08, irr: 0.12, equityMultiple: 1.5,
-      totalReturn: 0.5, annualCashFlows: [], exitValue: 300000, netProceeds: 100000,
+      avgCoCReturn: 0.08, irr: 0.12, equityMultiple: 1.5, peakCoCReturn: 0.08,
+      totalCashFlow: 5000, totalInvested: 77000, yearlyProjections: [],
+      downPayment: 60000, closingCosts: 5000, pointsCost: 0, additionalFeeItems: [], additionalFees: 0,
+      hardCostItems: [], hardCosts: 0, softCostItems: [], softCosts: 0,
+      opportunityCostItems: [], lostOpportunityCost: 0, initialLoanAmount: 240000,
+      terminalPropertyValue: 300000, exitClosingCosts: 9000, terminalEquity: 51000, irrCashFlows: [-77000, 5000],
     })),
   };
 });
@@ -74,7 +78,10 @@ vi.mock('@/utils/whatIfCalc', () => ({
   findBreakEven: vi.fn(),
   computeAvgRents: vi.fn(() => ({ units: 1, avgTargetRent: 2000, avgPreStabRent: 1500 })),
 }));
-vi.mock('@/utils/monteCarlo', () => ({ runMonteCarloSimulation: vi.fn() }));
+vi.mock('@/utils/monteCarlo', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/utils/monteCarlo')>();
+  return { ...actual, runMonteCarloSimulation: vi.fn() };
+});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

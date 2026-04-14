@@ -66,9 +66,9 @@ const baseResult: CoCResult = {
   opportunityCostItems: [], lostOpportunityCost: 0, totalInvested: 77000,
   initialLoanAmount: 280000,
   yearlyProjections: Array.from({ length: 3 }, (_, i) => ({
-    year: i + 1, grossRent: 24000, effectiveGrossIncome: 22800, operatingExpenses: 6840,
-    noi: 15960, debtService: 22800, cashFlow: -840, coCReturn: -0.011,
-    propertyValue: 350000, loanBalance: 270000, equity: 80000,
+    year: i + 1, grossRent: 24000, effectiveRent: 22800, opex: 6840,
+    noi: 15960, debtService: 22800, cashOutProceeds: 0, cashFlow: -840, coCReturn: -0.011,
+    loanBalance: 270000, equityValue: 80000, cumulativeCashFlow: -840 * (i + 1),
   })),
   irr: 0.08, equityMultiple: 1.5, avgCoCReturn: -0.011, peakCoCReturn: 0,
   totalCashFlow: -2520, terminalPropertyValue: 380000, exitClosingCosts: 11400,
