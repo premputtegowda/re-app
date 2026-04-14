@@ -13,11 +13,11 @@ export function makeProFormaProjector(pf: ProFormaData) {
 
   function getGrossRentForYear(year: number): number {
     const ov = pf.yearOverrides?.[year];
-    // Manual override → use directly
-    if (ov?.grossRent !== undefined && ov?.grossRentSystem !== true) return ov.grossRent;
-    // System (calculator) overrides and formula years → chainedValue.
-    // chainedValue skips system overrides so growth compounds from stabilized (target),
-    // e.g. Year 2 = target × (1 + growth%) when Year 1 was pre-stab.
+    // Any explicit override (manual or system/calculator) → use for this year.
+    // System overrides are pre-stab values that must be used for EGI/display.
+    // The chain (for years WITHOUT overrides) skips system overrides so growth
+    // compounds from stabilized, not from pre-stab values.
+    if (ov?.grossRent !== undefined) return ov.grossRent;
     return chainedValue('grossRent', 'grossRentGrowthPct', pf.grossRent.stabilized, pf.grossRent.growthPct, year);
   }
 
