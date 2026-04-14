@@ -157,8 +157,8 @@ function AccordionHeader({ num, title, summary, isOpen, onToggle, isComplete }: 
 // ── OpsCard ────────────────────────────────────────────────────────────────────
 // Completed sub-section summary card for the Operations mini-step flow.
 
-function OpsCard({ num, title, summary, onEdit }: {
-  num: number; title: string; summary: string; onEdit: () => void;
+function OpsCard({ num, title, summary, onEdit, warning }: {
+  num: number; title: string; summary: string; onEdit: () => void; warning?: boolean;
 }) {
   return (
     <button
@@ -166,9 +166,15 @@ function OpsCard({ num, title, summary, onEdit }: {
       onClick={onEdit}
       className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-left group hover:border-primary-300 dark:hover:border-primary-600 transition-colors"
     >
-      <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400">
-        <Check size={12} />
-      </span>
+      {warning ? (
+        <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 bg-amber-100 dark:bg-amber-900/40 text-amber-500 dark:text-amber-400">
+          <AlertTriangle size={12} />
+        </span>
+      ) : (
+        <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400">
+          <Check size={12} />
+        </span>
+      )}
       <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex-1">{title}</span>
       {summary && <span className="text-xs text-slate-400 dark:text-slate-500 truncate max-w-[180px]">{summary}</span>}
       <Pencil size={13} className="text-slate-300 dark:text-slate-600 group-hover:text-primary-500 dark:group-hover:text-primary-400 transition-colors shrink-0" />
@@ -882,9 +888,10 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         );
 
         const hasAnyUnits = someReno || someLU;
+        const valueAddIncomplete = isValueAdd === true && !hasAnyUnits;
         const stepComplete =
           isValueAdd === false ||
-          (isValueAdd === true && hasAnyUnits && !calcScheduleIncomplete);
+          (isValueAdd === true && !calcScheduleIncomplete);
 
         const unitTypes = hasMfr
           ? acquisition.unitMix.map(e => ({
@@ -947,7 +954,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         const valueAddSummary = isValueAdd === false
           ? 'No — already at market'
           : isValueAdd === true
-            ? [totalReno > 0 && `${totalReno} reno`, totalLU > 0 && `${totalLU} lease-up`].filter(Boolean).join(' · ') || 'Plan set'
+            ? [totalReno > 0 && `${totalReno} reno`, totalLU > 0 && `${totalLU} lease-up`].filter(Boolean).join(' · ') || 'No units assigned'
             : '';
 
         const stabSummary = stepComplete
@@ -1128,7 +1135,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.25, ease: 'easeOut' }}
               >
-                <OpsCard num={2} title="Value-Add Plan" summary={valueAddSummary} onEdit={() => setActiveOpsSection('valueAdd')} />
+                <OpsCard num={2} title="Value-Add Plan" summary={valueAddSummary} onEdit={() => setActiveOpsSection('valueAdd')} warning={valueAddIncomplete} />
               </motion.div>
             )}
             {completedOpsSections.has('rent') && activeOpsSection === 'valueAdd' && (
@@ -1316,7 +1323,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.25, ease: 'easeOut' }}
               >
-                <OpsCard num={3} title="Stabilization" summary={stabSummary} onEdit={() => { setActiveOpsSection('stab'); setCalcCollapsed(false); }} />
+                <OpsCard num={3} title="Stabilization" summary={stabSummary} onEdit={() => { setActiveOpsSection('stab'); setCalcCollapsed(false); }} warning={valueAddIncomplete} />
               </motion.div>
             )}
             {completedOpsSections.has('valueAdd') && isValueAdd === true && activeOpsSection === 'stab' && (
@@ -1549,7 +1556,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
             </AnimatePresence>
 
             {/* Value-add incomplete warning */}
-            {isValueAdd === true && !stepComplete && (
+            {valueAddIncomplete && (
               <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40">
                 <AlertTriangle size={13} className="text-amber-500 mt-0.5 shrink-0" />
                 <p className="text-xs text-amber-700 dark:text-amber-400">
@@ -1782,6 +1789,11 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     {/* Completed summary card */}
                     {isCompleted && !isEditing && (() => {
                       const warning = getStepWarning(step.id);
+                      const infoAmber = step.id === 3 && isValueAdd === true && !(
+                        (acquisition.propertyType === 'mfr' && acquisition.unitMix.length > 0)
+                          ? acquisition.unitMix.some(e => (e.unitsToRenovate ?? 0) > 0 || (e.leaseUpUnits ?? 0) > 0)
+                          : true
+                      );
                       const style = STEP_CARD_STYLE;
                       const { primary, primaryExtra, sub } = getStepCardData(step.id, acquisition, proForma, refinance, currentResult);
                       return (
@@ -1837,7 +1849,10 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                                 <AlertTriangle size={14} />
                               </span>
                             ) : (
-                              <Pencil size={13} className="text-slate-300 dark:text-slate-600 group-hover:text-primary-500 transition-colors" />
+                              <div className="flex items-center gap-1.5">
+                                {infoAmber && <AlertTriangle size={12} className="text-amber-400 dark:text-amber-500" />}
+                                <Pencil size={13} className="text-slate-300 dark:text-slate-600 group-hover:text-primary-500 transition-colors" />
+                              </div>
                             )}
                           </div>
                         </button>
