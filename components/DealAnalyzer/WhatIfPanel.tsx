@@ -221,7 +221,7 @@ function GoalSeekPanel({ metric, target, onMetricChange, onTargetChange, default
       key: 'targetRentPerUnit', pill: 'Rent / unit', label: 'Target rent / unit',
       worseDir: 'down', direction: 'at_least',
       searchMin: 50, searchMax: Math.max(defaults.targetRentPerUnit * 2.5, 5000),
-      format: v => `$${Math.round(v).toLocaleString()}/mo`,
+      format: v => `$${Math.ceil(v).toLocaleString()}/mo`,
     },
     {
       key: 'rentGrowthPct', pill: 'Rent Growth', label: 'Rent growth / yr',
@@ -291,6 +291,7 @@ function GoalSeekPanel({ metric, target, onMetricChange, onTargetChange, default
         searchMin: 1, searchMax: maxRefiYear,
         format: (v: number) => `Year ${Math.round(v)}`,
         formatGap: (v: number) => `${Math.round(v)} yr${Math.round(v) !== 1 ? 's' : ''}`,
+        scan: true,
       },
     ] : []),
   ];
@@ -315,7 +316,7 @@ function GoalSeekPanel({ metric, target, onMetricChange, onTargetChange, default
   const bestScanYear = scanYears.reduce((best, s) => s.value > best.value ? s : best, scanYears[0] ?? { year: 0, value: -999 });
 
   // ── Standard binary-search mode ──
-  const alreadyMet = currentValue >= target;
+  const alreadyMet = currentValue >= target - 0.05;
   const solved = !varDef.scan && !alreadyMet
     ? findBreakEven(build, varDef.searchMin, varDef.searchMax, metricFn, target, varDef.worseDir)
     : null;
@@ -323,13 +324,15 @@ function GoalSeekPanel({ metric, target, onMetricChange, onTargetChange, default
     ? (varDef.direction === 'at_least' ? metricFn(build(varDef.searchMax)) : metricFn(build(varDef.searchMin)))
     : bestScanYear.value;
 
+  const solvedValue = typeof solved === 'number' ? solved : null;
+  const gap = solvedValue !== null ? Math.abs(solvedValue - currentDefaultValue) : null;
+  // If the formatted solved value matches the current value, treat as already met
+  const effectivelyMet = solvedValue !== null && varDef.format(solvedValue) === varDef.format(currentDefaultValue);
+
   type ResultState = 'already_met' | 'solved' | 'not_achievable';
   const state: ResultState = varDef.scan
     ? (qualifyingYears.length > 0 ? 'solved' : 'not_achievable')
-    : alreadyMet ? 'already_met' : typeof solved === 'number' ? 'solved' : 'not_achievable';
-
-  const solvedValue = typeof solved === 'number' ? solved : null;
-  const gap = solvedValue !== null ? Math.abs(solvedValue - currentDefaultValue) : null;
+    : (alreadyMet || effectivelyMet) ? 'already_met' : typeof solved === 'number' ? 'solved' : 'not_achievable';
 
   // Full result at the solved value — used to show cash flow / equity multiple in result card
   const solvedResult = solvedValue !== null ? build(solvedValue) : null;
@@ -457,7 +460,7 @@ function GoalSeekPanel({ metric, target, onMetricChange, onTargetChange, default
 
       {varDef.scan && state === 'not_achievable' && (
         <div className="rounded-xl p-4 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800/30 space-y-2">
-          <p className="text-sm font-semibold text-red-600 dark:text-red-400">Not achievable at any hold period</p>
+          <p className="text-sm font-semibold text-red-600 dark:text-red-400">Not achievable at any {varDef.label.toLowerCase()}</p>
           <p className="text-xs text-red-500 dark:text-red-400">
             Best case is <strong>{bestScanYear.value.toFixed(1)}%</strong> {metric.toUpperCase()} at year {bestScanYear.year} —{' '}
             {(target - bestScanYear.value).toFixed(1)}% short of target.
@@ -500,7 +503,7 @@ function GoalSeekPanel({ metric, target, onMetricChange, onTargetChange, default
             </div>
           </div>
 
-          {gap !== null && gap > 0.01 && (
+          {gap !== null && gap > 0.01 && varDef.format(solvedValue!) !== varDef.format(currentDefaultValue) && (
             <p className="text-xs font-medium text-amber-600 dark:text-amber-400">
               {varDef.direction === 'at_least' ? '↑ Needs to increase by' : '↓ Needs to decrease by'}{' '}
               {fmtGap(gap)} to hit {target}% {metric.toUpperCase()}
@@ -509,7 +512,7 @@ function GoalSeekPanel({ metric, target, onMetricChange, onTargetChange, default
 
           <div className="h-2 rounded-full bg-slate-200 dark:bg-slate-600 overflow-hidden">
             <div
-              className={`h-full rounded-full transition-all duration-300 ${progressPct >= 80 ? 'bg-amber-400' : 'bg-primary-500'}`}
+              className={`h-full rounded-full transition-all duration-300 bg-secondary-500`}
               style={{ width: `${progressPct}%` }}
             />
           </div>
