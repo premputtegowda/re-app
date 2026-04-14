@@ -62,14 +62,17 @@ export function buildWhatIfResult(ov: WhatIfOverrides, deps: BuildDeps): CoCResu
   let hasExistingStabilizingYear = false;
 
   const rentGrowthChanged = ov.rentGrowthPct !== proForma.grossRent.growthPct;
+  const vacancyChanged = ov.vacancyPct !== proForma.vacancyPct.stabilized;
+  const expGrowthChanged = ov.fixedExpenseGrowthPct !== deps.defaultFixedExpenseGrowthPct;
   for (const [yearStr, yearOv] of Object.entries(proForma.yearOverrides ?? {})) {
     if (!yearOv) continue;
     const y = Number(yearStr);
-    // Strip per-year growth overrides when what-if changes the growth rate —
-    // otherwise the year override (e.g. 2%) takes precedence over the what-if slider (e.g. 100%)
-    const cleaned = rentGrowthChanged
-      ? (({ grossRentGrowthPct: _, ...rest }) => rest)(yearOv)
-      : yearOv;
+    // Strip per-year overrides when what-if changes the corresponding variable —
+    // otherwise year overrides take precedence over the what-if slider
+    let cleaned = { ...yearOv };
+    if (rentGrowthChanged) delete cleaned.grossRentGrowthPct;
+    if (vacancyChanged) delete cleaned.vacancyPct;
+    if (expGrowthChanged) delete cleaned.expenseGrowthPcts;
     if (cleaned.grossRent !== undefined && cleaned.grossRent < origStabilizedAnnual) {
       // Pre-stab year — scale relative to new pre-stab
       const ratio = defaultPreStabAnnual > 0 ? cleaned.grossRent / defaultPreStabAnnual : 1;
