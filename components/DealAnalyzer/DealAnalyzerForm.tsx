@@ -1108,8 +1108,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                   <Button variant="secondary" onClick={() => setActiveOpsSection(null)}>Cancel</Button>
                 )}
                 <Button variant="primary" fullWidth={!completedOpsSections.has('rent')} onClick={() => {
+                  const wasCompleted = completedOpsSections.has('rent');
                   setCompletedOpsSections(prev => { const s = new Set(prev); s.add('rent'); return s; });
-                  setActiveOpsSection(hasTargetRent ? 'valueAdd' : null);
+                  setActiveOpsSection(wasCompleted ? null : (hasTargetRent ? 'valueAdd' : null));
                   scheduleCalculate();
                 }}>Done</Button>
               </div>
@@ -1289,8 +1290,11 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     <Button variant="secondary" onClick={() => setActiveOpsSection(null)}>Cancel</Button>
                   )}
                   <Button variant="primary" fullWidth={!completedOpsSections.has('valueAdd')} onClick={() => {
+                    const wasCompleted = completedOpsSections.has('valueAdd');
                     setCompletedOpsSections(prev => { const s = new Set(prev); s.add('valueAdd'); return s; });
-                    if (isValueAdd === true) {
+                    if (wasCompleted) {
+                      setActiveOpsSection(null);
+                    } else if (isValueAdd === true) {
                       setActiveOpsSection('stab');
                       setCalcCollapsed(false);
                     } else {
