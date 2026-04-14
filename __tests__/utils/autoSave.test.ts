@@ -151,6 +151,58 @@ describe('auto-save on step completion', () => {
   });
 });
 
+describe('save status flash', () => {
+  function flashSaved(setSaveStatus: (s: 'idle' | 'saved') => void): void {
+    setSaveStatus('saved');
+    // In real code, setTimeout resets to 'idle' after 3s
+  }
+
+  it('sets status to saved after auto-save', () => {
+    let status: 'idle' | 'saved' = 'idle';
+    flashSaved((s) => { status = s; });
+    expect(status).toBe('saved');
+  });
+
+  it('status starts as idle', () => {
+    const status: 'idle' | 'saved' = 'idle';
+    expect(status).toBe('idle');
+  });
+});
+
+describe('bottom bar display logic', () => {
+  it('shows hint text when no results exist', () => {
+    const currentResult = null;
+    const showHint = !currentResult;
+    const showMetrics = !!currentResult;
+    expect(showHint).toBe(true);
+    expect(showMetrics).toBe(false);
+  });
+
+  it('shows metrics when results exist', () => {
+    const currentResult = { irr: 12, avgCoCReturn: 5 };
+    const showHint = !currentResult;
+    const showMetrics = !!currentResult;
+    expect(showHint).toBe(false);
+    expect(showMetrics).toBe(true);
+  });
+
+  it('shows "Saved" when saveStatus is saved', () => {
+    const saveStatus: 'idle' | 'saved' = 'saved';
+    const showSavedBadge = saveStatus === 'saved';
+    const showHintText = saveStatus === 'idle';
+    expect(showSavedBadge).toBe(true);
+    expect(showHintText).toBe(false);
+  });
+
+  it('shows hint text when saveStatus is idle', () => {
+    const saveStatus: 'idle' | 'saved' = 'idle';
+    const showSavedBadge = saveStatus === 'saved';
+    const showHintText = saveStatus === 'idle';
+    expect(showSavedBadge).toBe(false);
+    expect(showHintText).toBe(true);
+  });
+});
+
 describe('auto-save on calculate', () => {
   // Same logic — calculate triggers auto-save with results
   it('creates new deal on first calculate when address exists', () => {

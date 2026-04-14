@@ -490,6 +490,13 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const titleBeforeEdit = useRef('');
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showExitWarning, setShowExitWarning] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
+  const saveStatusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashSaved = () => {
+    setSaveStatus('saved');
+    if (saveStatusTimer.current) clearTimeout(saveStatusTimer.current);
+    saveStatusTimer.current = setTimeout(() => setSaveStatus('idle'), 3000);
+  };
 
   // Auto-save MC data immediately after a simulation run, if the deal is already saved
   useEffect(() => {
@@ -826,11 +833,13 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
       if (savedDealId) {
         updateSavedDeal(savedDealId, name, scenarioResults, draft, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined);
+        flashSaved();
       } else if (acquisition.propertyAddress.trim()) {
         const newId = saveDeal(name, draft, scenarioResults, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined);
         setSavedDealId(newId);
         setSaveName(name);
         savedSnapshot.current = JSON.stringify({ acquisition, operations, proForma, refinance });
+        flashSaved();
       }
     }
 
@@ -2059,7 +2068,31 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         )}
       </div>
 
-      {/* ── Fixed bottom hero bar — visible on all steps once results exist ── */}
+      {/* ── Fixed bottom bar — always visible ── */}
+      {!currentResult && (
+        <div className="fixed bottom-[60px] lg:bottom-0 left-0 right-0 z-50 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 shadow-[0_-4px_16px_rgba(0,0,0,0.06)]">
+          <div className="max-w-4xl mx-auto px-3 py-3 flex items-center justify-between" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
+            <div className="flex items-center gap-2 min-w-0">
+              {saveStatus === 'saved' ? (
+                <span className="flex items-center gap-1 text-xs text-secondary-600 dark:text-secondary-400 font-medium animate-fade-in">
+                  <Check size={12} /> Saved
+                </span>
+              ) : (
+                <p className="text-xs text-slate-400 dark:text-slate-500">
+                  Click <span className="font-semibold text-slate-500 dark:text-slate-400">Done</span> on each step to save your progress
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={onBack}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 text-xs font-semibold hover:bg-primary-100 dark:hover:bg-primary-900/50 transition-colors shrink-0"
+            >
+              ← Dashboard
+            </button>
+          </div>
+        </div>
+      )}
       {currentResult && (() => {
         const projs = currentResult.yearlyProjections;
         const avgMoCF = projs.length > 0 ? projs.reduce((s, p) => s + p.cashFlow, 0) / projs.length / 12 : 0;
