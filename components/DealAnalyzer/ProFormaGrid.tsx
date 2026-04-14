@@ -577,7 +577,13 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
       delete tgp[field];
       updated[y] = { ...cur, [field]: value, toggleOffGrowthPcts: Object.keys(tgp).length ? tgp : undefined };
     }
-    onChange({ ...data, yearOverrides: updated });
+    // Also update the base growth rate so chainedValue uses it as the default
+    const baseUpdate = field === 'grossRentGrowthPct'
+      ? { grossRent: { ...data.grossRent, growthPct: value } }
+      : field === 'otherIncomeGrowthPct'
+      ? { otherIncome: { ...data.otherIncome, growthPct: value } }
+      : {};
+    onChange({ ...data, ...baseUpdate, yearOverrides: updated });
   }, [data, onChange, projectionYears]);
 
   // push-to-future=OFF: pin just this year, mark toggleOff
