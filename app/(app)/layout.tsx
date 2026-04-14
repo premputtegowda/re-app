@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { Toaster } from 'sonner';
 import { Layout } from '@/components/Layout/Layout';
 import { useAuthStore } from '@/lib/authStore';
@@ -10,9 +10,17 @@ import { useDealAnalyzerStore } from '@/lib/dealAnalyzerStore';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
   const syncFromBackend = useStore((s) => s.syncFromBackend);
   const syncDealsFromBackend = useDealAnalyzerStore((s) => s.syncDealsFromBackend);
+
+  // Persist last visited route for post-login redirect
+  useEffect(() => {
+    if (isAuthenticated && pathname) {
+      localStorage.setItem('dealstack_last_route', pathname);
+    }
+  }, [isAuthenticated, pathname]);
 
   useEffect(() => {
     checkAuth();

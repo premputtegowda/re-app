@@ -9,7 +9,8 @@ import { useAuthStore } from '@/lib/authStore';
 function HomeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectTo = searchParams.get('redirect') ?? '/dashboard';
+  const lastRoute = typeof window !== 'undefined' ? localStorage.getItem('dealstack_last_route') : null;
+  const redirectTo = searchParams.get('redirect') ?? lastRoute ?? '/dashboard';
   const { isAuthenticated, isLoading, checkAuth, error } = useAuthStore();
 
   useEffect(() => {
