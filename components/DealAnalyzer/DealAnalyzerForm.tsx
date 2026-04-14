@@ -759,16 +759,27 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     const updatedResults = { ...scenarioResults, [activeType]: newResult };
     setScenarioResults(updatedResults);
 
+    const name = saveName || defaultSaveName(acquisition);
+    const enriched = buildCalcState();
+    const stepNotesObj: Record<number, string> = {};
+    if (opsNotes.trim()) stepNotesObj[3] = opsNotes.trim();
+    const draft: DealAnalyzerDraft = {
+      acquisition, operations, proForma, refinance,
+      currentStep: activeStep,
+      visitedSteps: Array.from(completedSteps),
+      activeType,
+      ...(enriched ? { calcState: enriched } : {}),
+      ...(Object.keys(stepNotesObj).length > 0 ? { stepNotes: stepNotesObj } : {}),
+    };
+
     if (savedDealId) {
-      const name = saveName || defaultSaveName(acquisition);
-      const enriched = buildCalcState();
-      updateSavedDeal(savedDealId, name, updatedResults, {
-        acquisition, operations, proForma, refinance,
-        currentStep: activeStep,
-        visitedSteps: Array.from(completedSteps),
-        activeType,
-        ...(enriched ? { calcState: enriched } : {}),
-      }, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined);
+      updateSavedDeal(savedDealId, name, updatedResults, draft, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined);
+    } else if (acquisition.propertyAddress.trim()) {
+      // Auto-save new deal on first calculate
+      const newId = saveDeal(name, draft, updatedResults, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined);
+      setSavedDealId(newId);
+      setSaveName(name);
+      savedSnapshot.current = JSON.stringify({ acquisition, operations, proForma, refinance });
     }
 
     // Re-run simulation whenever base results are refreshed
