@@ -70,3 +70,31 @@ describe('stepNotes persistence', () => {
     expect(loaded).toBe('');
   });
 });
+
+// ── Notes indicator dot logic ────────────────────────────────────────────────
+
+describe('notes indicator dot', () => {
+  function shouldShowDot(opsNotes: string): boolean {
+    return opsNotes.trim().length > 0;
+  }
+
+  it('shows dot when notes have content', () => {
+    expect(shouldShowDot('Check comps')).toBe(true);
+  });
+
+  it('shows dot for multi-line notes', () => {
+    expect(shouldShowDot('Line 1\nLine 2')).toBe(true);
+  });
+
+  it('hides dot when notes are empty', () => {
+    expect(shouldShowDot('')).toBe(false);
+  });
+
+  it('hides dot when notes are whitespace only', () => {
+    expect(shouldShowDot('   ')).toBe(false);
+  });
+
+  it('hides dot when notes are newlines only', () => {
+    expect(shouldShowDot('\n\n')).toBe(false);
+  });
+});

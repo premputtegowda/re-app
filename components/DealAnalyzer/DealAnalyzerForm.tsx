@@ -1588,7 +1588,10 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors"
               >
                 <div className="flex items-center gap-2">
-                  <FileText size={14} className="text-slate-400" />
+                  <span className="relative">
+                    <FileText size={14} className="text-slate-400" />
+                    {opsNotes.trim() && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-primary-500" />}
+                  </span>
                   <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Notes</span>
                   {!opsNotesOpen && opsNotes.trim() && (
                     <span className="text-xs text-slate-400 dark:text-slate-500 truncate max-w-[200px]">{opsNotes.split('\n')[0]}</span>
