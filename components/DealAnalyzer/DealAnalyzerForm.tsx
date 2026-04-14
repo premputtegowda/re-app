@@ -645,9 +645,25 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   useEffect(() => {
     if (acquisition.propertyType === prevPropertyType.current) return;
     prevPropertyType.current = acquisition.propertyType;
-    const units = acquisition.propertyType === 'mfr' ? acquisition.units : 1;
+    const units = acquisition.propertyType === 'mfr' ? Math.max(1, totalMFRUnits) : 1;
     setProForma(defaultProForma(acquisition.propertyType, { propertyMgmtPct: defaultPropertyMgmtPct, capExPerUnit: defaultCapExPerUnit, maintenancePct: defaultMaintenancePct, units }));
-  }, [acquisition.propertyType, acquisition.units, defaultPropertyMgmtPct, defaultCapExPerUnit, defaultMaintenancePct]);
+  }, [acquisition.propertyType, totalMFRUnits, defaultPropertyMgmtPct, defaultCapExPerUnit, defaultMaintenancePct]);
+
+  // Recalculate CapEx when unit count changes
+  const prevUnitCount = useRef(acquisition.propertyType === 'mfr' ? totalMFRUnits : 1);
+  useEffect(() => {
+    const units = acquisition.propertyType === 'mfr' ? Math.max(1, totalMFRUnits) : 1;
+    if (units === prevUnitCount.current) return;
+    prevUnitCount.current = units;
+    setProForma(prev => ({
+      ...prev,
+      expenses: prev.expenses.map(e =>
+        e.name === 'CapEx Reserves' && !e.isPercentOfEGI
+          ? { ...e, stabilizedValue: defaultCapExPerUnit * units }
+          : e
+      ),
+    }));
+  }, [acquisition.propertyType, totalMFRUnits, defaultCapExPerUnit]);
 
   // Auto-fill save name when address changes — only if user hasn't set a custom name
   const prevAddressRef = useRef(initialDeal?.acquisition?.propertyAddress ?? '');
