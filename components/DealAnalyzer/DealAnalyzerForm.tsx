@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Pencil, Calculator, AlertTriangle, MapPin, CreditCard, Hammer, BarChart2, TrendingUp, ChevronRight, ChevronUp, Check, Zap, X } from 'lucide-react';
+import { Pencil, Calculator, AlertTriangle, MapPin, CreditCard, Hammer, BarChart2, TrendingUp, ChevronRight, ChevronUp, ChevronDown, Check, Zap, X, FileText } from 'lucide-react';
 import { ShareButton } from './ShareButton';
 import { Card } from '@/components/UI/Card';
 import { Button } from '@/components/UI/Button';
@@ -382,6 +382,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     initialDeal?.calcState?.distributionMethod === 'custom' ? 'custom' : 'weighted'
   );
   const [calcCollapsed, setCalcCollapsed] = useState(true);
+  const [opsNotes, setOpsNotes] = useState(() => initialDeal?.stepNotes?.[3] ?? '');
+  const [opsNotesOpen, setOpsNotesOpen] = useState(false);
 
   // ── Operations mini-step state ────────────────────────────────────────────────
   type OpsSection = 'rent' | 'valueAdd' | 'stab';
@@ -795,12 +797,15 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     setSaveError(null);
     const name = saveName.trim() || defaultSaveName(acquisition);
     const enriched = buildCalcState();
+    const stepNotes: Record<number, string> = {};
+    if (opsNotes.trim()) stepNotes[3] = opsNotes.trim();
     const currentDraft: DealAnalyzerDraft = {
       acquisition, operations, proForma, refinance,
       currentStep: activeStep,
       visitedSteps: Array.from(completedSteps),
       activeType,
       ...(enriched ? { calcState: enriched } : {}),
+      ...(Object.keys(stepNotes).length > 0 ? { stepNotes } : {}),
     };
 
     if (savedDealId) {
@@ -1574,6 +1579,35 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
               units={acquisition.propertyType === 'mfr' ? (acquisition.unitMix.length > 0 ? acquisition.unitMix.reduce((s, e) => s + e.count, 0) : acquisition.units) : 1}
               purchasePrice={acquisition.purchasePrice}
             />
+
+            {/* ── Notes ── */}
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setOpsNotesOpen(v => !v)}
+                className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <FileText size={14} className="text-slate-400" />
+                  <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Notes</span>
+                  {!opsNotesOpen && opsNotes.trim() && (
+                    <span className="text-xs text-slate-400 dark:text-slate-500 truncate max-w-[200px]">{opsNotes.split('\n')[0]}</span>
+                  )}
+                </div>
+                {opsNotesOpen ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
+              </button>
+              {opsNotesOpen && (
+                <div className="px-4 pb-3">
+                  <textarea
+                    value={opsNotes}
+                    onChange={e => setOpsNotes(e.target.value)}
+                    placeholder="Add notes about this deal's operations, assumptions, or things to verify…"
+                    rows={4}
+                    className="w-full text-sm text-slate-700 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 resize-y placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-primary-400"
+                  />
+                </div>
+              )}
+            </div>
 
           </div>
         );

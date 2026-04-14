@@ -19,6 +19,7 @@ export interface DealAnalyzerDraft {
   visitedSteps: number[];
   activeType: CoCScenarioType;
   calcState?: CalcPersistedState;
+  stepNotes?: Record<number, string>;
 }
 
 interface CoCStore {
@@ -114,6 +115,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
           ...(mcRanges ? { mcRanges } : {}),
           ...(mcResults !== undefined ? { mcResults } : {}),
           ...(draft.calcState ? { calcState: draft.calcState } : {}),
+          ...(draft.stepNotes && Object.keys(draft.stepNotes).length > 0 ? { stepNotes: draft.stepNotes } : {}),
           savedAt,
           updatedAt: savedAt,
         };
@@ -131,6 +133,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
           mcRanges,
           mcResults,
           calcState: draft.calcState,
+          stepNotes: draft.stepNotes,
           savedAt,
           updatedAt: savedAt,
         }).catch((err) => console.error('[DealStore] Failed to sync new deal to backend:', err));
@@ -151,6 +154,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
                 proForma: draft.proForma,
                 refinance: draft.refinance,
                 ...(draft.calcState !== undefined ? { calcState: draft.calcState } : {}),
+                ...(draft.stepNotes !== undefined ? { stepNotes: draft.stepNotes } : {}),
               } : {}),
               ...(mcRanges !== undefined ? { mcRanges } : {}),
               ...(mcResults !== undefined ? { mcResults } : {}),

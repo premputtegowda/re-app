@@ -403,6 +403,8 @@ export interface SavedDeal {
   mcResults?: unknown; // SavedMCResults — typed as unknown to avoid circular import
   currentStep?: number;
   calcState?: CalcPersistedState;
+  /** Per-step notes keyed by step index (0–4) */
+  stepNotes?: Record<number, string>;
   savedAt: string;
   updatedAt: string;
 }
