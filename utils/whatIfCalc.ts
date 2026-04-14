@@ -61,20 +61,26 @@ export function buildWhatIfResult(ov: WhatIfOverrides, deps: BuildDeps): CoCResu
   const scaledYearOverrides: ProFormaData['yearOverrides'] = {};
   let hasExistingStabilizingYear = false;
 
+  const rentGrowthChanged = ov.rentGrowthPct !== proForma.grossRent.growthPct;
   for (const [yearStr, yearOv] of Object.entries(proForma.yearOverrides ?? {})) {
     if (!yearOv) continue;
     const y = Number(yearStr);
-    if (yearOv.grossRent !== undefined && yearOv.grossRent < origStabilizedAnnual) {
+    // Strip per-year growth overrides when what-if changes the growth rate —
+    // otherwise the year override (e.g. 2%) takes precedence over the what-if slider (e.g. 100%)
+    const cleaned = rentGrowthChanged
+      ? (({ grossRentGrowthPct: _, ...rest }) => rest)(yearOv)
+      : yearOv;
+    if (cleaned.grossRent !== undefined && cleaned.grossRent < origStabilizedAnnual) {
       // Pre-stab year — scale relative to new pre-stab
-      const ratio = defaultPreStabAnnual > 0 ? yearOv.grossRent / defaultPreStabAnnual : 1;
-      scaledYearOverrides[y] = { ...yearOv, grossRent: newPreStabAnnual * ratio };
+      const ratio = defaultPreStabAnnual > 0 ? cleaned.grossRent / defaultPreStabAnnual : 1;
+      scaledYearOverrides[y] = { ...cleaned, grossRent: newPreStabAnnual * ratio };
       hasExistingStabilizingYear = true;
-    } else if (yearOv.grossRentSystem && yearOv.grossRent !== undefined && origStabilizedAnnual > 0) {
+    } else if (cleaned.grossRentSystem && cleaned.grossRent !== undefined && origStabilizedAnnual > 0) {
       // System anchor year (first stabilized year set by calculator) — scale relative to new target
-      const ratio = yearOv.grossRent / origStabilizedAnnual;
-      scaledYearOverrides[y] = { ...yearOv, grossRent: newTargetAnnual * ratio };
+      const ratio = cleaned.grossRent / origStabilizedAnnual;
+      scaledYearOverrides[y] = { ...cleaned, grossRent: newTargetAnnual * ratio };
     } else {
-      scaledYearOverrides[y] = yearOv;
+      scaledYearOverrides[y] = cleaned;
     }
   }
 
