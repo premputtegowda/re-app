@@ -13,6 +13,22 @@ import { describe, it, expect } from 'vitest';
 import { makeChainedValue } from '@/utils/proFormaChaining';
 import type { ProFormaData } from '@/types';
 
+// ── Replicate incomeRowHasOverride logic ──
+
+function incomeRowHasOverride(
+  field: 'grossRent' | 'otherIncome' | 'vacancyPct' | 'creditLossPct',
+  yearOverrides: ProFormaData['yearOverrides'],
+  projectionYears: number
+): boolean {
+  for (let y = 1; y <= projectionYears; y++) {
+    const ov = yearOverrides?.[y];
+    if (ov?.[field] === undefined) continue;
+    if (field === 'grossRent' && ov.grossRentSystem === true) continue;
+    return true;
+  }
+  return false;
+}
+
 // ── chainedValue tests ──────────────────────────────────────────────────────
 
 describe('chainedValue — gross rent with pre-stab', () => {
@@ -220,5 +236,53 @@ describe('revert gross rent row', () => {
   it('empty overrides returns empty', () => {
     const result = revertGrossRent({});
     expect(Object.keys(result)).toHaveLength(0);
+  });
+});
+
+// ── Revert button visibility ────────────────────────────────────────────────
+
+describe('incomeRowHasOverride — revert button visibility', () => {
+  it('hidden when only system (calculator) grossRent overrides exist', () => {
+    expect(incomeRowHasOverride('grossRent', {
+      1: { grossRent: 475_200, grossRentSystem: true },
+      2: { grossRent: 504_000, grossRentSystem: true },
+    }, 5)).toBe(false);
+  });
+
+  it('shown when manual grossRent override exists', () => {
+    expect(incomeRowHasOverride('grossRent', {
+      1: { grossRent: 475_200, grossRentSystem: true },
+      3: { grossRent: 530_000 }, // manual — no grossRentSystem
+    }, 5)).toBe(true);
+  });
+
+  it('shown when grossRentSystem is false (explicitly manual)', () => {
+    expect(incomeRowHasOverride('grossRent', {
+      2: { grossRent: 510_000, grossRentSystem: false },
+    }, 5)).toBe(true);
+  });
+
+  it('hidden when no overrides at all', () => {
+    expect(incomeRowHasOverride('grossRent', {}, 5)).toBe(false);
+  });
+
+  it('hidden when overrides exist but not for grossRent', () => {
+    expect(incomeRowHasOverride('grossRent', {
+      1: { vacancyPct: 10 },
+      2: { grossRentGrowthPct: 3 },
+    }, 5)).toBe(false);
+  });
+
+  it('shown for vacancyPct regardless of grossRentSystem', () => {
+    // grossRentSystem flag only affects grossRent, not other fields
+    expect(incomeRowHasOverride('vacancyPct', {
+      1: { vacancyPct: 10, grossRentSystem: true },
+    }, 5)).toBe(true);
+  });
+
+  it('shown for otherIncome with any override', () => {
+    expect(incomeRowHasOverride('otherIncome', {
+      2: { otherIncome: 1200 },
+    }, 5)).toBe(true);
   });
 });
