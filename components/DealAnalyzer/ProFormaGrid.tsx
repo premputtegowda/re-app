@@ -370,7 +370,11 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
 
   function incomeRowHasOverride(field: 'grossRent' | 'otherIncome' | 'vacancyPct' | 'creditLossPct'): boolean {
     for (let y = 1; y <= projectionYears; y++) {
-      if (data.yearOverrides?.[y]?.[field] !== undefined) return true;
+      const ov = data.yearOverrides?.[y];
+      if (ov?.[field] === undefined) continue;
+      // For grossRent, skip system (calculator) overrides — they're not user edits
+      if (field === 'grossRent' && ov.grossRentSystem === true) continue;
+      return true;
     }
     return false;
   }
