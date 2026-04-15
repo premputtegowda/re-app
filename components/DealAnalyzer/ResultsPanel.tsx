@@ -321,6 +321,7 @@ interface ResultsPanelProps {
   /** Ref filled with the MC simulation run function — caller can trigger a run externally */
   mcSimRunRef?: React.MutableRefObject<(() => void) | null>;
   calcPhase?: CalcPhase;
+  onSimulationDone?: () => void;
 }
 
 function computeAvgRents(acquisition: CoCAcquisition): { units: number; avgTargetRent: number; avgPreStabRent: number } {
@@ -339,7 +340,7 @@ function computeAvgRents(acquisition: CoCAcquisition): { units: number; avgTarge
   return { units: acquisition.units || 1, avgTargetRent: 0, avgPreStabRent: 0 };
 }
 
-export function ResultsPanel({ result, acquisition, operations, proForma, refinance, mcRanges, onMcRangesChange, mcResults, onMcResultsChange, mcSimRunRef, calcPhase = 'idle' }: ResultsPanelProps) {
+export function ResultsPanel({ result, acquisition, operations, proForma, refinance, mcRanges, onMcRangesChange, mcResults, onMcResultsChange, mcSimRunRef, calcPhase = 'idle', onSimulationDone }: ResultsPanelProps) {
   const [activeTab, setActiveTab] = useState<ResultTab>('summary');
   const { units, avgTargetRent, avgPreStabRent } = computeAvgRents(acquisition);
   const { totalInvested, avgCoCReturn, irr, equityMultiple, peakCoCReturn, totalCashFlow } = result;
@@ -356,7 +357,8 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
   const handleRunningChange = useCallback((running: boolean, progress: number) => {
     setStressRunning(running);
     setStressProgress(progress);
-  }, []);
+    if (!running && onSimulationDone) onSimulationDone();
+  }, [onSimulationDone]);
 
   return (
     <div className="space-y-4">
