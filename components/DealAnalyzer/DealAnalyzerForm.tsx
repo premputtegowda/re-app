@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Pencil, Calculator, AlertTriangle, MapPin, CreditCard, Hammer, BarChart2, TrendingUp, ChevronRight, ChevronUp, ChevronDown, Check, Zap, X, FileText } from 'lucide-react';
+import { Pencil, Calculator, AlertTriangle, MapPin, CreditCard, Hammer, BarChart2, TrendingUp, ChevronRight, ChevronUp, ChevronDown, Check, Zap, X, FileText, RotateCcw } from 'lucide-react';
 import { ShareButton } from './ShareButton';
 import { Card } from '@/components/UI/Card';
 import { Button } from '@/components/UI/Button';
@@ -742,17 +742,16 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
   // ── Calculate ──
 
-  // Debounced recalculate — resets timer if user hits Done on another section quickly
+  const [resultsStale, setResultsStale] = useState(false);
+
+  // Mark results as stale when inputs change — user must click "Refresh" to recalculate
   const scheduleCalculate = () => {
     if (Object.keys(scenarioResults).length === 0) return;
-    if (calcDebounceRef.current) clearTimeout(calcDebounceRef.current);
-    calcDebounceRef.current = setTimeout(() => {
-      calcDebounceRef.current = null;
-      handleCalculate();
-    }, 2000);
+    setResultsStale(true);
   };
 
   const handleCalculate = () => {
+    setResultsStale(false);
     setCalcPhase('returns');
     // Smooth scroll to results area
     resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -2067,7 +2066,19 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
               )
             )}
 
-            {hasAnyResult && (
+            {hasAnyResult && resultsStale && calcPhase === 'idle' && (
+              <div className="text-center space-y-3 py-6">
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Your inputs have changed since the last calculation
+                </p>
+                <Button variant="primary" onClick={handleCalculate}>
+                  <RotateCcw size={15} className="mr-2" />
+                  Refresh your returns
+                </Button>
+              </div>
+            )}
+
+            {hasAnyResult && !resultsStale && (
               <>
                 {hasAnyWarning && calcPhase === 'idle' && (
                   <p className="text-center text-sm text-amber-600 dark:text-amber-400" data-testid="calc-incomplete-warning">
@@ -2136,7 +2147,15 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         return (
           <div className="fixed bottom-[60px] lg:bottom-0 left-0 right-0 z-50 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 shadow-[0_-4px_16px_rgba(0,0,0,0.06)]">
             <div className="max-w-4xl mx-auto px-3 pt-2.5" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
-              {calcPhase !== 'idle' && calcPhase !== 'done' ? (
+              {resultsStale && calcPhase === 'idle' ? (
+                <div className="flex items-center justify-between py-1">
+                  <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">Inputs changed — results may be outdated</p>
+                  <button type="button" onClick={handleCalculate}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 text-white text-xs font-semibold hover:bg-primary-700 transition-colors shrink-0">
+                    <RotateCcw size={12} /> Refresh
+                  </button>
+                </div>
+              ) : calcPhase !== 'idle' && calcPhase !== 'done' ? (
                 <div className="flex items-center gap-2 py-1">
                   <svg className="w-4 h-4 text-primary-500 shrink-0 animate-spin" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
