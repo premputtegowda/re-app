@@ -345,18 +345,9 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
   const { totalInvested, avgCoCReturn, irr, equityMultiple, peakCoCReturn, totalCashFlow } = result;
   const v = verdict(irr, avgCoCReturn);
 
-  // Stress test state lifted from MonteCarloPanel
-  const [stressRunning, setStressRunning]   = useState(false);
-  const [stressProgress, setStressProgress] = useState(0);
   const internalRunRef = useRef<(() => void) | null>(null);
-  // Use external ref if provided so callers (e.g. handleCalculate) can trigger simulation
   const stressRunRef = mcSimRunRef ?? internalRunRef;
   const openEditorRef = useRef<(() => void) | null>(null);
-
-  const handleRunningChange = useCallback((running: boolean, progress: number) => {
-    setStressRunning(running);
-    setStressProgress(progress);
-  }, []);
 
   return (
     <div className="space-y-4">
@@ -408,7 +399,7 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
                 value={irr !== null ? formatPct(irr) : '—'}
                 sub="Internal rate of return"
                 mostLikely={mcResults?.p50?.irr != null && mcResults.p50.irr > -900 ? formatPct(mcResults.p50.irr) : null}
-                loading={stressRunning}
+                loading={false}
                 color={irr !== null && irr >= 8 ? 'text-secondary-600 dark:text-secondary-400' : irr !== null && irr < 0 ? 'text-red-500' : 'text-slate-800 dark:text-slate-200'}
                 large
               />
@@ -417,7 +408,7 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
                 value={formatPct(avgCoCReturn)}
                 sub={`Peak ${formatPct(peakCoCReturn)}`}
                 mostLikely={mcResults?.p50?.avgCoCReturn != null ? formatPct(mcResults.p50.avgCoCReturn) : null}
-                loading={stressRunning}
+                loading={false}
                 color={avgCoCReturn >= 6 ? 'text-secondary-600 dark:text-secondary-400' : avgCoCReturn < 0 ? 'text-red-500' : 'text-slate-800 dark:text-slate-200'}
                 large
               />
@@ -426,7 +417,7 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
                 value={formatMultiple(equityMultiple)}
                 sub={`${formatCurrency(totalCashFlow)} cash`}
                 mostLikely={mcResults?.p50?.equityMultiple != null ? formatMultiple(mcResults.p50.equityMultiple) : null}
-                loading={stressRunning}
+                loading={false}
                 color={equityMultiple >= 1.5 ? 'text-primary-600 dark:text-primary-400' : equityMultiple < 1 ? 'text-red-500' : 'text-slate-800 dark:text-slate-200'}
                 large
               />
@@ -451,32 +442,6 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
         )}
 
         {/* Stress test progress — shown below metrics while simulation runs */}
-        {stressRunning && (
-          <div className="mt-4 px-4 py-3 rounded-xl bg-primary-50 dark:bg-primary-900/20 border border-primary-100 dark:border-primary-800 space-y-2.5 animate-fade-in">
-            <div className="flex items-center gap-2.5">
-              <svg className="w-4 h-4 text-primary-500 shrink-0 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-              </svg>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold text-primary-700 dark:text-primary-300">
-                  {stressProgress < 40 ? 'Sampling market conditions…'
-                    : stressProgress < 80 ? 'Running scenarios…'
-                    : 'Wrapping up…'}
-                </p>
-                <p className="text-[10px] text-primary-500 dark:text-primary-400 mt-0.5">
-                  {stressProgress < 40 ? 'Rent, vacancy, rates & exit across thousands of paths'
-                    : stressProgress < 80 ? 'Projecting cash flows and returns'
-                    : 'Computing price guidance and risk drivers'}
-                </p>
-              </div>
-              <span className="text-sm font-bold text-primary-600 dark:text-primary-400 tabular-nums shrink-0">{Math.round(stressProgress)}%</span>
-            </div>
-            <div className="h-2 w-full rounded-full bg-primary-100 dark:bg-primary-800 overflow-hidden">
-              <div className="h-full rounded-full bg-primary-500 transition-all duration-300" style={{ width: `${stressProgress}%` }} />
-            </div>
-          </div>
-        )}
       </Card>
 
       {/* ── Tab chips ── */}
@@ -541,7 +506,6 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
           onRangesChange={onMcRangesChange}
           savedResults={mcResults ?? null}
           onResultsChange={onMcResultsChange}
-          onRunningChange={handleRunningChange}
           runTriggerRef={stressRunRef}
           openEditorRef={openEditorRef}
         />
