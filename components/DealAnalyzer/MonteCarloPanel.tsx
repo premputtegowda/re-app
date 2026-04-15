@@ -536,7 +536,24 @@ export function MonteCarloPanel({
     [acquisition, proForma, avgTargetRentPerUnit, units, refinance, mcRangeDefaults],
   );
 
-  const initialRanges = savedRanges ?? defaults;
+  // On mount, re-anchor saved ranges if base values have shifted since last save
+  const initialRanges = (() => {
+    if (!savedRanges) return defaults;
+    const reanchored = { ...savedRanges };
+    let changed = false;
+    for (const key of Object.keys(defaults) as (keyof MCRanges)[]) {
+      const saved = savedRanges[key];
+      const def = defaults[key];
+      if (!saved || !def) continue;
+      if (saved.mode === def.mode) continue;
+      const minSpread = saved.min - saved.mode;
+      const maxSpread = saved.max - saved.mode;
+      reanchored[key] = { min: def.mode + minSpread, mode: def.mode, max: def.mode + maxSpread };
+      changed = true;
+    }
+    if (changed) onRangesChange?.(reanchored);
+    return changed ? reanchored : savedRanges;
+  })();
   const [ranges, setRanges] = useState<MCRanges>(initialRanges);
   const rangesRef = useRef<MCRanges>(initialRanges);
   const [draftRangesState, setDraftRangesState] = useState<MCRanges>(initialRanges);
