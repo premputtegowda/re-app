@@ -494,6 +494,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showExitWarning, setShowExitWarning] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
+  const [calcPhase, setCalcPhase] = useState<'idle' | 'returns' | 'uncertainty' | 'done'>('idle');
   const saveStatusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flashSaved = () => {
     setSaveStatus('saved');
@@ -752,6 +753,10 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   };
 
   const handleCalculate = () => {
+    setCalcPhase('returns');
+
+    // Delay to let the UI show the loading state before heavy computation
+    setTimeout(() => {
     const scenario: CoCScenario = {
       id: Date.now().toString(36),
       name: CHIP_LABELS[activeType],
@@ -790,8 +795,13 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       savedSnapshot.current = JSON.stringify({ acquisition, operations, proForma, refinance });
     }
 
-    // Re-run simulation whenever base results are refreshed
+    // Show uncertainty phase, then trigger simulation
+    setCalcPhase('uncertainty');
     mcSimRunRef.current?.();
+    // Auto-clear loading after a delay (simulation runs async in background)
+    setTimeout(() => setCalcPhase('done'), 2000);
+    setTimeout(() => setCalcPhase('idle'), 4000);
+    }, 100); // end of setTimeout from setCalcPhase('returns')
   };
 
   // ── Step continue ──
@@ -2053,6 +2063,34 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                   See Your Returns
                 </Button>
               )
+            )}
+
+            {/* Loading phases */}
+            {calcPhase !== 'idle' && calcPhase !== 'done' && (
+              <div className="rounded-xl border border-primary-200 dark:border-primary-800 bg-primary-50 dark:bg-primary-900/20 p-5 space-y-3 animate-fade-in">
+                <div className="flex items-center gap-3">
+                  <svg className="w-5 h-5 text-primary-500 shrink-0 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                  </svg>
+                  <div>
+                    <p className="text-sm font-semibold text-primary-700 dark:text-primary-300">
+                      {calcPhase === 'returns' ? 'Calculating returns…' : 'Analyzing market uncertainty…'}
+                    </p>
+                    <p className="text-xs text-primary-500 dark:text-primary-400 mt-0.5">
+                      {calcPhase === 'returns'
+                        ? 'Projecting cash flows, IRR, and equity multiple'
+                        : 'Stress testing your deal across thousands of market scenarios'}
+                    </p>
+                  </div>
+                </div>
+                {calcPhase === 'uncertainty' && (
+                  <div className="flex items-center gap-2 pt-1">
+                    <Check size={14} className="text-secondary-500 shrink-0" />
+                    <span className="text-xs text-secondary-600 dark:text-secondary-400 font-medium">Base returns calculated</span>
+                  </div>
+                )}
+              </div>
             )}
 
             {hasAnyResult && (
