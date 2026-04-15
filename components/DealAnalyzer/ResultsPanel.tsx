@@ -494,7 +494,7 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
         </Card>
       )}
 
-      {activeTab === 'montecarlo' && (
+      <div className={activeTab === 'montecarlo' ? '' : 'hidden'}>
         <MonteCarloPanel
           acquisition={acquisition}
           operations={operations}
@@ -511,7 +511,7 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
           runTriggerRef={stressRunRef}
           openEditorRef={openEditorRef}
         />
-      )}
+      </div>
     </div>
   );
 }
