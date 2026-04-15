@@ -1567,7 +1567,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                           onOpenChange={v => { if (!v) setCalcCollapsed(true); }}
                           initialState={calcState}
                           externalDistributionMethod={distributionMethod}
-                          onStateChange={s => { setCalcState(s); if (s.distributionMethod) setDistributionMethod(s.distributionMethod); }}
+                          onStateChange={s => { setCalcState(s); if (s.distributionMethod && s.distributionMethod !== distributionMethod) setDistributionMethod(s.distributionMethod); }}
                           onApplyRents={rents => {
                             if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map((u, i) => ({
                               ...u, inPlaceRent: rents[i]?.inPlace ?? u.inPlaceRent, rentMonthly: rents[i]?.target ?? u.rentMonthly,
