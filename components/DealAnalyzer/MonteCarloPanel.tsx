@@ -644,14 +644,10 @@ export function MonteCarloPanel({
   // Track fingerprint at last run — initialize from saved results
   const lastRunFingerprintRef = useRef<string | null>(savedResults?.inputFingerprint ?? null);
 
-  // Detect staleness and auto-re-run whenever inputs change (debounced so rapid edits don't thrash)
+  // Detect staleness when inputs change — simulation is triggered by handleCalculate, not here
   useEffect(() => {
     if (lastRunFingerprintRef.current === null || fingerprint === lastRunFingerprintRef.current) return;
     setIsStale(true);
-    const timer = setTimeout(() => {
-      if (!simRunningRef.current) runRef.current();
-    }, 1500);
-    return () => clearTimeout(timer);
   }, [fingerprint]);
 
   // Lift stale state to parent
