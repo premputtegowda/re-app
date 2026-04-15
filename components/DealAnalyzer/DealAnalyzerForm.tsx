@@ -543,6 +543,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       freshResults[type] = projectScenario({ ...scenario, scenarioType: type, name: CHIP_LABELS[type] });
     }
     setScenarioResults(freshResults);
+    lastCalcSnapshotRef.current = JSON.stringify({ acquisition, operations, proForma, refinance });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -743,15 +744,19 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   // ── Calculate ──
 
   const [resultsStale, setResultsStale] = useState(false);
+  const lastCalcSnapshotRef = useRef<string | null>(null);
 
-  // Mark results as stale when inputs change — user must click "Refresh" to recalculate
+  // Mark results as stale only when inputs actually changed since last calculation
   const scheduleCalculate = () => {
     if (Object.keys(scenarioResults).length === 0) return;
+    const currentSnapshot = JSON.stringify({ acquisition, operations, proForma, refinance });
+    if (lastCalcSnapshotRef.current === currentSnapshot) return; // nothing changed
     setResultsStale(true);
   };
 
   const handleCalculate = () => {
     setResultsStale(false);
+    lastCalcSnapshotRef.current = JSON.stringify({ acquisition, operations, proForma, refinance });
     setCalcPhase('returns');
     // Smooth scroll to results area
     resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
