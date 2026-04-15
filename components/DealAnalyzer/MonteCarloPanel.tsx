@@ -748,29 +748,30 @@ export function MonteCarloPanel({
         </p>
       </div>
 
-      {/* First-run: full progress bar (no previous results to show) */}
-      {running && !results && (
+      {/* Loading — full progress bar */}
+      {(running || isStale) && (
         <div className="animate-fade-in">
-          <ProgressBar pct={progress} />
+          {running ? (
+            <ProgressBar pct={progress} />
+          ) : (
+            <div className="rounded-xl border border-primary-200 dark:border-primary-800 bg-primary-50 dark:bg-primary-900/20 p-5 space-y-3">
+              <div className="flex items-center gap-3">
+                <svg className="w-5 h-5 text-primary-500 shrink-0 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                </svg>
+                <div>
+                  <p className="text-sm font-semibold text-primary-700 dark:text-primary-300">Analyzing market uncertainty…</p>
+                  <p className="text-xs text-primary-500 dark:text-primary-400 mt-0.5">Ranges updated — recalculating stress test</p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Re-run: slim progress line so results stay fully visible */}
-      {running && results && (
-        <div className="space-y-1.5 animate-fade-in">
-          <div className="h-1 w-full rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
-            <div className="h-full rounded-full bg-primary-500 transition-all duration-300" style={{ width: `${progress}%` }} />
-          </div>
-          <p className="text-[10px] text-slate-400 dark:text-slate-500 tabular-nums">
-            {progress < 40 ? 'Sampling market conditions…'
-              : progress < 80 ? 'Running scenarios…'
-              : 'Wrapping up…'} {Math.round(progress)}%
-          </p>
-        </div>
-      )}
-
-      {/* Results — stay mounted, fade in when fresh data arrives */}
-      {results && (
+      {/* Results — hidden when stale or running, fade in when fresh */}
+      {results && !isStale && !running && (
         <div className={`space-y-5 ${freshResults ? 'animate-fade-in' : ''}`}>
           <ProbabilityCard
             results={results}
