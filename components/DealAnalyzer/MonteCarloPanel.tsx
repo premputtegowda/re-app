@@ -802,9 +802,11 @@ export function MonteCarloPanel({
                 type="button"
                 onClick={() => {
                   const changed = JSON.stringify(draftRanges) !== JSON.stringify(ranges);
-                  handleRangesChange(draftRanges);
                   setShowEditor(false);
-                  if (changed) runRef.current(draftRanges);
+                  if (changed) {
+                    handleRangesChange(draftRanges);
+                    runRef.current(draftRanges);
+                  }
                 }}
                 className="px-3 py-1 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-xs font-semibold transition-colors"
               >
