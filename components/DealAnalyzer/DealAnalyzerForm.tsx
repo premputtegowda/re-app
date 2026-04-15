@@ -1788,12 +1788,25 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 type="text"
                 value={saveName}
                 onChange={e => setSaveName(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { if (!saveName.trim()) setSaveName(defaultSaveName(acquisition)); setEditingTitle(false); } if (e.key === 'Escape') { setSaveName(titleBeforeEdit.current); setEditingTitle(false); } }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    const name = saveName.trim() || defaultSaveName(acquisition);
+                    setSaveName(name);
+                    setEditingTitle(false);
+                    if (savedDealId) updateSavedDeal(savedDealId, name, scenarioResults);
+                  }
+                  if (e.key === 'Escape') { setSaveName(titleBeforeEdit.current); setEditingTitle(false); }
+                }}
                 className="flex-1 text-lg font-semibold bg-transparent border-b-2 border-primary-500 outline-none text-slate-900 dark:text-white min-w-0"
               />
               <button
                 type="button"
-                onClick={() => { if (!saveName.trim()) setSaveName(defaultSaveName(acquisition)); setEditingTitle(false); }}
+                onClick={() => {
+                  const name = saveName.trim() || defaultSaveName(acquisition);
+                  setSaveName(name);
+                  setEditingTitle(false);
+                  if (savedDealId) updateSavedDeal(savedDealId, name, scenarioResults);
+                }}
                 className="p-1 rounded-full hover:bg-emerald-100 dark:hover:bg-emerald-900/30 text-emerald-500 transition-colors shrink-0"
                 title="Confirm"
               >
