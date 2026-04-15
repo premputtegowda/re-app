@@ -120,7 +120,7 @@ describe('Revert row — vacancyPct', () => {
 });
 
 describe('Revert row — grossRent', () => {
-  it('clears ALL year overrides and promotes Yr1 value to stabilized', async () => {
+  it('clears all manual overrides, stabilized stays unchanged', async () => {
     const user = userEvent.setup();
     const data = makeDataWithGrossRentOverrides();
     const onChange = vi.fn();
@@ -137,12 +137,50 @@ describe('Revert row — grossRent', () => {
     expect(onChange).toHaveBeenCalledOnce();
     const updated: ProFormaData = onChange.mock.calls[0][0];
 
-    // All year overrides for grossRent cleared
+    // All manual year overrides for grossRent cleared
     expect(updated.yearOverrides?.[1]?.grossRent).toBeUndefined();
     expect(updated.yearOverrides?.[2]?.grossRent).toBeUndefined();
     expect(updated.yearOverrides?.[3]?.grossRent).toBeUndefined();
 
-    // Yr1 value (20_000) promoted to grossRent.stabilized
-    expect(updated.grossRent.stabilized).toBe(20_000);
+    // stabilized stays at original target (not promoted from Yr1)
+    expect(updated.grossRent.stabilized).toBe(24_000);
+  });
+
+  it('keeps Year 1 system pre-stab override on revert', async () => {
+    const user = userEvent.setup();
+    const base = defaultProForma('sfr');
+    const data: ProFormaData = {
+      ...base,
+      grossRent: { ...base.grossRent, stabilized: 24_000 },
+      yearOverrides: {
+        1: { grossRent: 20_000, grossRentSystem: true },
+        2: { grossRent: 25_000 },
+        3: { grossRent: 26_000 },
+      },
+    };
+    const onChange = vi.fn();
+
+    render(
+      <ProFormaGrid data={data} onChange={onChange} projectionYears={5} showWarnings={false} />
+    );
+
+    const grossRentRow = screen.getByText('Gross Rent').closest('tr')!;
+    await user.hover(within(grossRentRow).getByText('Gross Rent'));
+    const revertBtn = within(grossRentRow).getByTitle('Revert row to formula');
+    await user.click(revertBtn);
+
+    expect(onChange).toHaveBeenCalledOnce();
+    const updated: ProFormaData = onChange.mock.calls[0][0];
+
+    // Year 1 system override (pre-stab, below target) preserved
+    expect(updated.yearOverrides?.[1]?.grossRent).toBe(20_000);
+    expect(updated.yearOverrides?.[1]?.grossRentSystem).toBe(true);
+
+    // Year 2+ cleared
+    expect(updated.yearOverrides?.[2]?.grossRent).toBeUndefined();
+    expect(updated.yearOverrides?.[3]?.grossRent).toBeUndefined();
+
+    // stabilized unchanged
+    expect(updated.grossRent.stabilized).toBe(24_000);
   });
 });
