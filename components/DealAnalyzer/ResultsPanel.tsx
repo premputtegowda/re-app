@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Check } from 'lucide-react';
 import { Card } from '@/components/UI/Card';
 import type { CoCResult, CoCAcquisition, CoCOperations, CoCRefinance, ProFormaData } from '@/types';
 import { formatCurrency, formatPct, formatMultiple } from '@/utils/dealAnalyzerCalc';
@@ -306,6 +306,8 @@ const TAB_LABELS: Record<ResultTab, string> = {
 
 // ── Main ────────────────────────────────────────────────────────────────────────
 
+type CalcPhase = 'idle' | 'returns' | 'uncertainty' | 'done';
+
 interface ResultsPanelProps {
   result: CoCResult;
   acquisition: CoCAcquisition;
@@ -318,6 +320,7 @@ interface ResultsPanelProps {
   onMcResultsChange?: (r: SavedMCResults) => void;
   /** Ref filled with the MC simulation run function — caller can trigger a run externally */
   mcSimRunRef?: React.MutableRefObject<(() => void) | null>;
+  calcPhase?: CalcPhase;
 }
 
 function computeAvgRents(acquisition: CoCAcquisition): { units: number; avgTargetRent: number; avgPreStabRent: number } {
@@ -336,7 +339,7 @@ function computeAvgRents(acquisition: CoCAcquisition): { units: number; avgTarge
   return { units: acquisition.units || 1, avgTargetRent: 0, avgPreStabRent: 0 };
 }
 
-export function ResultsPanel({ result, acquisition, operations, proForma, refinance, mcRanges, onMcRangesChange, mcResults, onMcResultsChange, mcSimRunRef }: ResultsPanelProps) {
+export function ResultsPanel({ result, acquisition, operations, proForma, refinance, mcRanges, onMcRangesChange, mcResults, onMcResultsChange, mcSimRunRef, calcPhase = 'idle' }: ResultsPanelProps) {
   const [activeTab, setActiveTab] = useState<ResultTab>('summary');
   const { units, avgTargetRent, avgPreStabRent } = computeAvgRents(acquisition);
   const { totalInvested, avgCoCReturn, irr, equityMultiple, peakCoCReturn, totalCashFlow } = result;
@@ -360,46 +363,76 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
 
       {/* ── Hero scoreboard ── */}
       <Card>
-        {/* Verdict + invested */}
-        <div className="flex items-center justify-between mb-4">
-          <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${v.color}`}>{v.label}</span>
-          <div className="text-right">
-            <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wide">Total Invested</p>
-            <p className="text-sm font-bold text-slate-700 dark:text-slate-300 tabular-nums">{formatCurrency(totalInvested)}</p>
+        {calcPhase !== 'idle' && calcPhase !== 'done' ? (
+          /* Loading state — replaces metrics inside the hero card */
+          <div className="py-4 space-y-3" style={{ minHeight: 120 }}>
+            <div className="flex items-center gap-3">
+              <svg className="w-5 h-5 text-primary-500 shrink-0 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+              </svg>
+              <div>
+                <p className="text-sm font-semibold text-primary-700 dark:text-primary-300">
+                  {calcPhase === 'returns' ? 'Calculating returns…' : 'Analyzing market uncertainty…'}
+                </p>
+                <p className="text-xs text-primary-500 dark:text-primary-400 mt-0.5">
+                  {calcPhase === 'returns'
+                    ? 'Projecting cash flows, IRR, and equity multiple'
+                    : 'Stress testing your deal across thousands of market scenarios'}
+                </p>
+              </div>
+            </div>
+            {calcPhase === 'uncertainty' && (
+              <div className="flex items-center gap-2 pt-1" style={{ animation: 'fade-in 0.4s ease-out' }}>
+                <Check size={14} className="text-secondary-500 shrink-0" />
+                <span className="text-xs text-secondary-600 dark:text-secondary-400 font-medium">Base returns calculated</span>
+              </div>
+            )}
           </div>
-        </div>
+        ) : (
+          /* Normal metrics display */
+          <>
+            {/* Verdict + invested */}
+            <div className="flex items-center justify-between mb-4">
+              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${v.color}`}>{v.label}</span>
+              <div className="text-right">
+                <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wide">Total Invested</p>
+                <p className="text-sm font-bold text-slate-700 dark:text-slate-300 tabular-nums">{formatCurrency(totalInvested)}</p>
+              </div>
+            </div>
 
-
-        {/* Primary metrics — IRR takes prominence */}
-        <div className="grid grid-cols-3 gap-px bg-slate-100 dark:bg-slate-700 rounded-xl overflow-hidden w-full">
-          <MetricCell
-            label="IRR"
-            value={irr !== null ? formatPct(irr) : '—'}
-            sub="Internal rate of return"
-            mostLikely={mcResults?.p50?.irr != null && mcResults.p50.irr > -900 ? formatPct(mcResults.p50.irr) : null}
-            loading={stressRunning}
-            color={irr !== null && irr >= 8 ? 'text-secondary-600 dark:text-secondary-400' : irr !== null && irr < 0 ? 'text-red-500' : 'text-slate-800 dark:text-slate-200'}
-            large
-          />
-          <MetricCell
-            label="Avg CoC"
-            value={formatPct(avgCoCReturn)}
-            sub={`Peak ${formatPct(peakCoCReturn)}`}
-            mostLikely={mcResults?.p50?.avgCoCReturn != null ? formatPct(mcResults.p50.avgCoCReturn) : null}
-            loading={stressRunning}
-            color={avgCoCReturn >= 6 ? 'text-secondary-600 dark:text-secondary-400' : avgCoCReturn < 0 ? 'text-red-500' : 'text-slate-800 dark:text-slate-200'}
-            large
-          />
-          <MetricCell
-            label="Equity ×"
-            value={formatMultiple(equityMultiple)}
-            sub={`${formatCurrency(totalCashFlow)} cash`}
-            mostLikely={mcResults?.p50?.equityMultiple != null ? formatMultiple(mcResults.p50.equityMultiple) : null}
-            loading={stressRunning}
-            color={equityMultiple >= 1.5 ? 'text-primary-600 dark:text-primary-400' : equityMultiple < 1 ? 'text-red-500' : 'text-slate-800 dark:text-slate-200'}
-            large
-          />
-        </div>
+            {/* Primary metrics — IRR takes prominence */}
+            <div className="grid grid-cols-3 gap-px bg-slate-100 dark:bg-slate-700 rounded-xl overflow-hidden w-full">
+              <MetricCell
+                label="IRR"
+                value={irr !== null ? formatPct(irr) : '—'}
+                sub="Internal rate of return"
+                mostLikely={mcResults?.p50?.irr != null && mcResults.p50.irr > -900 ? formatPct(mcResults.p50.irr) : null}
+                loading={stressRunning}
+                color={irr !== null && irr >= 8 ? 'text-secondary-600 dark:text-secondary-400' : irr !== null && irr < 0 ? 'text-red-500' : 'text-slate-800 dark:text-slate-200'}
+                large
+              />
+              <MetricCell
+                label="Avg CoC"
+                value={formatPct(avgCoCReturn)}
+                sub={`Peak ${formatPct(peakCoCReturn)}`}
+                mostLikely={mcResults?.p50?.avgCoCReturn != null ? formatPct(mcResults.p50.avgCoCReturn) : null}
+                loading={stressRunning}
+                color={avgCoCReturn >= 6 ? 'text-secondary-600 dark:text-secondary-400' : avgCoCReturn < 0 ? 'text-red-500' : 'text-slate-800 dark:text-slate-200'}
+                large
+              />
+              <MetricCell
+                label="Equity ×"
+                value={formatMultiple(equityMultiple)}
+                sub={`${formatCurrency(totalCashFlow)} cash`}
+                mostLikely={mcResults?.p50?.equityMultiple != null ? formatMultiple(mcResults.p50.equityMultiple) : null}
+                loading={stressRunning}
+                color={equityMultiple >= 1.5 ? 'text-primary-600 dark:text-primary-400' : equityMultiple < 1 ? 'text-red-500' : 'text-slate-800 dark:text-slate-200'}
+                large
+              />
+            </div>
+          </>
+        )}
 
         {/* Legend — only when stress test values are present */}
         {mcResults?.p50 && (
@@ -447,7 +480,7 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
       </Card>
 
       {/* ── Tab chips ── */}
-      <div className="grid grid-cols-2 sm:flex gap-2">
+      <div className={`grid grid-cols-2 sm:flex gap-2 ${calcPhase !== 'idle' && calcPhase !== 'done' ? 'hidden' : ''}`}>
         {(Object.keys(TAB_LABELS) as ResultTab[]).map((tab) => (
           <button
             key={tab}
@@ -464,7 +497,8 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
         ))}
       </div>
 
-      {/* ── Tab content ── */}
+      {/* ── Tab content — hidden during loading ── */}
+      {calcPhase !== 'idle' && calcPhase !== 'done' ? null : (<>
       {activeTab === 'summary' && (
         <div className="space-y-4">
           <ExitSummary result={result} />
@@ -512,6 +546,7 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
           openEditorRef={openEditorRef}
         />
       </div>
+      </>)}
     </div>
   );
 }

@@ -754,6 +754,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
   const handleCalculate = () => {
     setCalcPhase('returns');
+    // Smooth scroll to results area
+    resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
     // Delay to let the UI show the loading state before heavy computation
     setTimeout(() => {
@@ -2065,42 +2067,14 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
               )
             )}
 
-            {/* Loading phases */}
-            {calcPhase !== 'idle' && calcPhase !== 'done' && (
-              <div className="rounded-xl border border-primary-200 dark:border-primary-800 bg-primary-50 dark:bg-primary-900/20 p-5 space-y-3 animate-fade-in">
-                <div className="flex items-center gap-3">
-                  <svg className="w-5 h-5 text-primary-500 shrink-0 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                  </svg>
-                  <div>
-                    <p className="text-sm font-semibold text-primary-700 dark:text-primary-300">
-                      {calcPhase === 'returns' ? 'Calculating returns…' : 'Analyzing market uncertainty…'}
-                    </p>
-                    <p className="text-xs text-primary-500 dark:text-primary-400 mt-0.5">
-                      {calcPhase === 'returns'
-                        ? 'Projecting cash flows, IRR, and equity multiple'
-                        : 'Stress testing your deal across thousands of market scenarios'}
-                    </p>
-                  </div>
-                </div>
-                {calcPhase === 'uncertainty' && (
-                  <div className="flex items-center gap-2 pt-1">
-                    <Check size={14} className="text-secondary-500 shrink-0" />
-                    <span className="text-xs text-secondary-600 dark:text-secondary-400 font-medium">Base returns calculated</span>
-                  </div>
-                )}
-              </div>
-            )}
-
             {hasAnyResult && (
               <>
-                {hasAnyWarning && (
+                {hasAnyWarning && calcPhase === 'idle' && (
                   <p className="text-center text-sm text-amber-600 dark:text-amber-400" data-testid="calc-incomplete-warning">
                     Some fields are missing — results may be incomplete
                   </p>
                 )}
-                <div className="animate-fade-in">
+                <div style={calcPhase === 'idle' || calcPhase === 'done' ? { animation: 'fade-in 0.6s ease-out' } : undefined}>
                   <ResultsPanel
                     result={currentResult!}
                     acquisition={acquisition}
@@ -2112,6 +2086,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     mcResults={mcResults}
                     onMcResultsChange={setMcResults}
                     mcSimRunRef={mcSimRunRef}
+                    calcPhase={calcPhase}
                   />
                 </div>
               </>
@@ -2161,6 +2136,18 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         return (
           <div className="fixed bottom-[60px] lg:bottom-0 left-0 right-0 z-50 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 shadow-[0_-4px_16px_rgba(0,0,0,0.06)]">
             <div className="max-w-4xl mx-auto px-3 pt-2.5" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
+              {calcPhase !== 'idle' && calcPhase !== 'done' ? (
+                <div className="flex items-center gap-2 py-1">
+                  <svg className="w-4 h-4 text-primary-500 shrink-0 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                  </svg>
+                  <p className="text-xs font-medium text-primary-600 dark:text-primary-400">
+                    {calcPhase === 'returns' ? 'Calculating returns…' : 'Analyzing market uncertainty…'}
+                  </p>
+                </div>
+              ) : (
+              <>
               <div className="flex items-start justify-center lg:justify-between gap-3">
 
                 {/* Metrics */}
@@ -2226,6 +2213,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
               {hasML && (
                 <p className="text-[7px] text-slate-400 dark:text-slate-500 mt-0.5">( ) = most likely accounting for market uncertainty</p>
+              )}
+              </>
               )}
             </div>
           </div>
