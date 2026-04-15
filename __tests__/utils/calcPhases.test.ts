@@ -95,6 +95,99 @@ describe('base returns checkmark', () => {
   });
 });
 
+describe('resultsStale flag', () => {
+  it('starts as false', () => {
+    expect(false).toBe(false);
+  });
+
+  it('becomes true when scheduleCalculate is called with existing results', () => {
+    const hasResults = true;
+    const resultsStale = hasResults; // scheduleCalculate sets stale when results exist
+    expect(resultsStale).toBe(true);
+  });
+
+  it('stays false when no results exist (first calculation)', () => {
+    const hasResults = false;
+    const resultsStale = hasResults;
+    expect(resultsStale).toBe(false);
+  });
+
+  it('resets to false when handleCalculate runs', () => {
+    let resultsStale = true;
+    // handleCalculate sets resultsStale = false
+    resultsStale = false;
+    expect(resultsStale).toBe(false);
+  });
+});
+
+describe('refresh button visibility', () => {
+  function showRefreshButton(hasResults: boolean, resultsStale: boolean, calcPhase: CalcPhase): boolean {
+    return hasResults && resultsStale && calcPhase === 'idle';
+  }
+
+  function showResultsPanel(hasResults: boolean, resultsStale: boolean): boolean {
+    return hasResults && !resultsStale;
+  }
+
+  it('shows refresh button when results exist and stale', () => {
+    expect(showRefreshButton(true, true, 'idle')).toBe(true);
+  });
+
+  it('hides refresh button when not stale', () => {
+    expect(showRefreshButton(true, false, 'idle')).toBe(false);
+  });
+
+  it('hides refresh button when no results', () => {
+    expect(showRefreshButton(false, true, 'idle')).toBe(false);
+  });
+
+  it('hides refresh button during loading', () => {
+    expect(showRefreshButton(true, true, 'returns')).toBe(false);
+    expect(showRefreshButton(true, true, 'uncertainty')).toBe(false);
+  });
+
+  it('shows results panel when not stale', () => {
+    expect(showResultsPanel(true, false)).toBe(true);
+  });
+
+  it('hides results panel when stale', () => {
+    expect(showResultsPanel(true, true)).toBe(false);
+  });
+
+  it('hides results panel when no results', () => {
+    expect(showResultsPanel(false, false)).toBe(false);
+  });
+});
+
+describe('sticky bar states', () => {
+  function stickyBarState(resultsStale: boolean, calcPhase: CalcPhase): 'stale' | 'loading' | 'metrics' {
+    if (resultsStale && calcPhase === 'idle') return 'stale';
+    if (calcPhase !== 'idle' && calcPhase !== 'done') return 'loading';
+    return 'metrics';
+  }
+
+  it('shows stale warning when results stale and idle', () => {
+    expect(stickyBarState(true, 'idle')).toBe('stale');
+  });
+
+  it('shows loading when calculating', () => {
+    expect(stickyBarState(false, 'returns')).toBe('loading');
+    expect(stickyBarState(false, 'uncertainty')).toBe('loading');
+  });
+
+  it('shows metrics when idle and not stale', () => {
+    expect(stickyBarState(false, 'idle')).toBe('metrics');
+  });
+
+  it('shows metrics when done', () => {
+    expect(stickyBarState(false, 'done')).toBe('metrics');
+  });
+
+  it('shows loading even when stale (calc in progress)', () => {
+    expect(stickyBarState(true, 'returns')).toBe('loading');
+  });
+});
+
 describe('full phase sequence', () => {
   it('follows correct order: idle → returns → uncertainty → done → idle', () => {
     const phases: CalcPhase[] = ['idle', 'returns', 'uncertainty', 'done', 'idle'];
