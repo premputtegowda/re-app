@@ -2102,7 +2102,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     onMcResultsChange={setMcResults}
                     mcSimRunRef={mcSimRunRef}
                     calcPhase={calcPhase}
-                    onSimulationDone={() => { setCalcPhase('done'); setTimeout(() => setCalcPhase('idle'), 500); }}
+                    onSimulationDone={() => { if (calcPhase === 'uncertainty') { setCalcPhase('done'); setTimeout(() => setCalcPhase('idle'), 500); } }}
                   />
                 </div>
               </>

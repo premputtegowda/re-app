@@ -354,10 +354,13 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
   const stressRunRef = mcSimRunRef ?? internalRunRef;
   const openEditorRef = useRef<(() => void) | null>(null);
 
+  const wasRunningRef = useRef(false);
   const handleRunningChange = useCallback((running: boolean, progress: number) => {
     setStressRunning(running);
     setStressProgress(progress);
-    if (!running && onSimulationDone) onSimulationDone();
+    // Only fire onSimulationDone when transitioning from running→done (not on mount)
+    if (wasRunningRef.current && !running && onSimulationDone) onSimulationDone();
+    wasRunningRef.current = running;
   }, [onSimulationDone]);
 
   return (
