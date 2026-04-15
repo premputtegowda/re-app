@@ -796,16 +796,10 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       savedSnapshot.current = JSON.stringify({ acquisition, operations, proForma, refinance });
     }
 
-    // Trigger simulation — runs in parallel (MonteCarloPanel is always mounted)
+    // Show uncertainty phase briefly, then reveal results
     setCalcPhase('uncertainty');
-    if (mcSimRunRef.current) {
-      mcSimRunRef.current();
-      // onSimulationDone callback will clear the phase when sim finishes
-    } else {
-      // No simulation available — clear phase after a short delay
-      setTimeout(() => setCalcPhase('done'), 1000);
-      setTimeout(() => setCalcPhase('idle'), 1500);
-    }
+    setTimeout(() => setCalcPhase('done'), 1500);
+    setTimeout(() => setCalcPhase('idle'), 2000);
     }, 100); // end of setTimeout from setCalcPhase('returns')
   };
 
@@ -2102,7 +2096,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     onMcResultsChange={setMcResults}
                     mcSimRunRef={mcSimRunRef}
                     calcPhase={calcPhase}
-                    onSimulationDone={() => { if (calcPhase === 'uncertainty') { setCalcPhase('done'); setTimeout(() => setCalcPhase('idle'), 500); } }}
                   />
                 </div>
               </>

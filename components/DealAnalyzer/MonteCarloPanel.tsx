@@ -551,12 +551,21 @@ export function MonteCarloPanel({
       reanchored[key] = { min: def.mode + minSpread, mode: def.mode, max: def.mode + maxSpread };
       changed = true;
     }
-    if (changed) onRangesChange?.(reanchored);
     return changed ? reanchored : savedRanges;
   })();
   const [ranges, setRanges] = useState<MCRanges>(initialRanges);
   const rangesRef = useRef<MCRanges>(initialRanges);
   const [draftRangesState, setDraftRangesState] = useState<MCRanges>(initialRanges);
+
+  // Notify parent of re-anchored ranges after mount (not during render)
+  const didMountReanchor = useRef(initialRanges !== savedRanges);
+  useEffect(() => {
+    if (didMountReanchor.current) {
+      didMountReanchor.current = false;
+      onRangesChange?.(initialRanges);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Track whether the user has explicitly customized ranges in the editor.
   // Until they do, base values auto-sync when ProForma inputs change.
@@ -716,9 +725,9 @@ export function MonteCarloPanel({
   const isStaleRef = useRef(isStale);
   useEffect(() => { isStaleRef.current = isStale; }, [isStale]);
 
-  // Auto-run on first visit if no saved results, or if fingerprint was never stored
+  // Auto-run on first visit if no saved results, stale, or fingerprint was never stored
   useEffect(() => {
-    if (!savedResults || !savedResults.inputFingerprint) {
+    if (!savedResults || !savedResults.inputFingerprint || isStale) {
       runRef.current();
     }
     // Auto-run on unmount if stale (keeps dashboard card fresh)
