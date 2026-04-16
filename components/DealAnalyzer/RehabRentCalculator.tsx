@@ -314,29 +314,33 @@ export function RehabRentCalculator({
   }, [unitTypes.length]);
 
   useEffect(() => {
-    if (externalDuration === undefined) return;
+    if (externalDuration === undefined || externalDuration === totalDuration) return;
     setTotalDuration(externalDuration);
-  }, [externalDuration]);
+  }, [externalDuration]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (externalOffline === undefined) return;
+    if (perUnitMonths.every(p => p === externalOffline)) return; // no change
     setPerUnitMonths(unitTypes.map(() => externalOffline));
   }, [externalOffline, unitTypes.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!externalUnitsToStabilize) return;
-    setUnitsToStabilize(externalUnitsToStabilize.map((n, t) => Math.min(n, unitTypes[t]?.count ?? n)));
-    // autoFilledByType is not changed: auto-filled types recalculate via the selective effect;
-    // manually-edited types keep their schedule and the mismatch warning prompts the user.
+    const next = externalUnitsToStabilize.map((n, t) => Math.min(n, unitTypes[t]?.count ?? n));
+    if (JSON.stringify(next) === JSON.stringify(unitsToStabilize)) return; // no change
+    setUnitsToStabilize(next);
   }, [externalUnitsToStabilize]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!externalLeaseUpToStabilize) return;
-    setLeaseUpToStabilize(externalLeaseUpToStabilize.map((n, t) => Math.min(n, unitTypes[t]?.count ?? n)));
+    const next = externalLeaseUpToStabilize.map((n, t) => Math.min(n, unitTypes[t]?.count ?? n));
+    if (JSON.stringify(next) === JSON.stringify(leaseUpToStabilize)) return; // no change
+    setLeaseUpToStabilize(next);
   }, [externalLeaseUpToStabilize]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (externalDistributionMethod === undefined) return;
+    if (externalDistributionMethod === distributionMethod) return; // no change
     if (externalDistributionMethod === 'custom') {
       // Clear weighted auto-fill when switching to custom
       setScheduleByType(unitTypes.map(() => Array(totalDuration).fill(0)));
