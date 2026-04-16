@@ -11,7 +11,7 @@ import { useDealAnalyzerStore } from '@/lib/dealAnalyzerStore';
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { isAuthenticated, isLoading, checkAuth } = useAuthStore();
+  const { isAuthenticated, isLoading, checkAuth, user } = useAuthStore();
   const syncFromBackend = useStore((s) => s.syncFromBackend);
   const syncDealsFromBackend = useDealAnalyzerStore((s) => s.syncDealsFromBackend);
 
@@ -31,6 +31,22 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       router.replace('/');
     }
   }, [isLoading, isAuthenticated, router]);
+
+  // Feature-gate: bounce users away from sections they don't have access to.
+  // /deal-analyzer routes need 'deal_analyzer'; everything else needs 'reps'.
+  useEffect(() => {
+    if (isLoading || !isAuthenticated || !user) return;
+    const features = user.features ?? [];
+    if (features.length === 0) return; // no features yet — let them see the empty state, will be invited
+    const isDealAnalyzerRoute = pathname?.startsWith('/deal-analyzer') ?? false;
+    const isAdminRoute = pathname?.startsWith('/admin') ?? false;
+    if (isAdminRoute) return; // admin gating handled in /admin/page.tsx
+    const needs = isDealAnalyzerRoute ? 'deal_analyzer' : 'reps';
+    if (features.includes(needs)) return;
+    // Redirect to a feature they DO have
+    if (features.includes('reps')) router.replace('/dashboard');
+    else if (features.includes('deal_analyzer')) router.replace('/deal-analyzer');
+  }, [isLoading, isAuthenticated, user, pathname, router]);
 
   useEffect(() => {
     if (isAuthenticated) {

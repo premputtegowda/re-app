@@ -118,3 +118,67 @@ describe('landing-page redirect — null user (auth still resolving) treats last
     expect(computeRedirectTo(null, '/deal-analyzer', null)).toBe('/deal-analyzer');
   });
 });
+
+// ── Layout-level feature gate ─────────────────────────────────────────────────
+// Replicates app/(app)/layout.tsx's gating: if the user navigates directly to a
+// route they don't have access to (e.g., bookmarked /dashboard but only has
+// deal_analyzer), the layout bounces them to a route they DO have access to.
+
+function computeFeatureGateRedirect(
+  pathname: string,
+  user: { features: string[] } | null,
+): string | null {
+  if (!user) return null;
+  const features = user.features ?? [];
+  if (features.length === 0) return null; // no features → empty-state, no redirect
+  if (pathname.startsWith('/admin')) return null; // admin gating handled separately
+  const isDealAnalyzerRoute = pathname.startsWith('/deal-analyzer');
+  const needs = isDealAnalyzerRoute ? 'deal_analyzer' : 'reps';
+  if (features.includes(needs)) return null; // has access, stay
+  if (features.includes('reps')) return '/dashboard';
+  if (features.includes('deal_analyzer')) return '/deal-analyzer';
+  return null;
+}
+
+describe('app layout feature gate — bounce users from inaccessible routes', () => {
+  it('deal_analyzer-only user on /dashboard → bounced to /deal-analyzer', () => {
+    expect(computeFeatureGateRedirect('/dashboard', { features: ['deal_analyzer'] })).toBe('/deal-analyzer');
+  });
+
+  it('deal_analyzer-only user on /list (REPS sub-route) → bounced to /deal-analyzer', () => {
+    expect(computeFeatureGateRedirect('/list', { features: ['deal_analyzer'] })).toBe('/deal-analyzer');
+  });
+
+  it('reps-only user on /deal-analyzer → bounced to /dashboard', () => {
+    expect(computeFeatureGateRedirect('/deal-analyzer', { features: ['reps'] })).toBe('/dashboard');
+  });
+
+  it('reps-only user on /deal-analyzer/abc-123 → bounced to /dashboard', () => {
+    expect(computeFeatureGateRedirect('/deal-analyzer/abc-123', { features: ['reps'] })).toBe('/dashboard');
+  });
+
+  it('user with REPS on /dashboard → no bounce', () => {
+    expect(computeFeatureGateRedirect('/dashboard', { features: ['reps'] })).toBeNull();
+  });
+
+  it('user with both features on /dashboard → no bounce', () => {
+    expect(computeFeatureGateRedirect('/dashboard', { features: ['reps', 'deal_analyzer'] })).toBeNull();
+  });
+
+  it('user with both features on /deal-analyzer → no bounce', () => {
+    expect(computeFeatureGateRedirect('/deal-analyzer', { features: ['reps', 'deal_analyzer'] })).toBeNull();
+  });
+
+  it('null user (auth loading) → no redirect (wait for user to load)', () => {
+    expect(computeFeatureGateRedirect('/dashboard', null)).toBeNull();
+  });
+
+  it('user with no features → no redirect (empty-state will be shown)', () => {
+    expect(computeFeatureGateRedirect('/dashboard', { features: [] })).toBeNull();
+  });
+
+  it('admin route → never gated (handled in /admin/page.tsx)', () => {
+    expect(computeFeatureGateRedirect('/admin', { features: ['deal_analyzer'] })).toBeNull();
+    expect(computeFeatureGateRedirect('/admin/users', { features: [] })).toBeNull();
+  });
+});
