@@ -1562,7 +1562,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                 {visibleCols.map((col, i) => {
                   if (col.type === 't12') {
                     return (
-                      <td key={`mr-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap">
+                      <td key={`mr-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap align-top">
                         <span className="text-sm tabular-nums text-slate-700 dark:text-slate-300">{fmt$(data.grossRent.t12)}</span>
                       </td>
                     );
