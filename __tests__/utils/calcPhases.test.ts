@@ -159,6 +159,61 @@ describe('refresh button visibility', () => {
   });
 });
 
+describe('stale-with-missing-fields prompt', () => {
+  /**
+   * When results are stale AND some required fields are missing, we suppress
+   * the "Refresh your returns" button (recomputing won't fix the underlying
+   * gap) and instead show "Some fields are missing — results may be incomplete".
+   *
+   * Replicates the JSX from DealAnalyzerForm:
+   *   {hasResults && stale && idle && (
+   *     hasAnyWarning ? <missing-fields message /> : <refresh button />
+   *   )}
+   */
+  type StalePromptKind = 'refresh' | 'missing-fields' | 'none';
+
+  function stalePromptKind(
+    hasResults: boolean,
+    resultsStale: boolean,
+    calcPhase: CalcPhase,
+    hasAnyWarning: boolean,
+  ): StalePromptKind {
+    if (!hasResults || !resultsStale || calcPhase !== 'idle') return 'none';
+    return hasAnyWarning ? 'missing-fields' : 'refresh';
+  }
+
+  it('stale + missing fields → shows "missing-fields" message (NOT refresh)', () => {
+    expect(stalePromptKind(true, true, 'idle', true)).toBe('missing-fields');
+  });
+
+  it('stale + no missing fields → shows refresh button', () => {
+    expect(stalePromptKind(true, true, 'idle', false)).toBe('refresh');
+  });
+
+  it('not stale → shows neither prompt regardless of warnings', () => {
+    expect(stalePromptKind(true, false, 'idle', true)).toBe('none');
+    expect(stalePromptKind(true, false, 'idle', false)).toBe('none');
+  });
+
+  it('no results → shows neither prompt', () => {
+    expect(stalePromptKind(false, true, 'idle', true)).toBe('none');
+    expect(stalePromptKind(false, true, 'idle', false)).toBe('none');
+  });
+
+  it('during loading → shows neither prompt (loading UI takes over)', () => {
+    expect(stalePromptKind(true, true, 'returns', true)).toBe('none');
+    expect(stalePromptKind(true, true, 'returns', false)).toBe('none');
+    expect(stalePromptKind(true, true, 'uncertainty', true)).toBe('none');
+  });
+
+  it('after a successful calc (idle, not stale) the missing-fields banner is owned by the non-stale branch', () => {
+    // The non-stale branch (separate JSX block) is responsible for showing the banner
+    // when results exist and warnings remain — this assertion just documents that
+    // stalePromptKind correctly defers to that branch by returning 'none'.
+    expect(stalePromptKind(true, false, 'idle', true)).toBe('none');
+  });
+});
+
 describe('sticky bar states', () => {
   function stickyBarState(resultsStale: boolean, calcPhase: CalcPhase): 'stale' | 'loading' | 'metrics' {
     if (resultsStale && calcPhase === 'idle') return 'stale';

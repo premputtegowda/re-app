@@ -319,6 +319,13 @@ export interface ProFormaData {
   propertyTaxRatePct?: number; // derived: (stabilizedValue * 12) / purchasePrice — used in bisection, never shown to user
   /** 12-month histogram: units renewing per month (from reno/lease-up schedule). Sum = total units. */
   leaseAnniversaryDistribution?: number[];
+  /**
+   * Per-unit-type anniversary breakdown — preferred over `leaseAnniversaryDistribution`
+   * when types have different target rents. Each entry has the type's monthly target
+   * rent (per unit) and its own 12-month renewal histogram. The projector uses this
+   * to compute Year 2+ Gross Lease Rent without blending types together.
+   */
+  leaseAnniversaryByType?: { targetRent: number; distribution: number[] }[];
   yearOverrides?: Record<number, {
     grossRent?: number;
     grossRentSystem?: boolean;       // true = set by rent schedule / calculator (not manual)

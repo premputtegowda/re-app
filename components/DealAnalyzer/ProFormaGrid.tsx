@@ -7,6 +7,7 @@ import type { ProFormaData, ProFormaItem } from '@/types';
 import { computeEGI } from '@/utils/dealAnalyzerCalc';
 import { makeChainedValue, makeChainedExpenseValue } from '@/utils/proFormaChaining';
 import { makeProFormaProjector } from '@/utils/proFormaYearCalc';
+import { applyIncomeGrowthOverride } from '@/utils/incomeGrowthOverride';
 
 // ── Expenses that must keep their type (no $ ↔ % toggle allowed) ─────────────
 
@@ -199,18 +200,9 @@ function YearCell({ computed, override, format, onOverride, onClearOverride, onY
   );
 
   // ── Fixed state (manual override) ──
+  // No per-cell revert button — use the row-level revert at the label instead.
   if (isFixed) return (
-    <div className="group/fixed flex items-center justify-end gap-0.5">
-      {onClearOverride && (
-        <button
-          type="button"
-          onClick={e => { e.stopPropagation(); onClearOverride(); }}
-          title="Resume flow"
-          className="opacity-0 group-hover/fixed:opacity-100 transition-opacity shrink-0 p-0.5 rounded text-slate-400 hover:text-primary-500 dark:hover:text-primary-400"
-        >
-          <RotateCcw size={9} />
-        </button>
-      )}
+    <div className="flex items-center justify-end">
       <button
         onClick={start}
         className="text-sm tabular-nums text-right font-semibold cursor-text text-slate-900 dark:text-slate-100 ring-1 ring-slate-300 dark:ring-slate-500 rounded px-1 hover:ring-primary-400 dark:hover:ring-primary-500 transition-all"
@@ -578,21 +570,9 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
 
   // push-to-future=ON: cascade to year..N and clear toggleOff flag
   const setYearGrowthPct = useCallback((year: number, field: 'grossRentGrowthPct' | 'otherIncomeGrowthPct', value: number) => {
-    const prev = data.yearOverrides ?? {};
-    const updated = { ...prev };
-    for (let y = year; y <= projectionYears; y++) {
-      const cur = updated[y] ?? {};
-      const tgp = { ...(cur.toggleOffGrowthPcts ?? {}) };
-      delete tgp[field];
-      updated[y] = { ...cur, [field]: value, toggleOffGrowthPcts: Object.keys(tgp).length ? tgp : undefined };
-    }
-    // Also update the base growth rate so chainedValue uses it as the default
-    const baseUpdate = field === 'grossRentGrowthPct'
-      ? { grossRent: { ...data.grossRent, growthPct: value } }
-      : field === 'otherIncomeGrowthPct'
-      ? { otherIncome: { ...data.otherIncome, growthPct: value } }
-      : {};
-    onChange({ ...data, ...baseUpdate, yearOverrides: updated });
+    // push-to-future ON: cascade override from `year` → projectionYears.
+    // Does NOT touch base growth rate (that would silently change earlier years).
+    onChange(applyIncomeGrowthOverride(data, year, field, value, projectionYears));
   }, [data, onChange, projectionYears]);
 
   // push-to-future=OFF: pin just this year, mark toggleOff
@@ -749,6 +729,14 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
   const getEGIForYear              = (year: number)                                    => projector.getEGIForYear(year);
   const getOpExForYear             = (year: number, egi: number)                       => projector.getOpExForYear(year, egi);
   const getEffectivePctForYear     = (id: string, stabilizedPct: number, year: number) => projector.getEffectivePctForExpense(id, stabilizedPct, year);
+  const getMarketRentForYear       = (year: number)                                    => projector.getMarketRentForYear(year);
+  const getGrossLeaseRentForYear   = (year: number)                                    => projector.getGrossRentForYear(year);
+  const getLossToLeaseForYear      = (year: number)                                    => projector.getLossToLeaseForYear(year);
+
+  // Show LTL/Gross Lease Rent rows only when an anniversary distribution exists.
+  // Without it, market rent === gross lease rent (no LTL), so the extra rows would be noise.
+  const hasLTLDistribution = !!data.leaseAnniversaryDistribution &&
+    data.leaseAnniversaryDistribution.reduce((s, n) => s + n, 0) > 0;
 
   function getT12EGI() { return computeEGI(data.grossRent.t12, data.otherIncome.t12, data.vacancyPct.t12, cl.t12); }
   function getT12OpEx(t12egi: number) { return data.expenses.reduce((s, e) => s + (e.isPercentOfEGI ? t12egi * (e.t12Value / 100) : e.t12Value), 0); }
@@ -1355,7 +1343,53 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
           <div className="px-3 pt-3 pb-1 bg-white dark:bg-slate-800">
             <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">Income</p>
           </div>
-          <MobileIncomeRow label="Gross Rent" overrideKey="grossRent" stabilized={data.grossRent.stabilized} growthPct={data.grossRent.growthPct} isPercent={false} onT12={v => setGrossRent('t12', v)} onStabilized={v => setGrossRent('stabilized', v)} onGrowthPct={v => setGrossRent('growthPct', v)} t12Val={data.grossRent.t12} />
+          {/* Market Rent — dollar values read-only; growth rate per year editable */}
+          <div className="px-3 py-3 border-b border-slate-100 dark:border-slate-700">
+            <div className="mb-2">
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Market Rent</p>
+              <p className="text-[10px] text-slate-400">Units × target × 12</p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="text-right">
+                <p className="text-[10px] font-semibold uppercase text-slate-400 mb-1">T12</p>
+                <span className="text-sm font-medium tabular-nums text-slate-700 dark:text-slate-300">{fmt$(data.grossRent.t12)}</span>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] font-semibold uppercase text-slate-400 mb-1">Yr {mobileYear}{mobileYear === projectionYears ? ' ★' : ''}</p>
+                <span className="text-sm font-medium tabular-nums text-slate-700 dark:text-slate-300">{fmt$(getMarketRentForYear(mobileYear))}</span>
+                {mobileYear > 1 && (() => {
+                  const yrOv = data.yearOverrides?.[mobileYear];
+                  const yrGrowthPct = yrOv?.grossRentGrowthPct ?? data.grossRent.growthPct;
+                  return (
+                    <div className="flex items-center justify-end gap-0.5 mt-1">
+                      <Cell value={yrGrowthPct} onChange={() => {}} onCommit={(v) => setYearGrowthPct(mobileYear, 'grossRentGrowthPct', v)} format="growthPct" isOverridden={yrOv?.grossRentGrowthPct !== undefined} />
+                      <span className="text-[10px] text-slate-400">/yr</span>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
+          {hasLTLDistribution && (
+            <>
+              <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-700/50 flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">Loss to Lease</p>
+                  <p className="text-[10px] text-slate-400">Anniversary lag · Yr {mobileYear}</p>
+                </div>
+                <span className="text-sm tabular-nums text-slate-500 dark:text-slate-400">
+                  {getLossToLeaseForYear(mobileYear) > 0 ? `(${fmt$(getLossToLeaseForYear(mobileYear))})` : '—'}
+                </span>
+              </div>
+              <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-700/50 flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-slate-700 dark:text-slate-300">Gross Lease Rent</p>
+                  <p className="text-[10px] text-slate-400">Market − LTL · Yr {mobileYear}</p>
+                </div>
+                <span className="text-sm font-medium tabular-nums text-slate-700 dark:text-slate-300">{fmt$(getGrossLeaseRentForYear(mobileYear))}</span>
+              </div>
+            </>
+          )}
           <MobileIncomeRow label="Other Income" overrideKey="otherIncome" stabilized={data.otherIncome.stabilized} growthPct={data.otherIncome.growthPct} isPercent={false} onT12={v => setOtherIncome('t12', v)} onStabilized={v => setOtherIncome('stabilized', v)} onGrowthPct={v => setOtherIncome('growthPct', v)} t12Val={data.otherIncome.t12} />
           <MobileIncomeRow label="Vacancy" overrideKey="vacancyPct" stabilized={data.vacancyPct.stabilized} growthPct={0} isPercent={true} onT12={v => setVacancy('t12', v)} onStabilized={v => setVacancy('stabilized', v)} onGrowthPct={() => {}} t12Val={data.vacancyPct.t12} />
           <MobileIncomeRow label="Credit Loss" overrideKey="creditLossPct" stabilized={cl.stabilized} growthPct={0} isPercent={true} onT12={v => setCreditLoss('t12', v)} onStabilized={v => setCreditLoss('stabilized', v)} onGrowthPct={() => {}} t12Val={cl.t12} />
@@ -1511,24 +1545,84 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
             <tbody>
               <SectionRow label="Income" span={totalCols} />
 
-              {/* Gross Rent */}
+              {/* Market Rent (GPR) — dollar values are read-only (canonical GPR).
+                  Per-year growth rate IS editable so users can model varying growth.
+                  Edits cascade forward via setYearGrowthPct (push-to-future). */}
               <tr className="group hover:bg-slate-50/60 dark:hover:bg-slate-700/20 transition-colors">
                 <td className={`${STICKY} ${STICKY_HOVER} px-3 py-2.5 align-top`}>
-                  <div className="flex items-center gap-1">
-                    <span className="text-sm text-slate-700 dark:text-slate-300 flex-1">Gross Rent</span>
-                    {incomeRowHasOverride('grossRent') && (
-                      <button type="button" title="Revert row to formula"
-                        onClick={() => revertIncomeRow('grossRent')}
-                        className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-primary-500 hover:text-primary-700 dark:hover:text-primary-300 transition-all shrink-0">
-                        <RotateCcw size={10} />
-                      </button>
-                    )}
-                  </div>
-                  {renderChainMap(y => isIncomeChainBroken('grossRent', y), y => isIncomeToggleOff('grossRent', y))}
+                  <span className="text-sm text-slate-700 dark:text-slate-300">Market Rent</span>
+                  <p className="text-[10px] text-slate-400 leading-tight">Units × target × 12</p>
                   {renderGrowthChainMap(y => data.yearOverrides?.[y]?.grossRentGrowthPct ?? data.grossRent.growthPct, y => data.yearOverrides?.[y]?.grossRentGrowthPct !== undefined, () => revertIncomeGrowthRow('grossRentGrowthPct', data.grossRent.growthPct))}
                 </td>
-                {visibleCols.map((col, i) => cloneElement(renderIncomeCell(col, 'grossRent', data.grossRent.stabilized, data.grossRent.growthPct, false, v => setGrossRent('t12', v), v => setGrossRent('stabilized', v), v => setGrossRent('growthPct', v), data.grossRent.t12), { key: `gr-${i}` }))}
+                {visibleCols.map((col, i) => {
+                  if (col.type === 't12') {
+                    return (
+                      <td key={`mr-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap">
+                        <span className="text-sm tabular-nums text-slate-700 dark:text-slate-300">{fmt$(data.grossRent.t12)}</span>
+                      </td>
+                    );
+                  }
+                  const yrOv = data.yearOverrides?.[col.year];
+                  const yrGrowthPct = yrOv?.grossRentGrowthPct ?? data.grossRent.growthPct;
+                  return (
+                    <td key={`mr-${i}`} className="px-2 py-2.5 align-top">
+                      <div className="flex flex-col items-end gap-0.5">
+                        <span className="text-sm tabular-nums text-slate-700 dark:text-slate-300">{fmt$(getMarketRentForYear(col.year))}</span>
+                        {col.year > 1 && (
+                          <div className="flex items-center gap-0.5">
+                            <YearCell
+                              computed={data.grossRent.growthPct}
+                              override={yrOv?.grossRentGrowthPct !== undefined ? yrGrowthPct : undefined}
+                              format="growthPct"
+                              onOverride={v => setYearGrowthPct(col.year, 'grossRentGrowthPct', v)}
+                              onClearOverride={() => clearYearGrowthPct(col.year, 'grossRentGrowthPct')}
+                              onYearOnly={v => applyIncomeGrowthYearOnly(col.year, 'grossRentGrowthPct', v)}
+                              pushToFutureOff={yrOv?.toggleOffGrowthPcts?.grossRentGrowthPct === true}
+                            />
+                            <span className="text-[10px] text-slate-400">/yr</span>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                  );
+                })}
               </tr>
+
+              {/* Loss to Lease + Gross Lease Rent — only when anniversary distribution exists */}
+              {hasLTLDistribution && (
+                <>
+                  <tr className="hover:bg-slate-50/60 dark:hover:bg-slate-700/20 transition-colors">
+                    <td className={`${STICKY} ${STICKY_HOVER} px-3 py-2.5 align-top`}>
+                      <span className="text-sm text-slate-500 dark:text-slate-400">Loss to Lease</span>
+                      <p className="text-[10px] text-slate-400 leading-tight">Anniversary lag</p>
+                    </td>
+                    {visibleCols.map((col, i) => {
+                      const ltl = col.type === 't12' ? 0 : getLossToLeaseForYear(col.year);
+                      return (
+                        <td key={`ltl-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap">
+                          <span className="text-sm tabular-nums text-slate-500 dark:text-slate-400">
+                            {ltl > 0 ? `(${fmt$(ltl).replace('$', '$')})` : '—'}
+                          </span>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                  <tr className="hover:bg-slate-50/60 dark:hover:bg-slate-700/20 transition-colors border-b border-slate-100 dark:border-slate-700/50">
+                    <td className={`${STICKY} ${STICKY_HOVER} px-3 py-2.5 align-top`}>
+                      <span className="text-sm text-slate-700 dark:text-slate-300">Gross Lease Rent</span>
+                      <p className="text-[10px] text-slate-400 leading-tight">Market − LTL</p>
+                    </td>
+                    {visibleCols.map((col, i) => {
+                      const v = col.type === 't12' ? data.grossRent.t12 : getGrossLeaseRentForYear(col.year);
+                      return (
+                        <td key={`glr-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap">
+                          <span className="text-sm font-medium tabular-nums text-slate-700 dark:text-slate-300">{fmt$(v)}</span>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                </>
+              )}
 
               {/* Other Income */}
               <tr className="group hover:bg-slate-50/60 dark:hover:bg-slate-700/20 transition-colors">

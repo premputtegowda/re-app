@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useMemo, useEffect, useRef } from 'react';
-import { Zap, X, ChevronDown, ChevronUp, Check } from 'lucide-react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { Zap, X, Check } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -23,6 +23,12 @@ export interface SimulationResult {
   monthlyByType: number[][];
   /** 12-month histogram: units reaching target rent per month (for loss-to-lease model) */
   anniversaryDistribution: number[];
+  /**
+   * Per-unit-type anniversary distribution. Each entry pairs the type's target
+   * rent with its own 12-month renewal histogram. Enables accurate per-type
+   * Year 2+ LTL when unit types have different rents.
+   */
+  anniversaryByType: { targetRent: number; distribution: number[] }[];
 }
 
 // ── Simulation ─────────────────────────────────────────────────────────────────
@@ -125,33 +131,42 @@ export function simulateFromSchedule(
     }
   }
 
-  // Build anniversary distribution: 12-month histogram of when units first reach target rent.
-  // Stable units (already at target) go in month 1. Reno units go in their completion month.
-  // Lease-up units go in their flip month. Units completing after month 12 go in month 12.
+  // Build anniversary distributions: 12-month histograms of when units first reach target rent.
+  // - Combined histogram (anniversaryDist) for backward compatibility / blended views.
+  // - Per-type histograms (anniversaryByType) so the projector can compute Year 2+ LTL
+  //   without blending different unit types' rents.
   const anniversaryDist = new Array(12).fill(0);
-  // Stable units → month 1
-  const initialStable = unitTypes.map((ut, t) => {
+  const anniversaryByType: { targetRent: number; distribution: number[] }[] = unitTypes.map(ut => ({
+    targetRent: ut.targetRent,
+    distribution: new Array(12).fill(0),
+  }));
+
+  for (let t = 0; t < unitTypes.length; t++) {
+    const ut = unitTypes[t];
     const scheduledReno = (scheduleByType[t] ?? []).reduce((s, n) => s + n, 0);
     const scheduledLeaseUp = (leaseUpScheduleByType[t] ?? []).reduce((s, n) => s + n, 0);
-    return Math.max(0, ut.count - scheduledReno - scheduledLeaseUp);
-  });
-  anniversaryDist[0] = initialStable.reduce((s, n) => s + n, 0);
-  // Reno completions
-  for (let t = 0; t < unitTypes.length; t++) {
+    const initialStable = Math.max(0, ut.count - scheduledReno - scheduledLeaseUp);
+
+    // Stable units (already at target) → month 1
+    anniversaryDist[0] += initialStable;
+    anniversaryByType[t].distribution[0] += initialStable;
+
+    // Reno completions → completion month
     completionsByType[t].forEach((count, month) => {
-      const idx = Math.min(11, Math.max(0, month - 1)); // clamp to 0-11
+      const idx = Math.min(11, Math.max(0, month - 1));
       anniversaryDist[idx] += count;
+      anniversaryByType[t].distribution[idx] += count;
     });
-  }
-  // Lease-up flips
-  for (let t = 0; t < unitTypes.length; t++) {
+
+    // Lease-up flips → flip month
     leaseUpFlipsByType[t].forEach((count, month) => {
       const idx = Math.min(11, Math.max(0, month - 1));
       anniversaryDist[idx] += count;
+      anniversaryByType[t].distribution[idx] += count;
     });
   }
 
-  return { yearlyRents, stabilizationMonth: maxStabMonth, monthlyByType, anniversaryDistribution: anniversaryDist };
+  return { yearlyRents, stabilizationMonth: maxStabMonth, monthlyByType, anniversaryDistribution: anniversaryDist, anniversaryByType };
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -232,7 +247,11 @@ interface RehabRentCalculatorProps {
   unitTypes: UnitTypeInput[];
   projectionYears: number;
   appliedYears: Record<number, number>;
-  onApply: (overrides: Record<number, number>, anniversaryDistribution?: number[]) => void;
+  onApply: (
+    overrides: Record<number, number>,
+    anniversaryDistribution?: number[],
+    anniversaryByType?: { targetRent: number; distribution: number[] }[],
+  ) => void;
   onClear: () => void;
   onApplyPreStab?: (values: number[]) => void;
   onApplyRents?: (rents: LocalRent[]) => void;
@@ -302,7 +321,6 @@ export function RehabRentCalculator({
   const [scheduleByType, setScheduleByType]     = useState<number[][]>(() => initialState?.scheduleByType ?? unitTypes.map(() => []));
   const [leaseUpToStabilize, setLeaseUpToStabilize] = useState<number[]>(() => initialState?.leaseUpToStabilize ?? unitTypes.map(() => 0));
   const [leaseUpScheduleByType, setLeaseUpScheduleByType] = useState<number[][]>(() => initialState?.leaseUpScheduleByType ?? unitTypes.map(() => []));
-  const [openYear, setOpenYear]                 = useState<number | null>(null);
   type DistributionMethod = 'weighted' | 'custom';
   const [distributionMethod, setDistributionMethod] = useState<DistributionMethod>(() => {
     if (initialState?.distributionMethod === 'custom') return 'custom';
@@ -492,10 +510,44 @@ export function RehabRentCalculator({
     return Array.from({ length: Math.min(stabYear, projectionYears) }, (_, i) => i + 1);
   }, [result, projectionYears]);
 
+  const allYears = useMemo(
+    () => Array.from({ length: projectionYears }, (_, i) => i + 1),
+    [projectionYears]
+  );
+
   const totalTargetAnnual = useMemo(
     () => effectiveUnitTypes.reduce((s, t) => s + t.count * t.targetRent, 0) * 12,
     [effectiveUnitTypes]
   );
+
+  // Actual collected rent for any year, applying the anniversary model for Year 2+.
+  // Year 1 comes from the monthly simulation (gradual lease-up rollover).
+  // Year 2+ uses the anniversary distribution: each unit renews on its month,
+  // earning prev rate before and new market rate after.
+  const computeYearRent = useCallback((year: number): number => {
+    if (!result) return 0;
+    if (year === 1) return result.yearlyRents[0] ?? 0;
+    const dist = result.anniversaryDistribution;
+    const totalUnits = dist.reduce((s, n) => s + n, 0);
+    if (totalUnits === 0 || totalTargetAnnual === 0) return 0;
+    const perUnitTarget = totalTargetAnnual / totalUnits / 12;
+    const growthRate = grossRentGrowthPct / 100;
+    const marketRate = perUnitTarget * Math.pow(1 + growthRate, year - 1);
+    const prevRate = perUnitTarget * Math.pow(1 + growthRate, year - 2);
+    let actualRent = 0;
+    for (let m = 0; m < 12; m++) {
+      const units = dist[m] ?? 0;
+      if (units === 0) continue;
+      if (m === 0) {
+        actualRent += units * marketRate * 12;
+      } else {
+        const oldMonths = m;
+        const newMonths = 12 - m;
+        actualRent += units * (prevRate * oldMonths + marketRate * newMonths);
+      }
+    }
+    return actualRent;
+  }, [result, totalTargetAnnual, grossRentGrowthPct]);
 
   const blendedMonthlyByType = useMemo(() => {
     if (!result || transitionYears.length === 0) return unitTypes.map(() => 0);
@@ -509,38 +561,39 @@ export function RehabRentCalculator({
 
   const yearGroups = useMemo(() => groupByYear(totalDuration), [totalDuration]);
 
-  // Auto-apply: whenever the simulation result changes, push to ProForma (or clear if invalid)
+  // Auto-apply: whenever the simulation result changes, push to ProForma (or clear if invalid).
+  // Callbacks are held in a ref so inline parent arrow functions don't retrigger the effect.
+  const callbacksRef = useRef({ onApply, onClear, onApplyRents, onApplyPreStab });
+  useEffect(() => {
+    callbacksRef.current = { onApply, onClear, onApplyRents, onApplyPreStab };
+  });
   const lastAppliedKeyRef = useRef('');
   useEffect(() => {
     if (!scheduleValid || !result) {
-      // Schedule was cleared or became invalid — revert ProForma if we had previously applied
       if (lastAppliedKeyRef.current !== '') {
         lastAppliedKeyRef.current = '';
-        onClear();
+        callbacksRef.current.onClear();
       }
       return;
     }
     const overrides: Record<number, number> = {};
     transitionYears.forEach(y => { overrides[y] = result.yearlyRents[y - 1]; });
-    const stabYear = Math.ceil(result.stabilizationMonth / 12);
-    const firstFullYear = stabYear + 1;
-    if (firstFullYear <= projectionYears) {
-      overrides[firstFullYear] = totalTargetAnnual * Math.pow(1 + grossRentGrowthPct / 100, stabYear);
-    }
-    const key = JSON.stringify({ overrides, dist: result.anniversaryDistribution });
+    // Note: we do NOT pin a "firstFullYear" override anymore. Post-stabilization rent
+    // is governed by the anniversary model (LTL) via the projector — pinning it to
+    // full market rate would force LTL to 0 for that year.
+    const key = JSON.stringify({ overrides, dist: result.anniversaryDistribution, byType: result.anniversaryByType });
     if (key === lastAppliedKeyRef.current) return;
     lastAppliedKeyRef.current = key;
-    onApply(overrides, result.anniversaryDistribution);
-    onApplyRents?.(localRents);
-    if (onApplyPreStab) onApplyPreStab(blendedMonthlyByType);
-  }); // eslint-disable-line react-hooks/exhaustive-deps
+    callbacksRef.current.onApply(overrides, result.anniversaryDistribution, result.anniversaryByType);
+    callbacksRef.current.onApplyRents?.(localRents);
+    callbacksRef.current.onApplyPreStab?.(blendedMonthlyByType);
+  }, [scheduleValid, result, transitionYears, localRents, blendedMonthlyByType]);
 
   const clearCalc = () => {
     setTotalDuration(0);
     setUnitsToStabilize(unitTypes.map(() => 0));
     setPerUnitMonths(unitTypes.map(() => 0));
     setScheduleByType(unitTypes.map(() => []));
-    setOpenYear(null);
     setLeaseUpToStabilize(unitTypes.map(() => 0));
     setLeaseUpScheduleByType(unitTypes.map(() => []));
     // distributionMethod is intentionally preserved on clear
@@ -856,97 +909,68 @@ export function RehabRentCalculator({
             </div>
           )}
 
-          {/* ── Results: pre-stab rent per year ── */}
-          {result && transitionYears.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
-                Pre-stab rent / year
-              </p>
-              <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-                {transitionYears.map(y => {
-                  const yearTotal = result.yearlyRents[y - 1];
-                  const isOpen = openYear === y;
-                  const monthStart = (y - 1) * 12;
-                  const monthsInYear = Array.from({ length: 12 }, (_, i) => monthStart + i);
-                  const yearTypeAnnuals = unitTypes.map((_, t) =>
-                    monthsInYear.reduce((s, mi) => s + (result.monthlyByType[t]?.[mi] ?? 0), 0)
-                  );
-                  const typeTargetAnnuals = effectiveUnitTypes.map(ut => ut.count * ut.targetRent * 12);
-
-                  return (
-                    <div key={y} className="border-t border-slate-100 dark:border-slate-700/60 first:border-t-0">
-                      <button
-                        type="button"
-                        onClick={() => setOpenYear(isOpen ? null : y)}
-                        className="w-full px-3 py-2.5 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors"
-                      >
-                        <span className="text-sm font-semibold text-slate-600 dark:text-slate-300">Year {y}</span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-bold text-amber-600 dark:text-amber-400 tabular-nums">{fmt$(yearTotal)}/yr</span>
-                          {isOpen ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
-                        </div>
-                      </button>
-
-                      {isOpen && (
-                        <div className="overflow-x-auto border-t border-slate-100 dark:border-slate-700/60">
-                          <table className="w-full text-xs min-w-[280px]">
-                            <thead>
-                              <tr className="bg-slate-50/50 dark:bg-slate-800/20">
-                                <th className="px-3 py-1.5 text-left font-medium text-slate-400 dark:text-slate-500 w-10">Mo</th>
-                                {unitTypes.map((ut, t) => (
-                                  <th key={t} className="px-2 py-1.5 text-right font-semibold text-slate-600 dark:text-slate-300">{ut.label}</th>
-                                ))}
-                                <th className="px-3 py-1.5 text-right font-medium text-amber-600 dark:text-amber-400">Total/mo</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {monthsInYear.map((mi, i) => {
-                                const moNum = monthStart + i + 1;
-                                const typeRents = unitTypes.map((_, t) => result.monthlyByType[t]?.[mi] ?? 0);
-                                const rowTotal = typeRents.reduce((a, b) => a + b, 0);
-                                return (
-                                  <tr key={mi} className="border-t border-slate-50 dark:border-slate-700/40 hover:bg-slate-50/50 dark:hover:bg-slate-800/20">
-                                    <td className="px-3 py-1 text-slate-400 dark:text-slate-500 tabular-nums">Mo {moNum}</td>
-                                    {typeRents.map((rent, t) => (
-                                      <td key={t} className={`px-2 py-1 text-right tabular-nums ${rent === 0 ? 'text-red-400 dark:text-red-500' : 'text-slate-600 dark:text-slate-300'}`}>
-                                        {rent === 0 ? '—' : fmt$(rent)}
-                                      </td>
-                                    ))}
-                                    <td className="px-3 py-1 text-right tabular-nums font-medium text-amber-600 dark:text-amber-400">
-                                      {rowTotal === 0 ? '—' : fmt$(rowTotal)}
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                            <tfoot>
-                              <tr className="border-t-2 border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-800/40">
-                                <td className="px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400">Annual</td>
-                                {yearTypeAnnuals.map((ann, t) => (
-                                  <td key={t} className="px-2 py-2 text-right tabular-nums font-semibold text-slate-700 dark:text-slate-200">{fmt$(ann)}</td>
-                                ))}
-                                <td className="px-3 py-2 text-right tabular-nums font-bold text-amber-600 dark:text-amber-400">{fmt$(yearTotal)}</td>
-                              </tr>
-                              <tr className="border-t border-slate-100 dark:border-slate-700/60">
-                                <td className="px-3 py-1.5 text-[11px] text-slate-400 dark:text-slate-500">Target</td>
-                                {typeTargetAnnuals.map((tgt, t) => (
-                                  <td key={t} className="px-2 py-1.5 text-right tabular-nums text-emerald-600 dark:text-emerald-400">{fmt$(tgt)}</td>
-                                ))}
-                                <td className="px-3 py-1.5 text-right tabular-nums text-emerald-600 dark:text-emerald-400 font-medium">{fmt$(totalTargetAnnual)}</td>
-                              </tr>
-                            </tfoot>
-                          </table>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+          {/* ── Results: 3-step LTL walkthrough per year ── */}
+          {result && allYears.length > 0 && (
+            <div className="space-y-3">
+              {/* Step explainers */}
+              <div className="space-y-1.5">
+                <div className="flex items-start gap-2">
+                  <span className="shrink-0 mt-0.5 inline-flex items-center justify-center w-4 h-4 rounded-full bg-slate-200 dark:bg-slate-700 text-[10px] font-bold text-slate-600 dark:text-slate-300">1</span>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    <span className="font-semibold text-slate-700 dark:text-slate-200">Market Rent</span> = units × target rent × 12, grown at {grossRentGrowthPct}%/yr
+                  </p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="shrink-0 mt-0.5 inline-flex items-center justify-center w-4 h-4 rounded-full bg-slate-200 dark:bg-slate-700 text-[10px] font-bold text-slate-600 dark:text-slate-300">2</span>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    <span className="font-semibold text-slate-700 dark:text-slate-200">Gross Lease Rent</span> = actual collected from the lease-up schedule (Year 1) and anniversary lag (Year 2+)
+                  </p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="shrink-0 mt-0.5 inline-flex items-center justify-center w-4 h-4 rounded-full bg-amber-100 dark:bg-amber-900/40 text-[10px] font-bold text-amber-600 dark:text-amber-400">3</span>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    <span className="font-semibold text-amber-600 dark:text-amber-400">Loss to Lease</span> = Market − Gross Lease
+                  </p>
+                </div>
               </div>
+
+              {/* Per-year breakdown table */}
+              <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-700">
+                      <th className="px-3 py-2 text-left font-semibold text-slate-500 dark:text-slate-400">Year</th>
+                      <th className="px-3 py-2 text-right font-semibold text-slate-500 dark:text-slate-400">Market</th>
+                      <th className="px-3 py-2 text-right font-semibold text-slate-500 dark:text-slate-400">Gross Lease</th>
+                      <th className="px-3 py-2 text-right font-semibold text-amber-600 dark:text-amber-400">LTL</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allYears.map(y => {
+                      const market = totalTargetAnnual * Math.pow(1 + grossRentGrowthPct / 100, y - 1);
+                      const actual = computeYearRent(y);
+                      const ltl = market - actual; // always Market − Gross Lease, per year
+                      return (
+                        <tr key={y} className="border-t border-slate-100 dark:border-slate-700/60 first:border-t-0">
+                          <td className="px-3 py-2 font-semibold text-slate-600 dark:text-slate-300">Yr {y}</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-slate-600 dark:text-slate-300">{fmt$(market)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt$(actual)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums font-semibold text-amber-600 dark:text-amber-400">
+                            {ltl > 0.5 ? fmt$(ltl) : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
               <p className="text-[11px] text-slate-400 dark:text-slate-500">
                 Fully stabilized by month {result.stabilizationMonth}
                 {result.stabilizationMonth <= projectionYears * 12
                   ? ` (Year ${Math.ceil(result.stabilizationMonth / 12)})`
                   : ' — beyond projection window'}
+                .
               </p>
             </div>
           )}

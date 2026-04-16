@@ -332,7 +332,14 @@ interface DealAnalyzerFormProps {
 
 export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const router = useRouter();
-  const onBack = () => router.push('/deal-analyzer');
+  const navigateBack = () => router.push('/deal-analyzer');
+  // onBack: intercepted to prompt save when there are unsaved changes. Falls
+  // back to navigation if clean. Definition uses isDirty defined later via ref.
+  const onBack = () => {
+    if (isDirtyRef.current) setShowExitWarning(true);
+    else navigateBack();
+  };
+  const isDirtyRef = useRef(false);
   const { addScenario, saveDeal, updateSavedDeal, updateMCData, updateCurrentStep } = useDealAnalyzerStore();
   const { defaultPropertyMgmtPct, defaultCapExPerUnit, defaultMaintenancePct } = useDealSettingsStore();
 
@@ -348,6 +355,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const [errors, setErrors] = useState<string[]>([]);
   const [errorStep, setErrorStep] = useState<number | null>(null);
   const [calcState, setCalcState] = useState<CalcPersistedState | undefined>(initialDeal?.calcState);
+  const distributionMethod: 'weighted' | 'custom' = calcState?.distributionMethod === 'custom' ? 'custom' : 'weighted';
   const [calcKey, setCalcKey] = useState(0);
   const [isValueAdd, setIsValueAdd] = useState<boolean | null>(() => {
     // Prefer explicitly persisted value
@@ -378,9 +386,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   });
   const [stabDuration, setStabDuration] = useState(() => initialDeal?.calcState?.totalDuration ?? 12);
   const [offlinePerUnit, setOfflinePerUnit] = useState(() => initialDeal?.calcState?.perUnitMonths?.[0] || 1);
-  const [distributionMethod, setDistributionMethod] = useState<'weighted' | 'custom'>(() =>
-    initialDeal?.calcState?.distributionMethod === 'custom' ? 'custom' : 'weighted'
-  );
+  // Derived from calcState — the calculator owns this value. Avoids the bidirectional
+  // sync loop where parent.distributionMethod ↔ calculator.distributionMethod oscillated.
+  // See onStateChange handler below: setCalcState(s) updates calcState, which re-derives this.
   const [calcCollapsed, setCalcCollapsed] = useState(true);
   const [opsNotes, setOpsNotes] = useState(() => initialDeal?.stepNotes?.[3] ?? '');
   const [opsNotesOpen, setOpsNotesOpen] = useState(false);
@@ -431,9 +439,23 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   });
 
   // Form data
-  const [acquisition, setAcquisition] = useState<CoCAcquisition>(
-    initialDeal?.acquisition ?? DEFAULT_ACQUISITION
-  );
+  const [acquisition, setAcquisition] = useState<CoCAcquisition>(() => {
+    const acq = initialDeal?.acquisition ?? DEFAULT_ACQUISITION;
+    // Sanitize stale unit-mix data: clamp unitsToRenovate/leaseUpUnits to count.
+    // Older deals may have these exceeding count after a unit-count reduction (saved before clamp logic).
+    if (acq.propertyType === 'mfr' && acq.unitMix?.length) {
+      return {
+        ...acq,
+        unitMix: acq.unitMix.map(e => {
+          const reno = Math.min(e.unitsToRenovate ?? 0, e.count);
+          const leaseUp = Math.min(e.leaseUpUnits ?? 0, Math.max(0, e.count - reno));
+          if (reno === (e.unitsToRenovate ?? 0) && leaseUp === (e.leaseUpUnits ?? 0)) return e;
+          return { ...e, unitsToRenovate: reno, leaseUpUnits: leaseUp };
+        }),
+      };
+    }
+    return acq;
+  });
   const [operations, setOperations] = useState<CoCOperations>(
     initialDeal?.operations ?? DEFAULT_OPERATIONS
   );
@@ -522,6 +544,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     savedSnapshot.current !== null &&
     (savedSnapshot.current !== JSON.stringify({ acquisition, operations, proForma, refinance }) ||
       saveName !== (initialDeal?.name ?? ''));
+  // Sync isDirty into a ref so onBack (defined at the top of the component) can read the latest value
+  isDirtyRef.current = isDirty;
 
   const resultsRef = useRef<HTMLDivElement>(null);
   const mcSimRunRef = useRef<(() => void) | null>(null);
@@ -746,12 +770,37 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const [resultsStale, setResultsStale] = useState(false);
   const lastCalcSnapshotRef = useRef<string | null>(null);
 
-  // Mark results as stale only when inputs actually changed since last calculation
+  // Mark results as stale only when inputs actually changed since last calculation.
+  // ALSO auto-save current draft to backend if the deal is already saved — so any inner
+  // "Done" button (value-add, stab, rent subsections) persists changes immediately.
   const scheduleCalculate = () => {
-    if (Object.keys(scenarioResults).length === 0) return;
     const currentSnapshot = JSON.stringify({ acquisition, operations, proForma, refinance });
-    if (lastCalcSnapshotRef.current === currentSnapshot) return; // nothing changed
-    setResultsStale(true);
+    const inputsChanged = lastCalcSnapshotRef.current !== currentSnapshot;
+
+    // Mark results stale if they exist and inputs changed
+    if (inputsChanged && Object.keys(scenarioResults).length > 0) {
+      setResultsStale(true);
+    }
+
+    // Auto-save: only push to backend when the snapshot actually differs (avoids redundant writes)
+    if (savedDealId && savedSnapshot.current !== currentSnapshot) {
+      const name = saveName || defaultSaveName(acquisition);
+      const enriched = buildCalcState();
+      const stepNotesObj: Record<number, string> = {};
+      if (opsNotes.trim()) stepNotesObj[3] = opsNotes.trim();
+      const draft: DealAnalyzerDraft = {
+        acquisition, operations, proForma, refinance,
+        currentStep: activeStep,
+        visitedSteps: Array.from(completedSteps),
+        activeType,
+        ...(enriched ? { calcState: enriched } : {}),
+        ...(Object.keys(stepNotesObj).length > 0 ? { stepNotes: stepNotesObj } : {}),
+      };
+      updateSavedDeal(savedDealId, name, scenarioResults, draft, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined);
+      savedSnapshot.current = currentSnapshot;
+      isDirtyRef.current = false;
+      flashSaved();
+    }
   };
 
   const handleCalculate = () => {
@@ -848,12 +897,15 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
       if (savedDealId) {
         updateSavedDeal(savedDealId, name, scenarioResults, draft, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined);
+        savedSnapshot.current = JSON.stringify({ acquisition, operations, proForma, refinance });
+        isDirtyRef.current = false;
         flashSaved();
       } else if (acquisition.propertyAddress.trim()) {
         const newId = saveDeal(name, draft, scenarioResults, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined);
         setSavedDealId(newId);
         setSaveName(name);
         savedSnapshot.current = JSON.stringify({ acquisition, operations, proForma, refinance });
+        isDirtyRef.current = false;
         flashSaved();
       }
     }
@@ -893,13 +945,15 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
     setSaveName(name);
     savedSnapshot.current = JSON.stringify({ acquisition, operations, proForma, refinance });
-    onBack();
+    isDirtyRef.current = false; // just saved — clear the dirty flag so navigateBack doesn't re-warn
+    navigateBack();
   };
 
   const handleSaveAndExit = () => {
-    if (!acquisition.propertyAddress.trim()) { onBack(); return; }
+    if (!acquisition.propertyAddress.trim()) { navigateBack(); return; }
     handleSave();
-    onBack();
+    setShowExitWarning(false);
+    navigateBack();
   };
 
   // ── Financing missing fields (for inline warning icons) ──
@@ -1306,9 +1360,13 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                                       type="number" min={0} max={entry.count} placeholder="0"
                                       className="input text-sm text-right w-full"
                                       value={(entry.unitsToRenovate ?? 0) === 0 ? '' : entry.unitsToRenovate}
-                                      onChange={e => updateAcquisition('unitMix', acquisition.unitMix.map(u =>
-                                        u.id === entry.id ? { ...u, unitsToRenovate: Math.min(Number(e.target.value) || 0, entry.count) } : u
-                                      ))}
+                                      onChange={e => updateAcquisition('unitMix', acquisition.unitMix.map(u => {
+                                        if (u.id !== entry.id) return u;
+                                        const newReno = Math.min(Number(e.target.value) || 0, entry.count);
+                                        const remainingForLeaseUp = entry.count - newReno;
+                                        const newLeaseUp = Math.min(u.leaseUpUnits ?? 0, remainingForLeaseUp);
+                                        return { ...u, unitsToRenovate: newReno, leaseUpUnits: newLeaseUp };
+                                      }))}
                                     />
                                   </div>
                                   <div>
@@ -1544,68 +1602,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                       </div>
                     )}
 
-                    {/* Calculator — always mounted so auto-fill runs even when collapsed */}
-                    <div className={calcCollapsed ? 'hidden' : 'rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden -mx-4'}>
-                      <RehabRentCalculator
-                          key={calcKey}
-                          hideHeader={false}
-                          unitTypes={unitTypes}
-                          projectionYears={acquisition.projectionYears}
-                          appliedYears={calcAppliedYears}
-                          grossRentGrowthPct={proForma.grossRent.growthPct}
-                          externalDuration={stabDuration}
-                          externalOffline={offlinePerUnit}
-                          externalUnitsToStabilize={unitsToRenovateMemo}
-                          externalLeaseUpToStabilize={leaseUpUnitsArrMemo}
-                          onOpenChange={v => { if (!v) setCalcCollapsed(true); }}
-                          initialState={calcState}
-                          externalDistributionMethod={distributionMethod}
-                          onStateChange={s => { setCalcState(s); if (s.distributionMethod && s.distributionMethod !== distributionMethod) setDistributionMethod(s.distributionMethod); }}
-                          onApplyRents={rents => {
-                            if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map((u, i) => ({
-                              ...u, inPlaceRent: rents[i]?.inPlace ?? u.inPlaceRent, rentMonthly: rents[i]?.target ?? u.rentMonthly,
-                            })));
-                            else {
-                              updateAcquisition('sfrInPlaceRent', rents[0]?.inPlace ?? acquisition.sfrInPlaceRent);
-                              updateAcquisition('sfrTargetRent',  rents[0]?.target  ?? acquisition.sfrTargetRent);
-                            }
-                          }}
-                          onApplyPreStab={values => {
-                            if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map((u, i) => ({ ...u, preStabRent: Math.round(values[i] ?? 0) })));
-                            else updateAcquisition('sfrPreStabRent', Math.round(values[0] ?? 0));
-                          }}
-                          onApply={(overrides, anniversaryDistribution) => {
-                            setProForma(prev => {
-                              const ovs = { ...(prev.yearOverrides ?? {}) };
-                              Object.entries(overrides).forEach(([yr, rent]) => {
-                                const y = Number(yr);
-                                // Skip years the user has manually overridden (grossRentSystem===false)
-                                if (ovs[y]?.grossRentSystem === false) return;
-                                ovs[y] = { ...(ovs[y] ?? {}), grossRent: rent, grossRentSystem: true };
-                              });
-                              return {
-                                ...prev,
-                                yearOverrides: ovs,
-                                ...(anniversaryDistribution ? { leaseAnniversaryDistribution: anniversaryDistribution } : {}),
-                              };
-                            });
-                          }}
-                          onClear={() => {
-                            setProForma(prev => {
-                              const ovs = { ...(prev.yearOverrides ?? {}) };
-                              for (let y = 1; y <= acquisition.projectionYears; y++) {
-                                if (ovs[y]) {
-                                  const { grossRent: _r, grossRentSystem: _s, ...rest } = ovs[y];
-                                  if (Object.keys(rest).length > 0) ovs[y] = rest; else delete ovs[y];
-                                }
-                              }
-                              return { ...prev, yearOverrides: ovs };
-                            });
-                            if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map(u => ({ ...u, preStabRent: 0 })));
-                            else updateAcquisition('sfrPreStabRent', 0);
-                          }}
-                        />
-                    </div>
+                    {/* Calculator's interactive UI now lives in the always-mounted block below the AnimatePresence
+                        so its auto-fill effects fire on input changes even when the stab section is collapsed. */}
 
                     {/* Schedule incomplete notice */}
                     {isVisited && calcScheduleIncomplete && (
@@ -1632,6 +1630,86 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
               </motion.div>
             )}
             </AnimatePresence>
+
+            {/* Stabilization calculator — ALWAYS mounted while value-add is set, so its
+                simulation + auto-apply effects fire whenever inputs change (unit count,
+                lease-up units, target rents, growth rate), even when the stab section
+                isn't open. Visually hidden when not active or collapsed. */}
+            {completedOpsSections.has('valueAdd') && isValueAdd === true && (
+              <div className={(activeOpsSection === 'stab' && !calcCollapsed) ? 'rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden' : 'hidden'}>
+                <RehabRentCalculator
+                  key={calcKey}
+                  hideHeader={false}
+                  unitTypes={unitTypes}
+                  projectionYears={acquisition.projectionYears}
+                  appliedYears={calcAppliedYears}
+                  grossRentGrowthPct={proForma.grossRent.growthPct}
+                  externalDuration={stabDuration}
+                  externalOffline={offlinePerUnit}
+                  externalUnitsToStabilize={unitsToRenovateMemo}
+                  externalLeaseUpToStabilize={leaseUpUnitsArrMemo}
+                  onOpenChange={v => { if (!v) setCalcCollapsed(true); }}
+                  initialState={calcState}
+                  externalDistributionMethod={distributionMethod}
+                  onStateChange={s => setCalcState(s)}
+                  onApplyRents={rents => {
+                    if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map((u, i) => ({
+                      ...u, inPlaceRent: rents[i]?.inPlace ?? u.inPlaceRent, rentMonthly: rents[i]?.target ?? u.rentMonthly,
+                    })));
+                    else {
+                      updateAcquisition('sfrInPlaceRent', rents[0]?.inPlace ?? acquisition.sfrInPlaceRent);
+                      updateAcquisition('sfrTargetRent',  rents[0]?.target  ?? acquisition.sfrTargetRent);
+                    }
+                  }}
+                  onApplyPreStab={values => {
+                    if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map((u, i) => ({ ...u, preStabRent: Math.round(values[i] ?? 0) })));
+                    else updateAcquisition('sfrPreStabRent', Math.round(values[0] ?? 0));
+                  }}
+                  onApply={(overrides, anniversaryDistribution, anniversaryByType) => {
+                    setProForma(prev => {
+                      const ovs: typeof prev.yearOverrides = { ...(prev.yearOverrides ?? {}) };
+                      const newOverrideYears = new Set(Object.keys(overrides).map(Number));
+                      // Strip stale system grossRent overrides from years no longer in the set.
+                      // Manual overrides (grossRentSystem===false) are preserved.
+                      Object.entries(ovs).forEach(([yr, ye]) => {
+                        const y = Number(yr);
+                        if (newOverrideYears.has(y)) return;
+                        if (ye?.grossRentSystem !== true) return;
+                        const { grossRent: _g, grossRentSystem: _s, ...rest } = ye;
+                        if (Object.keys(rest).length === 0) delete ovs[y];
+                        else ovs[y] = rest;
+                      });
+                      // Apply the new system overrides (skip years the user has pinned manually)
+                      Object.entries(overrides).forEach(([yr, rent]) => {
+                        const y = Number(yr);
+                        if (ovs[y]?.grossRentSystem === false) return;
+                        ovs[y] = { ...(ovs[y] ?? {}), grossRent: rent, grossRentSystem: true };
+                      });
+                      return {
+                        ...prev,
+                        yearOverrides: ovs,
+                        ...(anniversaryDistribution ? { leaseAnniversaryDistribution: anniversaryDistribution } : {}),
+                        ...(anniversaryByType ? { leaseAnniversaryByType: anniversaryByType } : {}),
+                      };
+                    });
+                  }}
+                  onClear={() => {
+                    setProForma(prev => {
+                      const ovs = { ...(prev.yearOverrides ?? {}) };
+                      for (let y = 1; y <= acquisition.projectionYears; y++) {
+                        if (ovs[y]) {
+                          const { grossRent: _r, grossRentSystem: _s, ...rest } = ovs[y];
+                          if (Object.keys(rest).length > 0) ovs[y] = rest; else delete ovs[y];
+                        }
+                      }
+                      return { ...prev, yearOverrides: ovs };
+                    });
+                    if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map(u => ({ ...u, preStabRent: 0 })));
+                    else updateAcquisition('sfrPreStabRent', 0);
+                  }}
+                />
+              </div>
+            )}
 
             {/* Value-add incomplete warning */}
             {valueAddIncomplete && (
@@ -1870,7 +1948,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
               ) : hasAddress && (
                 <button type="button" onClick={handleSaveAndExit} className="text-sm px-3 py-1.5 rounded-lg bg-primary-600 text-white hover:bg-primary-700">Save as Draft</button>
               )}
-              <button type="button" onClick={onBack} className="text-sm px-3 py-1.5 rounded-lg bg-amber-600 text-white hover:bg-amber-700">Leave without saving</button>
+              <button type="button" onClick={() => { setShowExitWarning(false); navigateBack(); }} className="text-sm px-3 py-1.5 rounded-lg bg-amber-600 text-white hover:bg-amber-700">Leave without saving</button>
             </div>
           </div>
         )}
@@ -2067,15 +2145,21 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
             )}
 
             {hasAnyResult && resultsStale && calcPhase === 'idle' && (
-              <div className="text-center space-y-3 py-6">
-                <p className="text-sm text-slate-500 dark:text-slate-400">
-                  Your inputs have changed since the last calculation
+              hasAnyWarning ? (
+                <p className="text-center text-sm text-amber-600 dark:text-amber-400 py-6" data-testid="calc-incomplete-warning">
+                  Some fields are missing — results may be incomplete
                 </p>
-                <Button variant="primary" onClick={handleCalculate}>
-                  <RotateCcw size={15} className="mr-2" />
-                  Refresh your returns
-                </Button>
-              </div>
+              ) : (
+                <div className="text-center space-y-3 py-6">
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                    Your inputs have changed since the last calculation
+                  </p>
+                  <Button variant="primary" onClick={handleCalculate}>
+                    <RotateCcw size={15} className="mr-2" />
+                    Refresh your returns
+                  </Button>
+                </div>
+              )
             )}
 
             {hasAnyResult && !resultsStale && (

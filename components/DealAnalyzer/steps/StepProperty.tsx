@@ -33,7 +33,17 @@ export function StepProperty({ data, onChange, showWarnings = false }: StepPrope
   ) =>
     onChange(
       'unitMix',
-      data.unitMix.map((e) => (e.id === id ? { ...e, [field]: value } : e))
+      data.unitMix.map((e) => {
+        if (e.id !== id) return e;
+        const updated = { ...e, [field]: value };
+        // When count is reduced, clamp dependent fields so they don't exceed available units
+        if (field === 'count') {
+          if ((updated.unitsToRenovate ?? 0) > value) updated.unitsToRenovate = value;
+          const remainingForLeaseUp = value - (updated.unitsToRenovate ?? 0);
+          if ((updated.leaseUpUnits ?? 0) > remainingForLeaseUp) updated.leaseUpUnits = Math.max(0, remainingForLeaseUp);
+        }
+        return updated;
+      })
     );
 
   const removeUnitEntry = (id: string) =>

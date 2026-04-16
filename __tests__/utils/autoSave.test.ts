@@ -203,6 +203,103 @@ describe('bottom bar display logic', () => {
   });
 });
 
+describe('auto-save on scheduleCalculate (inner Done buttons)', () => {
+  /**
+   * scheduleCalculate is fired by every inner sub-section Done (value-add Done,
+   * stab Done, rent Done) — and now ALSO auto-saves to backend when:
+   *   - the deal already exists in DB (savedDealId is set)
+   *   - the current state diverges from the last saved snapshot
+   *
+   * If the snapshots match, we skip the write to avoid a flood of redundant
+   * backend calls when nothing has actually changed.
+   */
+  type SaveDecision = 'save' | 'skip';
+
+  function shouldAutoSaveOnScheduleCalculate(
+    savedDealId: string | null,
+    savedSnapshot: string | null,
+    currentSnapshot: string,
+  ): SaveDecision {
+    if (!savedDealId) return 'skip'; // brand-new deals only save via main step Done
+    if (savedSnapshot === currentSnapshot) return 'skip'; // nothing actually changed
+    return 'save';
+  }
+
+  it('saves when deal exists and state differs from snapshot', () => {
+    const decision = shouldAutoSaveOnScheduleCalculate(
+      'deal-123',
+      JSON.stringify({ leaseUpUnits: 10 }),
+      JSON.stringify({ leaseUpUnits: 3 }),
+    );
+    expect(decision).toBe('save');
+  });
+
+  it('skips save when state matches snapshot (no real change)', () => {
+    const snapshot = JSON.stringify({ leaseUpUnits: 10 });
+    const decision = shouldAutoSaveOnScheduleCalculate('deal-123', snapshot, snapshot);
+    expect(decision).toBe('skip');
+  });
+
+  it('skips save when no savedDealId — brand-new deals require explicit step Done', () => {
+    const decision = shouldAutoSaveOnScheduleCalculate(
+      null,
+      null,
+      JSON.stringify({ leaseUpUnits: 3 }),
+    );
+    expect(decision).toBe('skip');
+  });
+
+  it('saves on first edit after initial load (snapshot was set on load, now differs)', () => {
+    const initialSnapshot = JSON.stringify({ leaseUpUnits: 10 });
+    const afterEdit = JSON.stringify({ leaseUpUnits: 3 });
+    const decision = shouldAutoSaveOnScheduleCalculate('deal-123', initialSnapshot, afterEdit);
+    expect(decision).toBe('save');
+  });
+});
+
+describe('snapshot/dirty bookkeeping after save', () => {
+  /**
+   * After a successful save, the savedSnapshot ref should equal the current
+   * state, and the isDirty flag should clear. Without this, the exit-warning
+   * dialog would re-fire even after the user just saved.
+   */
+  function applyPostSave(currentState: object): { snapshot: string; isDirty: boolean } {
+    return {
+      snapshot: JSON.stringify(currentState),
+      isDirty: false,
+    };
+  }
+
+  it('snapshot equals current state after save', () => {
+    const state = { acquisition: { unitMix: [{ leaseUpUnits: 3 }] } };
+    const { snapshot } = applyPostSave(state);
+    expect(snapshot).toBe(JSON.stringify(state));
+  });
+
+  it('isDirty resets to false after save', () => {
+    const state = { acquisition: { unitMix: [{ leaseUpUnits: 3 }] } };
+    const { isDirty } = applyPostSave(state);
+    expect(isDirty).toBe(false);
+  });
+
+  it('a follow-up unchanged scheduleCalculate becomes a no-op (snapshot matches)', () => {
+    const state = { acquisition: { unitMix: [{ leaseUpUnits: 3 }] } };
+    const { snapshot } = applyPostSave(state);
+    // Replicate scheduleCalculate's check
+    const currentSnapshot = JSON.stringify(state);
+    const wouldSave = snapshot !== currentSnapshot;
+    expect(wouldSave).toBe(false);
+  });
+
+  it('a follow-up edit after save flips isDirty back via snapshot diff', () => {
+    const original = { acquisition: { unitMix: [{ leaseUpUnits: 3 }] } };
+    const { snapshot } = applyPostSave(original);
+    const edited = { acquisition: { unitMix: [{ leaseUpUnits: 5 }] } };
+    const isDirtyAfterEdit = snapshot !== JSON.stringify(edited);
+    expect(isDirtyAfterEdit).toBe(true);
+  });
+});
+
 describe('auto-save on calculate', () => {
   // Same logic — calculate triggers auto-save with results
   it('creates new deal on first calculate when address exists', () => {
