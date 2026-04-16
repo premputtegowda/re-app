@@ -527,7 +527,7 @@ export function RehabRentCalculator({
     if (firstFullYear <= projectionYears) {
       overrides[firstFullYear] = totalTargetAnnual * Math.pow(1 + grossRentGrowthPct / 100, stabYear);
     }
-    const key = JSON.stringify(overrides);
+    const key = JSON.stringify({ overrides, dist: result.anniversaryDistribution });
     if (key === lastAppliedKeyRef.current) return;
     lastAppliedKeyRef.current = key;
     onApply(overrides, result.anniversaryDistribution);
