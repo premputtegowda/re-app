@@ -1680,10 +1680,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
             {/* Stabilization section Done/Cancel — render AFTER the always-mounted calc
                 so they appear at the bottom of the visible section content, where users
-                expect them after editing the schedule.
-                Only shown when there are unsaved changes (isDirty) OR the section hasn't
-                been completed yet — once completed and clean, the buttons hide. */}
-            {completedOpsSections.has('valueAdd') && isValueAdd === true && activeOpsSection === 'stab' && (isDirty || !completedOpsSections.has('stab')) && (
+                expect them after editing the schedule. */}
+            {completedOpsSections.has('valueAdd') && isValueAdd === true && activeOpsSection === 'stab' && (
               <div className="flex gap-3 px-4 pb-4 pt-2 border-t border-slate-100 dark:border-slate-700/60 mt-2 rounded-b-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 -mt-px">
                 {completedOpsSections.has('stab') && (
                   <Button variant="secondary" onClick={() => setActiveOpsSection(null)}>Cancel</Button>
