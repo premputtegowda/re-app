@@ -759,7 +759,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     lastCalcSnapshotRef.current = JSON.stringify({ acquisition, operations, proForma, refinance });
     setCalcPhase('returns');
     // Smooth scroll to results area
-    resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    resultsRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
 
     // Delay to let the UI show the loading state before heavy computation
     setTimeout(() => {
