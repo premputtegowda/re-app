@@ -821,6 +821,10 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     setResultsStale(false);
     lastCalcSnapshotRef.current = JSON.stringify({ acquisition, operations, proForma, refinance });
     setCalcPhase('returns');
+    // Collapse all steps so the results area is prominent
+    setActiveStep(FORM_STEPS.length); // past last step → no step matches → all collapsed
+    setEditingStep(null);
+    setPausedActiveStep(null);
     // Smooth scroll to results area
     resultsRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
 

@@ -112,6 +112,15 @@ export function buildWhatIfResult(ov: WhatIfOverrides, deps: BuildDeps): CoCResu
     return e;
   });
 
+  // Scale per-type anniversary distributions proportionally when target rent changes.
+  // Without this, the anniversary model uses old per-type target rents while market rent
+  // uses the new stabilized → LTL inverts → IRR moves the wrong direction.
+  const rentRatio = origStabilizedAnnual > 0 ? newTargetAnnual / origStabilizedAnnual : 1;
+  const scaledAnniversaryByType = proForma.leaseAnniversaryByType?.map(t => ({
+    ...t,
+    targetRent: t.targetRent * rentRatio,
+  }));
+
   const scenario: CoCScenario = {
     id: 'whatif',
     name: 'What If',
@@ -131,6 +140,7 @@ export function buildWhatIfResult(ov: WhatIfOverrides, deps: BuildDeps): CoCResu
       creditLossPct: proForma.creditLossPct ?? { t12: 0, stab: null, stabilized: 0 },
       expenses: modifiedExpenses,
       yearOverrides: scaledYearOverrides,
+      ...(scaledAnniversaryByType ? { leaseAnniversaryByType: scaledAnniversaryByType } : {}),
     },
     refinance: refinance.enabled
       ? { ...refinance, newInterestRate: ov.refiRate ?? refinance.newInterestRate, refiYear: Math.round(ov.refiYear ?? refinance.refiYear ?? 3) }
