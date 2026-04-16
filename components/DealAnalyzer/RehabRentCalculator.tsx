@@ -276,7 +276,6 @@ interface RehabRentCalculatorProps {
   externalOffline?: number;
   externalUnitsToStabilize?: number[];
   externalLeaseUpToStabilize?: number[];
-  externalDistributionMethod?: 'weighted' | 'custom';
   hideHeader?: boolean;
 }
 
@@ -296,7 +295,6 @@ export function RehabRentCalculator({
   externalOffline,
   externalUnitsToStabilize,
   externalLeaseUpToStabilize,
-  externalDistributionMethod,
   hideHeader,
 }: RehabRentCalculatorProps) {
   const setOpen = (v: boolean) => { onOpenChange?.(v); };
@@ -397,16 +395,11 @@ export function RehabRentCalculator({
     setLeaseUpToStabilize(next);
   }, [externalLeaseUpToStabilize]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    if (externalDistributionMethod === undefined) return;
-    if (externalDistributionMethod === distributionMethod) return; // no change
-    if (externalDistributionMethod === 'custom') {
-      // Clear weighted auto-fill when switching to custom
-      setScheduleByType(unitTypes.map(() => Array(totalDuration).fill(0)));
-      setLeaseUpScheduleByType(unitTypes.map(() => Array(totalDuration).fill(0)));
-    }
-    setDistributionMethod(externalDistributionMethod);
-  }, [externalDistributionMethod]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Note: NO external-sync for distributionMethod. The calculator owns this state
+  // entirely — initialized from initialState (or hasManualSchedule heuristic) and
+  // only changed via UI button clicks. Bidirectional sync with the parent caused
+  // weighted/custom oscillation when calcState's value didn't match the calculator's
+  // hasManualSchedule inference on initial mount.
 
   // Sync rent changes from the form back into localRents (bidirectional sync).
   // Echo-back guard: when the calculator pushes rents → form → unitTypes, the values
