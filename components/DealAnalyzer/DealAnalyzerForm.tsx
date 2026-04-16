@@ -1574,7 +1574,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                             if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map((u, i) => ({ ...u, preStabRent: Math.round(values[i] ?? 0) })));
                             else updateAcquisition('sfrPreStabRent', Math.round(values[0] ?? 0));
                           }}
-                          onApply={overrides => {
+                          onApply={(overrides, anniversaryDistribution) => {
                             setProForma(prev => {
                               const ovs = { ...(prev.yearOverrides ?? {}) };
                               Object.entries(overrides).forEach(([yr, rent]) => {
@@ -1583,7 +1583,11 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                                 if (ovs[y]?.grossRentSystem === false) return;
                                 ovs[y] = { ...(ovs[y] ?? {}), grossRent: rent, grossRentSystem: true };
                               });
-                              return { ...prev, yearOverrides: ovs };
+                              return {
+                                ...prev,
+                                yearOverrides: ovs,
+                                ...(anniversaryDistribution ? { leaseAnniversaryDistribution: anniversaryDistribution } : {}),
+                              };
                             });
                           }}
                           onClear={() => {

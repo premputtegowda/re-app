@@ -21,6 +21,8 @@ export interface SimulationResult {
   yearlyRents: number[];
   stabilizationMonth: number;
   monthlyByType: number[][];
+  /** 12-month histogram: units reaching target rent per month (for loss-to-lease model) */
+  anniversaryDistribution: number[];
 }
 
 // ── Simulation ─────────────────────────────────────────────────────────────────
@@ -123,7 +125,33 @@ export function simulateFromSchedule(
     }
   }
 
-  return { yearlyRents, stabilizationMonth: maxStabMonth, monthlyByType };
+  // Build anniversary distribution: 12-month histogram of when units first reach target rent.
+  // Stable units (already at target) go in month 1. Reno units go in their completion month.
+  // Lease-up units go in their flip month. Units completing after month 12 go in month 12.
+  const anniversaryDist = new Array(12).fill(0);
+  // Stable units → month 1
+  const initialStable = unitTypes.map((ut, t) => {
+    const scheduledReno = (scheduleByType[t] ?? []).reduce((s, n) => s + n, 0);
+    const scheduledLeaseUp = (leaseUpScheduleByType[t] ?? []).reduce((s, n) => s + n, 0);
+    return Math.max(0, ut.count - scheduledReno - scheduledLeaseUp);
+  });
+  anniversaryDist[0] = initialStable.reduce((s, n) => s + n, 0);
+  // Reno completions
+  for (let t = 0; t < unitTypes.length; t++) {
+    completionsByType[t].forEach((count, month) => {
+      const idx = Math.min(11, Math.max(0, month - 1)); // clamp to 0-11
+      anniversaryDist[idx] += count;
+    });
+  }
+  // Lease-up flips
+  for (let t = 0; t < unitTypes.length; t++) {
+    leaseUpFlipsByType[t].forEach((count, month) => {
+      const idx = Math.min(11, Math.max(0, month - 1));
+      anniversaryDist[idx] += count;
+    });
+  }
+
+  return { yearlyRents, stabilizationMonth: maxStabMonth, monthlyByType, anniversaryDistribution: anniversaryDist };
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -204,7 +232,7 @@ interface RehabRentCalculatorProps {
   unitTypes: UnitTypeInput[];
   projectionYears: number;
   appliedYears: Record<number, number>;
-  onApply: (overrides: Record<number, number>) => void;
+  onApply: (overrides: Record<number, number>, anniversaryDistribution?: number[]) => void;
   onClear: () => void;
   onApplyPreStab?: (values: number[]) => void;
   onApplyRents?: (rents: LocalRent[]) => void;
@@ -502,7 +530,7 @@ export function RehabRentCalculator({
     const key = JSON.stringify(overrides);
     if (key === lastAppliedKeyRef.current) return;
     lastAppliedKeyRef.current = key;
-    onApply(overrides);
+    onApply(overrides, result.anniversaryDistribution);
     onApplyRents?.(localRents);
     if (onApplyPreStab) onApplyPreStab(blendedMonthlyByType);
   }); // eslint-disable-line react-hooks/exhaustive-deps
