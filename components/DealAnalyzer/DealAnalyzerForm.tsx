@@ -1533,10 +1533,10 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 <div className="border-t border-slate-100 dark:border-slate-700/60 space-y-4 px-4 py-4">
 
                     {/* Timeline */}
-                    <div className={`grid gap-4 ${someReno ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                    <div className={`grid gap-4 ${someReno ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
                       <div>
                         <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1">
-                          Renovation/Lease-up period
+                          Reno/Lease-up period
                           {isVisited && stabDuration === 0 && <AlertTriangle size={12} className="text-amber-500" />}
                         </label>
                         <div className="relative">
@@ -1587,7 +1587,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                             ) : stabDuration > 0 ? (
                               <span className="text-xs text-slate-400 dark:text-slate-500">Schedule auto-filled</span>
                             ) : (
-                              <span className="text-xs text-slate-400 dark:text-slate-500">Set renovation/lease-up period to auto-calculate</span>
+                              <span className="text-xs text-slate-400 dark:text-slate-500">Set reno/lease-up period to auto-calculate</span>
                             )}
                           </div>
                           <div className="shrink-0 flex items-center gap-2">
@@ -1822,7 +1822,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const _mfrOps = acquisition.propertyType === 'mfr' && acquisition.unitMix.length > 0;
   const opsRentIncomplete = _mfrOps
     ? acquisition.unitMix.length === 0 || acquisition.unitMix.some(e => (e.rentMonthly || 0) === 0)
-    : (acquisition.sfrTargetRent || 0) === 0;
+    : (acquisition.sfrTargetRent || 0) === 0 && proForma.grossRent.stabilized === 0;
 
   const _someRenoOps = _mfrOps && acquisition.unitMix.some(e => (e.unitsToRenovate ?? 0) > 0);
   const _someLUOps = _mfrOps && acquisition.unitMix.some(e => (e.leaseUpUnits ?? 0) > 0);

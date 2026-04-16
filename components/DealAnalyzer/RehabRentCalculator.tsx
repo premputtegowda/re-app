@@ -942,9 +942,10 @@ export function RehabRentCalculator({
                 </div>
               </div>
 
-              {/* Per-year breakdown table */}
+              {/* Per-year breakdown — card layout on mobile, table on desktop */}
               <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-                <table className="w-full text-xs">
+                {/* Desktop table (hidden on small phones) */}
+                <table className="w-full text-xs hidden sm:table">
                   <thead>
                     <tr className="bg-slate-50 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-700">
                       <th className="px-3 py-2 text-left font-semibold text-slate-500 dark:text-slate-400">Year</th>
@@ -957,7 +958,7 @@ export function RehabRentCalculator({
                     {allYears.map(y => {
                       const market = totalTargetAnnual * Math.pow(1 + grossRentGrowthPct / 100, y - 1);
                       const actual = computeYearRent(y);
-                      const ltl = market - actual; // always Market − Gross Lease, per year
+                      const ltl = market - actual;
                       return (
                         <tr key={y} className="border-t border-slate-100 dark:border-slate-700/60 first:border-t-0">
                           <td className="px-3 py-2 font-semibold text-slate-600 dark:text-slate-300">Yr {y}</td>
@@ -971,6 +972,33 @@ export function RehabRentCalculator({
                     })}
                   </tbody>
                 </table>
+                {/* Mobile cards (hidden on sm+) */}
+                <div className="sm:hidden divide-y divide-slate-100 dark:divide-slate-700/60">
+                  {allYears.map(y => {
+                    const market = totalTargetAnnual * Math.pow(1 + grossRentGrowthPct / 100, y - 1);
+                    const actual = computeYearRent(y);
+                    const ltl = market - actual;
+                    return (
+                      <div key={y} className="px-3 py-2.5">
+                        <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Year {y}</p>
+                        <div className="grid grid-cols-3 gap-2 text-[11px]">
+                          <div className="text-right">
+                            <p className="text-slate-400 dark:text-slate-500">Market</p>
+                            <p className="tabular-nums text-slate-600 dark:text-slate-300">{fmt$(market)}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-slate-400 dark:text-slate-500">Gross Lease</p>
+                            <p className="tabular-nums text-slate-700 dark:text-slate-200">{fmt$(actual)}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-amber-500 dark:text-amber-400">LTL</p>
+                            <p className="tabular-nums font-semibold text-amber-600 dark:text-amber-400">{ltl > 0.5 ? fmt$(ltl) : '—'}</p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
 
               <p className="text-[11px] text-slate-400 dark:text-slate-500">
