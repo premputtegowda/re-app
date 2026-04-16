@@ -915,8 +915,10 @@ export function RehabRentCalculator({
             </div>
           )}
 
-          {/* ── Results: 3-step LTL walkthrough per year ── */}
-          {result && allYears.length > 0 && (
+          {/* ── Results: 3-step LTL walkthrough per year ──
+              Suppress when reno units exist but offline time = 0 (impossible — reno takes time)
+              so users don't see misleading rent numbers from a bad input. */}
+          {result && allYears.length > 0 && !(unitsToStabilize.some(u => u > 0) && perUnitMonths.some(m => m === 0)) && (
             <div className="space-y-3">
               {/* Step explainers */}
               <div className="space-y-1.5">

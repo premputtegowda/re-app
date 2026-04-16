@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, cloneElement, useEffect, Fragment } from 'react';
 import { flushSync } from 'react-dom';
-import { Plus, X, RotateCcw, ChevronLeft, ChevronRight, TrendingUp, AlertTriangle, Link2, Unlink } from 'lucide-react';
+import { Plus, X, RotateCcw, ChevronLeft, ChevronRight, TrendingUp, AlertTriangle, AlertCircle, Link2, Unlink } from 'lucide-react';
 import type { ProFormaData, ProFormaItem } from '@/types';
 import { computeEGI } from '@/utils/dealAnalyzerCalc';
 import { makeChainedValue, makeChainedExpenseValue } from '@/utils/proFormaChaining';
@@ -316,12 +316,13 @@ interface ProFormaGridProps {
   targetRent?: number;    // for pre-stab formula: Target_n = targetRent × (1+g)^(n-1)
   units?: number;         // unit count — used for CapEx/unit display
   purchasePrice?: number; // used to derive propertyTaxRatePct when user enters property tax dollar amount
+  suppressRent?: boolean; // when true, Market Rent / LTL / Gross Lease Rent rows show blanks (warnings unresolved upstream)
 }
 
 const PAGE_SIZE_MOBILE = 4; // T12 + 3 years per page on mobile
 const PAGE_SIZE_DESKTOP = 6; // T12 + 5 years = 6 columns per page
 
-export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings = false, inPlaceRent, targetRent, units = 1, purchasePrice = 0 }: ProFormaGridProps) {
+export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings = false, inPlaceRent, targetRent, units = 1, purchasePrice = 0, suppressRent = false }: ProFormaGridProps) {
   const [newExpenseName, setNewExpenseName] = useState('');
   const [addingRow, setAddingRow] = useState(false);
   const [page, setPage] = useState(0);
@@ -1217,7 +1218,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
             <div className="flex items-center gap-1.5">
               <LabelCell value={expense.name} onChange={name => updateExpense(expense.id, { name })} />
               {showWarnings && !expense.isPercentOfEGI && expense.stabilizedValue === 0 && (
-                <AlertTriangle size={12} className="text-amber-500 shrink-0" />
+                <AlertCircle size={12} className="text-amber-500 shrink-0" />
               )}
             </div>
             {renderChainMap(y => isExpenseChainBroken(expense.id, y), y => isExpenseToggleOff(expense.id, y))}
@@ -1356,8 +1357,10 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
               </div>
               <div className="text-right">
                 <p className="text-[10px] font-semibold uppercase text-slate-400 mb-1">Yr {mobileYear}{mobileYear === projectionYears ? ' ★' : ''}</p>
-                <span className="text-sm font-medium tabular-nums text-slate-700 dark:text-slate-300">{fmt$(getMarketRentForYear(mobileYear))}</span>
-                {mobileYear > 1 && (() => {
+                <span className="text-sm font-medium tabular-nums text-slate-700 dark:text-slate-300">
+                  {suppressRent ? '—' : fmt$(getMarketRentForYear(mobileYear))}
+                </span>
+                {!suppressRent && mobileYear > 1 && (() => {
                   const yrOv = data.yearOverrides?.[mobileYear];
                   const yrGrowthPct = yrOv?.grossRentGrowthPct ?? data.grossRent.growthPct;
                   return (
@@ -1378,7 +1381,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                   <p className="text-[10px] text-slate-400">Anniversary lag · Yr {mobileYear}</p>
                 </div>
                 <span className="text-sm tabular-nums text-slate-500 dark:text-slate-400">
-                  {getLossToLeaseForYear(mobileYear) > 0 ? `(${fmt$(getLossToLeaseForYear(mobileYear))})` : '—'}
+                  {suppressRent ? '—' : getLossToLeaseForYear(mobileYear) > 0 ? `(${fmt$(getLossToLeaseForYear(mobileYear))})` : '—'}
                 </span>
               </div>
               <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-700/50 flex items-center justify-between">
@@ -1386,7 +1389,9 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                   <p className="text-sm text-slate-700 dark:text-slate-300">Gross Lease Rent</p>
                   <p className="text-[10px] text-slate-400">Market − LTL · Yr {mobileYear}</p>
                 </div>
-                <span className="text-sm font-medium tabular-nums text-slate-700 dark:text-slate-300">{fmt$(getGrossLeaseRentForYear(mobileYear))}</span>
+                <span className="text-sm font-medium tabular-nums text-slate-700 dark:text-slate-300">
+                  {suppressRent ? '—' : fmt$(getGrossLeaseRentForYear(mobileYear))}
+                </span>
               </div>
             </>
           )}
@@ -1562,6 +1567,9 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                       </td>
                     );
                   }
+                  if (suppressRent) {
+                    return <td key={`mr-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap"><span className="text-sm text-slate-300 dark:text-slate-600">—</span></td>;
+                  }
                   const yrOv = data.yearOverrides?.[col.year];
                   const yrGrowthPct = yrOv?.grossRentGrowthPct ?? data.grossRent.growthPct;
                   return (
@@ -1597,7 +1605,10 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                       <p className="text-[10px] text-slate-400 leading-tight">Anniversary lag</p>
                     </td>
                     {visibleCols.map((col, i) => {
-                      const ltl = col.type === 't12' ? 0 : getLossToLeaseForYear(col.year);
+                      if (col.type === 't12' || suppressRent) {
+                        return <td key={`ltl-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap"><span className="text-sm text-slate-300 dark:text-slate-600">—</span></td>;
+                      }
+                      const ltl = getLossToLeaseForYear(col.year);
                       return (
                         <td key={`ltl-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap">
                           <span className="text-sm tabular-nums text-slate-500 dark:text-slate-400">
@@ -1613,6 +1624,9 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                       <p className="text-[10px] text-slate-400 leading-tight">Market − LTL</p>
                     </td>
                     {visibleCols.map((col, i) => {
+                      if (suppressRent) {
+                        return <td key={`glr-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap"><span className="text-sm text-slate-300 dark:text-slate-600">—</span></td>;
+                      }
                       const v = col.type === 't12' ? data.grossRent.t12 : getGrossLeaseRentForYear(col.year);
                       return (
                         <td key={`glr-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap">
@@ -1711,7 +1725,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                           </button>
                         )}
                         {showWarnings && !expense.isPercentOfEGI && expense.stabilizedValue === 0 && (
-                          <AlertTriangle size={12} className="text-amber-500 shrink-0" data-testid={`expense-warning-${expense.name}`} />
+                          <AlertCircle size={12} className="text-amber-500 shrink-0" data-testid={`expense-warning-${expense.name}`} />
                         )}
                         {!NON_TOGGLEABLE_EXPENSES.has(expense.name) && (
                           <button

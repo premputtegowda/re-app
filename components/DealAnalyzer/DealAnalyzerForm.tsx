@@ -185,15 +185,17 @@ function OpsCard({ num, title, summary, onEdit, warning }: {
 // ── OpsSectionHeader ───────────────────────────────────────────────────────────
 // Non-interactive header for an active Operations sub-section.
 
-function OpsSectionHeader({ num, title, isComplete }: { num: number; title: string; isComplete: boolean }) {
+function OpsSectionHeader({ num, title, isComplete, warning }: { num: number; title: string; isComplete: boolean; warning?: boolean }) {
   return (
     <div className="flex items-center gap-3 px-4 py-3.5">
       <span className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
-        isComplete
+        warning
+          ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-500 dark:text-amber-400'
+          : isComplete
           ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400'
           : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
       }`}>
-        {isComplete ? <Check size={12} /> : <span className="text-xs font-bold">{num}</span>}
+        {warning ? <AlertTriangle size={12} /> : isComplete ? <Check size={12} /> : <span className="text-xs font-bold">{num}</span>}
       </span>
       <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">{title}</span>
     </div>
@@ -358,10 +360,10 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const distributionMethod: 'weighted' | 'custom' = calcState?.distributionMethod === 'custom' ? 'custom' : 'weighted';
   const [calcKey, setCalcKey] = useState(0);
   const [isValueAdd, setIsValueAdd] = useState<boolean | null>(() => {
-    // Prefer explicitly persisted value
+    // Prefer explicitly persisted value — this is the user's choice, not inferred.
     if (initialDeal?.calcState?.isValueAdd !== undefined) return initialDeal.calcState.isValueAdd ?? null;
     if (!initialDeal) return null;
-    // Fallback: infer from data for deals saved before this field was added
+    // Legacy fallback: infer from data for deals saved before isValueAdd was persisted.
     const isMfr = initialDeal.acquisition.propertyType === 'mfr';
     const hasPreStab = isMfr
       ? initialDeal.acquisition.unitMix.some(e => (e.preStabRent || 0) > 0)
@@ -370,6 +372,18 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     if (hasPreStab || hasCalcOverrides) return true;
     return null;
   });
+  // Persist isValueAdd to calcState immediately when the user toggles it,
+  // so it survives a page reload even before a formal Done/Save click.
+  // Also trigger scheduleCalculate to push calcState to the backend.
+  useEffect(() => {
+    if (isValueAdd === null) return; // not yet answered — nothing to persist
+    setCalcState(prev => {
+      if (prev?.isValueAdd === isValueAdd) return prev; // no change
+      return { ...(prev ?? {} as CalcPersistedState), isValueAdd };
+    });
+    // Defer auto-save so the calcState update commits first
+    setTimeout(() => scheduleCalculate(), 0);
+  }, [isValueAdd]); // eslint-disable-line react-hooks/exhaustive-deps
   const [preStabMethod, setPreStabMethod] = useState<'calculator' | 'manual' | null>(() => {
     // Prefer explicitly persisted value
     if (initialDeal?.calcState?.preStabMethod !== undefined) return initialDeal.calcState.preStabMethod ?? 'calculator';
@@ -988,11 +1002,12 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       case 2:
         return <StepRenovation data={acquisition} onChange={updateAcquisition} showWarnings={isVisited} />;
       case 3: {
-        const hasMfr = acquisition.propertyType === 'mfr' && acquisition.unitMix.length > 0;
+        const hasMfr = _mfrOps;
 
         const hasTargetRent = hasMfr
           ? acquisition.unitMix.some(e => (e.rentMonthly || 0) > 0)
           : (acquisition.sfrTargetRent || 0) > 0;
+        const rentIncomplete = opsRentIncomplete;
 
         const hasPreStab = hasMfr
           ? acquisition.unitMix.some(e => (e.preStabRent || 0) > 0)
@@ -1016,14 +1031,23 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         );
         const someReno = unitsToRenovate.some(u => u > 0);
         const someLU = leaseUpUnitsArr.some(u => u > 0);
-        const calcScheduleIncomplete = preStabMethod === 'calculator' && (someReno || someLU) && !calcApplied && (
-          stabDuration === 0 ||
+        // Schedule mismatch: any unit type's schedule total doesn't equal its assigned
+        // count. Fires regardless of calcApplied — if the user changed value-add units
+        // AFTER applying the calculator (or chose Custom and under-filled cells), the
+        // saved schedule is now stale.
+        const scheduleHasMismatch =
           unitsToRenovate.some((u, t) => u > 0 && renoScheduleTotals[t] !== u) ||
-          leaseUpUnitsArr.some((u, t) => u > 0 && luScheduleTotals[t] !== u)
+          leaseUpUnitsArr.some((u, t) => u > 0 && luScheduleTotals[t] !== u);
+        const calcScheduleIncomplete = preStabMethod === 'calculator' && (someReno || someLU) && (
+          (!calcApplied && stabDuration === 0) ||
+          scheduleHasMismatch
         );
 
         const hasAnyUnits = someReno || someLU;
-        const valueAddIncomplete = isValueAdd === true && !hasAnyUnits;
+        const valueAddIncomplete = opsValueAddIncomplete;
+        // Stabilization warning: uses the component-level flag + calcScheduleIncomplete
+        // (which needs calcState schedule data only available in this render scope).
+        const stabIncomplete = opsStabIncomplete || calcScheduleIncomplete;
         const stepComplete =
           isValueAdd === false ||
           (isValueAdd === true && !calcScheduleIncomplete);
@@ -1103,10 +1127,10 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
             {/* ── Section 1: Rent ── */}
             {completedOpsSections.has('rent') && activeOpsSection !== 'rent' ? (
-              <OpsCard num={1} title="Rent" summary={rentSummary} onEdit={() => setActiveOpsSection('rent')} />
+              <OpsCard num={1} title="Rent" summary={rentSummary} onEdit={() => setActiveOpsSection('rent')} warning={rentIncomplete} />
             ) : (
             <div className={card}>
-              <OpsSectionHeader num={1} title="Rent" isComplete={hasTargetRent} />
+              <OpsSectionHeader num={1} title="Rent" isComplete={hasTargetRent} warning={rentIncomplete} />
                 <div className="border-t border-slate-100 dark:border-slate-700/60">
                   <p className="px-4 pt-3 text-xs text-slate-400 dark:text-slate-500">Estimate ok if exact figures aren't available</p>
                   {hasMfr ? (
@@ -1282,7 +1306,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 transition={{ duration: 0.25, ease: 'easeOut' }}
                 className={card}
               >
-                <OpsSectionHeader num={2} title="Value-Add Plan" isComplete={isValueAdd !== null} />
+                <OpsSectionHeader num={2} title="Value-Add Plan" isComplete={isValueAdd !== null} warning={valueAddIncomplete} />
                   <div className="border-t border-slate-100 dark:border-slate-700/60 px-4 py-4 space-y-4">
 
                     {/* Yes / No */}
@@ -1455,7 +1479,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.25, ease: 'easeOut' }}
               >
-                <OpsCard num={3} title="Stabilization" summary={stabSummary} onEdit={() => { setActiveOpsSection('stab'); setCalcCollapsed(false); }} warning={valueAddIncomplete} />
+                <OpsCard num={3} title="Stabilization" summary={stabSummary} onEdit={() => { setActiveOpsSection('stab'); setCalcCollapsed(false); }} warning={stabIncomplete} />
               </motion.div>
             )}
             {completedOpsSections.has('valueAdd') && isValueAdd === true && activeOpsSection === 'stab' && (
@@ -1467,13 +1491,13 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 transition={{ duration: 0.25, ease: 'easeOut' }}
                 className={card}
               >
-                <OpsSectionHeader num={3} title="Stabilization" isComplete={stepComplete} />
+                <OpsSectionHeader num={3} title="Stabilization" isComplete={stepComplete} warning={stabIncomplete} />
                 {/* Warning: no reno/lease-up units assigned */}
                 {hasMfr && acquisition.unitMix.every(e => (e.unitsToRenovate ?? 0) === 0 && (e.leaseUpUnits ?? 0) === 0) && (
                   <div className="flex items-start gap-2 mx-4 mt-3 px-3 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40">
                     <AlertTriangle size={13} className="text-amber-500 mt-0.5 shrink-0" />
                     <p className="text-xs text-amber-700 dark:text-amber-400">
-                      Specify renovation or lease-up units in the Value-Add Plan to build a stabilization schedule. Target rent will be used from Year 1 until units are assigned.
+                      Specify renovation or lease-up units in the Value-Add Plan to build a stabilization schedule.
                     </p>
                   </div>
                 )}
@@ -1512,7 +1536,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     <div className={`grid gap-4 ${someReno ? 'grid-cols-2' : 'grid-cols-1'}`}>
                       <div>
                         <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1">
-                          Renovation period
+                          Renovation/Lease-up period
                           {isVisited && stabDuration === 0 && <AlertTriangle size={12} className="text-amber-500" />}
                         </label>
                         <div className="relative">
@@ -1527,11 +1551,14 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                       </div>
                       {someReno && (
                         <div>
-                          <label className="text-xs font-medium text-slate-500 dark:text-slate-400 block mb-1.5">Reno time per unit</label>
+                          <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1">
+                            Reno time per unit
+                            {isVisited && offlinePerUnit === 0 && <AlertTriangle size={12} className="text-amber-500" />}
+                          </label>
                           <div className="relative">
                             <input
                               type="number" min={0} max={24} step={0.25} placeholder="e.g. 1"
-                              className="input text-sm pr-10 w-full"
+                              className={`input text-sm pr-10 w-full ${isVisited && offlinePerUnit === 0 ? 'border-amber-300 focus:ring-amber-400' : ''}`}
                               value={offlinePerUnit === 0 ? '' : offlinePerUnit}
                               onChange={e => setOfflinePerUnit(Math.min(24, Math.max(0, Number(e.target.value) || 0)))}
                             />
@@ -1560,7 +1587,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                             ) : stabDuration > 0 ? (
                               <span className="text-xs text-slate-400 dark:text-slate-500">Schedule auto-filled</span>
                             ) : (
-                              <span className="text-xs text-slate-400 dark:text-slate-500">Set renovation period to auto-calculate</span>
+                              <span className="text-xs text-slate-400 dark:text-slate-500">Set renovation/lease-up period to auto-calculate</span>
                             )}
                           </div>
                           <div className="shrink-0 flex items-center gap-2">
@@ -1694,25 +1721,39 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
               </div>
             )}
 
-            {/* Value-add incomplete warning */}
-            {valueAddIncomplete && (
-              <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40">
-                <AlertTriangle size={13} className="text-amber-500 mt-0.5 shrink-0" />
-                <p className="text-xs text-amber-700 dark:text-amber-400">
-                  Value-add plan incomplete. Target rent will be used in Pro Forma for Year 1.
-                </p>
-              </div>
-            )}
+            {/* Pre-ProForma warning banner — surfaces incomplete sections so the user
+                knows why the Pro Forma rent might be missing/incorrect. */}
+            {(rentIncomplete || valueAddIncomplete || stabIncomplete) && (() => {
+              const incompleteSections: string[] = [];
+              if (rentIncomplete) incompleteSections.push('Rent');
+              if (valueAddIncomplete) incompleteSections.push('Value-Add Plan');
+              if (stabIncomplete && !valueAddIncomplete) incompleteSections.push('Stabilization');
+              const sectionList = incompleteSections.length === 1
+                ? incompleteSections[0]
+                : incompleteSections.length === 2
+                ? `${incompleteSections[0]} and ${incompleteSections[1]}`
+                : `${incompleteSections.slice(0, -1).join(', ')}, and ${incompleteSections[incompleteSections.length - 1]}`;
+              return (
+                <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40">
+                  <AlertTriangle size={13} className="text-amber-500 mt-0.5 shrink-0" />
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    Please clear the warnings in <span className="font-semibold">{sectionList}</span> above to populate the Pro Forma rent correctly.
+                  </p>
+                </div>
+              );
+            })()}
 
-            {/* ── Pro Forma ── */}
-            <ProFormaGrid
-              data={proForma}
-              onChange={setProForma}
-              projectionYears={acquisition.projectionYears}
-              showWarnings={isVisited}
-              units={acquisition.propertyType === 'mfr' ? (acquisition.unitMix.length > 0 ? acquisition.unitMix.reduce((s, e) => s + e.count, 0) : acquisition.units) : 1}
-              purchasePrice={acquisition.purchasePrice}
-            />
+            {/* ── Pro Forma — hidden entirely when any rent/VA/stab warning exists ── */}
+            {!(rentIncomplete || valueAddIncomplete || stabIncomplete) && (
+              <ProFormaGrid
+                data={proForma}
+                onChange={setProForma}
+                projectionYears={acquisition.projectionYears}
+                showWarnings={isVisited}
+                units={acquisition.propertyType === 'mfr' ? (acquisition.unitMix.length > 0 ? acquisition.unitMix.reduce((s, e) => s + e.count, 0) : acquisition.units) : 1}
+                purchasePrice={acquisition.purchasePrice}
+              />
+            )}
 
             {/* ── Notes ── */}
             <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
@@ -1776,6 +1817,39 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     }
   };
 
+  // ── Operations sub-section warning flags (used by getStepWarning AND renderStepContent) ──
+  // Lifted to component level so both share the same source of truth.
+  const _mfrOps = acquisition.propertyType === 'mfr' && acquisition.unitMix.length > 0;
+  const opsRentIncomplete = _mfrOps
+    ? acquisition.unitMix.length === 0 || acquisition.unitMix.some(e => (e.rentMonthly || 0) === 0)
+    : (acquisition.sfrTargetRent || 0) === 0;
+
+  const _someRenoOps = _mfrOps && acquisition.unitMix.some(e => (e.unitsToRenovate ?? 0) > 0);
+  const _someLUOps = _mfrOps && acquisition.unitMix.some(e => (e.leaseUpUnits ?? 0) > 0);
+  const _hasAnyUnitsOps = _someRenoOps || _someLUOps;
+  const opsValueAddIncomplete = isValueAdd === true && !_hasAnyUnitsOps;
+  // Calculator applied = at least one yearOverride has grossRentSystem (set by the calculator's auto-apply)
+  const _calcApplied = Object.values(proForma.yearOverrides ?? {}).some(ov => ov?.grossRentSystem);
+  // Schedule mismatch: assigned units in value-add don't match the calculator's saved schedule
+  const _renoArr = _mfrOps ? acquisition.unitMix.map(e => e.unitsToRenovate ?? 0) : [1];
+  const _luArr = _mfrOps ? acquisition.unitMix.map(e => e.leaseUpUnits ?? 0) : [0];
+  const _renoTotals = _renoArr.map((_, t) =>
+    (calcState?.scheduleByType?.[t] ?? []).reduce((s: number, n: number) => s + n, 0));
+  const _luTotals = _luArr.map((_, t) =>
+    (calcState?.leaseUpScheduleByType?.[t] ?? []).reduce((s: number, n: number) => s + n, 0));
+  const _scheduleHasMismatch =
+    _renoArr.some((u, t) => u > 0 && _renoTotals[t] !== u) ||
+    _luArr.some((u, t) => u > 0 && _luTotals[t] !== u);
+  const _calcNotAppliedYet = preStabMethod === 'calculator' && (_someRenoOps || _someLUOps) && !_calcApplied;
+  const _calcScheduleIncomplete = preStabMethod === 'calculator' && (_someRenoOps || _someLUOps) && _scheduleHasMismatch;
+  const opsStabIncomplete = isValueAdd === true && (
+    !_hasAnyUnitsOps ||
+    stabDuration === 0 ||
+    (_someRenoOps && offlinePerUnit === 0) ||
+    _calcNotAppliedYet ||
+    _calcScheduleIncomplete
+  );
+
   // ── Step warnings (soft — non-blocking) ──
 
   const getStepWarning = (stepId: number): string | null => {
@@ -1806,7 +1880,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         return null;
       }
       case 3:
-        if (proForma.grossRent.stabilized === 0)
+        // Operations warning fires when ANY sub-section (rent, value-add, stabilization) is incomplete.
+        if (proForma.grossRent.stabilized === 0 || opsRentIncomplete || opsValueAddIncomplete || opsStabIncomplete)
           return 'incomplete';
         return null;
       case 4: {
@@ -2146,12 +2221,17 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
             )}
 
             {hasAnyResult && !resultsStale && (
-              <>
-                {hasAnyWarning && calcPhase === 'idle' && (
-                  <p className="text-center text-sm text-amber-600 dark:text-amber-400" data-testid="calc-incomplete-warning">
-                    Some fields are missing — results may be incomplete
+              hasAnyWarning ? (
+                <div className="text-center space-y-2 py-8">
+                  <AlertTriangle size={24} className="text-amber-500 mx-auto" />
+                  <p className="text-sm text-amber-600 dark:text-amber-400 font-medium" data-testid="calc-incomplete-warning">
+                    Some fields are incomplete
                   </p>
-                )}
+                  <p className="text-xs text-slate-400 dark:text-slate-500 max-w-xs mx-auto">
+                    Please complete all required fields above to see your returns. Look for the warning signs in the steps.
+                  </p>
+                </div>
+              ) : (
                 <div style={calcPhase === 'idle' || calcPhase === 'done' ? { animation: 'fade-in 0.6s ease-out' } : undefined}>
                   <ResultsPanel
                     result={currentResult!}
@@ -2167,7 +2247,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     calcPhase={calcPhase}
                   />
                 </div>
-              </>
+              )
             )}
           </div>
         )}
