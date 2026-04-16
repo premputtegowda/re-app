@@ -183,12 +183,14 @@ export function projectScenario(scenario: CoCScenario, opts?: { dynamicRefiValue
   let prevRentValue: number | undefined;
 
   for (let year = 1; year <= (acquisition.projectionYears || 5); year++) {
-    let grossRent: number;   // rent-only (matches ProFormaGrid "Gross Rent" row)
-    let effectiveRent: number; // EGI = rent*(1-vac%) + otherIncome
+    let marketRent: number;  // ideal rent: all units at market rate all year
+    let grossRent: number;   // actual collected rent (market - loss to lease)
+    let effectiveRent: number; // EGI = grossRent*(1-vac%-cl%) + otherIncome
     let opex: number;
 
     if (pf && pfProjector) {
       // Use the same computation as ProFormaGrid — no separate recalculation
+      marketRent    = pfProjector.getMarketRentForYear(year);
       grossRent     = pfProjector.getGrossRentForYear(year);
       effectiveRent = pfProjector.getEGIForYear(year);
       opex          = pfProjector.getOpExForYear(year, effectiveRent);
@@ -199,6 +201,7 @@ export function projectScenario(scenario: CoCScenario, opts?: { dynamicRefiValue
       } else {
         grossRent = (prevRentValue ?? baseMonthlyRent * 12) * (1 + operations.annualRentGrowthPct / 100);
       }
+      marketRent = grossRent; // legacy path has no LTL
       prevRentValue = grossRent;
       effectiveRent = grossRent * (1 - operations.vacancyRatePct / 100);
       opex = effectiveRent * ((operations.opexPct + operations.propertyMgmtPct) / 100);
@@ -260,6 +263,7 @@ export function projectScenario(scenario: CoCScenario, opts?: { dynamicRefiValue
 
     yearlyProjections.push({
       year,
+      marketRent,
       grossRent,
       effectiveRent,
       opex,

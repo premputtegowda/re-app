@@ -317,6 +317,8 @@ export interface ProFormaData {
   };
   expenses: ProFormaItem[];
   propertyTaxRatePct?: number; // derived: (stabilizedValue * 12) / purchasePrice — used in bisection, never shown to user
+  /** 12-month histogram: units renewing per month (from reno/lease-up schedule). Sum = total units. */
+  leaseAnniversaryDistribution?: number[];
   yearOverrides?: Record<number, {
     grossRent?: number;
     grossRentSystem?: boolean;       // true = set by rent schedule / calculator (not manual)
@@ -354,7 +356,8 @@ export interface CoCScenario {
 
 export interface CoCYearlyProjection {
   year: number;
-  grossRent: number;
+  marketRent: number;    // ideal rent: all units at market rate all year
+  grossRent: number;     // actual collected rent (market - loss to lease)
   effectiveRent: number;
   opex: number;
   noi: number;
