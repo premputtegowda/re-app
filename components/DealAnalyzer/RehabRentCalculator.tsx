@@ -119,15 +119,28 @@ export function simulateFromSchedule(
     monthly.slice(y * 12, (y + 1) * 12).reduce((a, b) => a + b, 0)
   );
 
+  // Stabilization month = the latest month any unit becomes stable (reno complete or lease-up flip).
+  // For reno, that's lastStartMonth + offline. For lease-up, it's the lastFlipMonth.
+  // Using `sched.length` (= totalDuration) was a bug — it inflated stabMonth by the unused tail
+  // of the schedule, pushing transitionYears to include years where everything is already stable.
   let maxStabMonth = 0;
   for (let t = 0; t < unitTypes.length; t++) {
     const sched = scheduleByType[t] ?? [];
-    if (sched.some(n => n > 0)) {
-      maxStabMonth = Math.max(maxStabMonth, Math.ceil(sched.length + (perUnitMonthsByType[t] ?? 0)));
+    let lastRenoStart = -1;
+    for (let i = sched.length - 1; i >= 0; i--) {
+      if ((sched[i] ?? 0) > 0) { lastRenoStart = i + 1; break; } // 1-indexed start month
     }
+    if (lastRenoStart > 0) {
+      maxStabMonth = Math.max(maxStabMonth, Math.ceil(lastRenoStart + (perUnitMonthsByType[t] ?? 0)));
+    }
+
     const leaseUpSched = leaseUpScheduleByType[t] ?? [];
-    if (leaseUpSched.some(n => n > 0)) {
-      maxStabMonth = Math.max(maxStabMonth, leaseUpSched.length);
+    let lastLeaseUpFlip = -1;
+    for (let i = leaseUpSched.length - 1; i >= 0; i--) {
+      if ((leaseUpSched[i] ?? 0) > 0) { lastLeaseUpFlip = i + 1; break; }
+    }
+    if (lastLeaseUpFlip > 0) {
+      maxStabMonth = Math.max(maxStabMonth, lastLeaseUpFlip);
     }
   }
 

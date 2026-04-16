@@ -80,6 +80,25 @@ describe('simulateFromSchedule — single type, renovation', () => {
     const result = simulateFromSchedule([unit], [[]], [[]], [1], 2);
     expect(result.stabilizationMonth).toBe(0);
   });
+
+  it('stabilizationMonth uses the LAST non-zero start, not the schedule array length', () => {
+    // Bug fix regression test:
+    // Schedule has 12 entries with last reno start at month 10 (index 9), offline = 2 mo.
+    // Old buggy calc: sched.length (12) + offline (2) = 14 → stabYear=2, transitionYears=[1,2].
+    //   That made the calculator emit a Year 2 system override (full target rent), which
+    //   short-circuited the projector's anniversary model → wrong LTL.
+    // Correct: last reno start = 10, + offline 2 = 12 → stabYear=1, transitionYears=[1] only.
+    const sched = [0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0]; // starts at M6 and M10
+    const result = simulateFromSchedule([{ label: 'A', count: 5, inPlaceRent: 1200, targetRent: 1500 }], [sched], [[]], [2], 3);
+    expect(result.stabilizationMonth).toBe(12);
+  });
+
+  it('stabilizationMonth from lease-up schedule uses the last non-zero flip month', () => {
+    // Lease-up flips at months 2, 6, 10 (no entries in 11, 12). Last flip = M10.
+    const leaseUp = [0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0];
+    const result = simulateFromSchedule([{ label: 'A', count: 5, inPlaceRent: 1200, targetRent: 1500 }], [[]], [leaseUp], [0], 3);
+    expect(result.stabilizationMonth).toBe(10);
+  });
 });
 
 describe('simulateFromSchedule — already-stable units', () => {
