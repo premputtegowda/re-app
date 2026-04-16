@@ -10,8 +10,18 @@ function HomeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const lastRoute = typeof window !== 'undefined' ? localStorage.getItem('dealstack_last_route') : null;
-  const redirectTo = searchParams.get('redirect') ?? lastRoute ?? '/dashboard';
-  const { isAuthenticated, isLoading, checkAuth, error } = useAuthStore();
+  const { isAuthenticated, isLoading, checkAuth, error, user } = useAuthStore();
+
+  // Default landing page is feature-aware. Users without REPS access should
+  // never land on a REPS route; if their lastRoute is a REPS route but they
+  // only have Deal Analyzer access, redirect to the Deal Analyzer dashboard.
+  const hasReps = !!user?.features?.includes('reps');
+  const hasDealAnalyzer = !!user?.features?.includes('deal_analyzer');
+  const featureDefault = hasReps ? '/dashboard' : hasDealAnalyzer ? '/deal-analyzer' : '/dashboard';
+  // Treat `/deal-analyzer*` as Deal Analyzer; everything else as REPS-side.
+  const lastRouteFeature: 'deal_analyzer' | 'reps' = lastRoute?.startsWith('/deal-analyzer') ? 'deal_analyzer' : 'reps';
+  const lastRouteAllowed = lastRoute && (lastRouteFeature === 'reps' ? hasReps || !user : hasDealAnalyzer || !user);
+  const redirectTo = searchParams.get('redirect') ?? (lastRouteAllowed ? lastRoute! : featureDefault);
 
   useEffect(() => {
     checkAuth();
