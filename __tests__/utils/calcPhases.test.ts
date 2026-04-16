@@ -243,6 +243,69 @@ describe('sticky bar states', () => {
   });
 });
 
+describe('stab section Done/Cancel visibility', () => {
+  /**
+   * Done/Cancel buttons only appear when there's something to save:
+   *   - new section that hasn't been completed yet (need Done to mark complete), OR
+   *   - dirty state (changes since last save).
+   * Once completed AND clean, the buttons hide so the user knows the state is persisted.
+   */
+  function showDoneCancel(args: {
+    valueAddCompleted: boolean;
+    isValueAdd: boolean | null;
+    activeOpsSection: 'rent' | 'valueAdd' | 'stab' | null;
+    stabCompleted: boolean;
+    isDirty: boolean;
+  }): boolean {
+    const { valueAddCompleted, isValueAdd, activeOpsSection, stabCompleted, isDirty } = args;
+    return (
+      valueAddCompleted &&
+      isValueAdd === true &&
+      activeOpsSection === 'stab' &&
+      (isDirty || !stabCompleted)
+    );
+  }
+
+  const baseActive = {
+    valueAddCompleted: true,
+    isValueAdd: true as boolean | null,
+    activeOpsSection: 'stab' as const,
+  };
+
+  it('shows when section is incomplete (need first Done to mark complete)', () => {
+    expect(showDoneCancel({ ...baseActive, stabCompleted: false, isDirty: false })).toBe(true);
+  });
+
+  it('shows when there are unsaved changes (dirty), even after first completion', () => {
+    expect(showDoneCancel({ ...baseActive, stabCompleted: true, isDirty: true })).toBe(true);
+  });
+
+  it('HIDES when section is completed AND clean (no edits since last save)', () => {
+    expect(showDoneCancel({ ...baseActive, stabCompleted: true, isDirty: false })).toBe(false);
+  });
+
+  it('hides when stab section is not active (user is on a different section)', () => {
+    expect(showDoneCancel({ ...baseActive, activeOpsSection: 'valueAdd', stabCompleted: false, isDirty: true })).toBe(false);
+    expect(showDoneCancel({ ...baseActive, activeOpsSection: null, stabCompleted: false, isDirty: true })).toBe(false);
+  });
+
+  it('hides when value-add prerequisite is incomplete', () => {
+    expect(showDoneCancel({ ...baseActive, valueAddCompleted: false, stabCompleted: false, isDirty: true })).toBe(false);
+  });
+
+  it('hides when isValueAdd is null/false (no value-add plan, no stab section)', () => {
+    expect(showDoneCancel({ ...baseActive, isValueAdd: null, stabCompleted: false, isDirty: true })).toBe(false);
+    expect(showDoneCancel({ ...baseActive, isValueAdd: false, stabCompleted: false, isDirty: true })).toBe(false);
+  });
+
+  it('reappears after a save when user makes another edit', () => {
+    // After save: completed + clean → hidden
+    expect(showDoneCancel({ ...baseActive, stabCompleted: true, isDirty: false })).toBe(false);
+    // User edits a field → isDirty flips to true → buttons reappear
+    expect(showDoneCancel({ ...baseActive, stabCompleted: true, isDirty: true })).toBe(true);
+  });
+});
+
 describe('full phase sequence', () => {
   it('follows correct order: idle → returns → uncertainty → done → idle', () => {
     const phases: CalcPhase[] = ['idle', 'returns', 'uncertainty', 'done', 'idle'];
