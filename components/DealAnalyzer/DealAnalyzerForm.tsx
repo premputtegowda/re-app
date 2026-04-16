@@ -1564,31 +1564,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                             )}
                           </div>
                           <div className="shrink-0 flex items-center gap-2">
-                            {calcApplied && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setCalcState(undefined);
-                                  setCalcKey(k => k + 1);
-                                  setProForma(prev => {
-                                    const ovs = { ...(prev.yearOverrides ?? {}) };
-                                    for (let y = 1; y <= acquisition.projectionYears; y++) {
-                                      if (ovs[y]) {
-                                        const { grossRent: _r, grossRentSystem: _s, ...rest } = ovs[y];
-                                        if (Object.keys(rest).length > 0) ovs[y] = rest; else delete ovs[y];
-                                      }
-                                    }
-                                    return { ...prev, yearOverrides: ovs };
-                                  });
-                                  if (hasMfr) updateAcquisition('unitMix', acquisition.unitMix.map(u => ({ ...u, preStabRent: 0 })));
-                                  else updateAcquisition('sfrPreStabRent', 0);
-                                }}
-                                className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors touch-manipulation"
-                              >
-                                <X size={11} />
-                                Use target rent
-                              </button>
-                            )}
                             <button
                               type="button"
                               onClick={() => { setCalcCollapsed(false); setPreStabMethod('calculator'); }}
