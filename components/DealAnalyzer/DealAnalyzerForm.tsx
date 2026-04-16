@@ -2264,7 +2264,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 </span>
               ) : (
                 <p className="text-xs text-slate-400 dark:text-slate-500">
-                  Click <span className="font-semibold text-slate-500 dark:text-slate-400">Done</span> on each step to save your progress
+                  Click <span className="font-semibold text-slate-500 dark:text-slate-400">Next</span> on each step to save your progress
                 </p>
               )}
             </div>
