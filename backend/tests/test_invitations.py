@@ -796,69 +796,7 @@ async def test_approve_access_request_sends_email_when_smtp_enabled(
     assert call_kwargs["to_email"] == "approvemail@example.com"
 
 
-# ── Deal Analyzer announcement email (PATCH /api/admin/users/{id}) ────────────
-
-@pytest.mark.asyncio
-async def test_deal_analyzer_email_sent_when_feature_added(
-    async_client: AsyncClient,
-    admin_auth_headers: dict,
-    test_user: User,
-):
-    """Enabling deal_analyzer feature sends announcement email via SMTP."""
-    mock_sender = AsyncMock()
-
-    with patch("app.routers.admin.get_settings") as mock_settings, \
-         patch("app.routers.admin.get_smtp_sender", return_value=mock_sender):
-        cfg = MagicMock()
-        cfg.smtp_enabled = True
-        cfg.frontend_url = "https://app.example.com"
-        mock_settings.return_value = cfg
-
-        resp = await async_client.patch(
-            f"/api/admin/users/{test_user.id}",
-            json={"add_feature": "deal_analyzer"},
-            headers=admin_auth_headers,
-        )
-
-    assert resp.status_code == 200
-    mock_sender.send_plain.assert_awaited_once()
-    call_kwargs = mock_sender.send_plain.call_args.kwargs
-    assert call_kwargs["to_email"] == test_user.email
-    assert "deal analyzer" in call_kwargs["subject"].lower()
-    assert test_user.name in call_kwargs["body"]
-    assert "https://app.example.com/deal-analyzer" in call_kwargs["body"]
-
-
-@pytest.mark.asyncio
-async def test_deal_analyzer_email_body_contains_key_features(
-    async_client: AsyncClient,
-    admin_auth_headers: dict,
-    test_user: User,
-):
-    """Announcement email body mentions all key Deal Analyzer features including refinance."""
-    mock_sender = AsyncMock()
-
-    with patch("app.routers.admin.get_settings") as mock_settings, \
-         patch("app.routers.admin.get_smtp_sender", return_value=mock_sender):
-        cfg = MagicMock()
-        cfg.smtp_enabled = True
-        cfg.frontend_url = "https://app.example.com"
-        mock_settings.return_value = cfg
-
-        await async_client.patch(
-            f"/api/admin/users/{test_user.id}",
-            json={"add_feature": "deal_analyzer"},
-            headers=admin_auth_headers,
-        )
-
-    body = mock_sender.send_plain.call_args.kwargs["body"]
-    assert "refinance" in body.lower()
-    assert "irr" in body.lower()
-    assert "what-if" in body.lower()
-    assert "break-even" in body.lower()
-    assert "monte carlo" in body.lower()
-    assert "The DealstackRE Team" in body
-
+# ── Deal Analyzer feature grant — verify NO email is sent (announcement removed) ──
 
 @pytest.mark.asyncio
 async def test_deal_analyzer_email_not_sent_when_smtp_disabled(
