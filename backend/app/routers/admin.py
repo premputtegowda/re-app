@@ -283,8 +283,16 @@ async def create_invitation(
             f"You've been invited to join DealstackRE with complimentary access.\n\n"
             f"Click the link below to accept your invitation (expires in {INVITE_EXPIRY_DAYS} days):\n"
             f"{invite_url}\n\n"
-            f"DealstackRE helps real estate professionals track and document their hours "
-            f"for IRS Real Estate Professional Status (REPS) qualification.\n\n"
+            f"DealstackRE is an all-in-one toolkit for real estate investors:\n\n"
+            f"  • REPS Tracker — log and document hours for IRS Real Estate Professional\n"
+            f"    Status (REPS) qualification, with AI-powered classification and\n"
+            f"    audit-ready reports.\n"
+            f"  • Deal Analyzer — model cash flows, IRR, equity multiple, and refinance\n"
+            f"    scenarios so you know the right price before you buy. Stress test every\n"
+            f"    deal against thousands of market scenarios to see how it holds up when\n"
+            f"    rents, rates, or values move against you.\n"
+            f"  • Market Research (coming soon) — identify the strongest markets with\n"
+            f"    unemployment, population, rent, and supply/demand trends.\n\n"
             f"— The DealstackRE Team"
         )
         try:
