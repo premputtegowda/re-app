@@ -1293,49 +1293,42 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     {isValueAdd === true && (
                       <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
                         {hasMfr ? (
-                          <>
-                            <table className="w-full text-sm">
-                              <thead>
-                                <tr className="bg-slate-50 dark:bg-slate-700/40 border-b border-slate-100 dark:border-slate-700/60">
-                                  <th className="px-4 py-2 text-left text-xs font-medium text-slate-400">Unit Type</th>
-                                  <th className="px-3 py-2 text-right text-xs font-medium text-slate-400">Renovation</th>
-                                  <th className="px-3 py-2 text-right text-xs font-medium text-slate-400">Lease-up</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
-                                {acquisition.unitMix.map(entry => (
-                                  <tr key={entry.id}>
-                                    <td className="px-4 py-2.5 text-xs font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">
-                                      {entry.beds}BR/{entry.baths}BA <span className="text-slate-400 font-normal">×{entry.count}</span>
-                                    </td>
-                                    <td className="px-2 py-2">
-                                      <input
-                                        type="number" min={0} max={entry.count} placeholder="0"
-                                        className="input text-sm text-right w-full"
-                                        value={(entry.unitsToRenovate ?? 0) === 0 ? '' : entry.unitsToRenovate}
-                                        onChange={e => updateAcquisition('unitMix', acquisition.unitMix.map(u =>
-                                          u.id === entry.id ? { ...u, unitsToRenovate: Math.min(Number(e.target.value) || 0, entry.count) } : u
-                                        ))}
-                                      />
-                                    </td>
-                                    <td className="px-2 py-2">
-                                      <input
-                                        type="number" min={0} max={entry.count - (entry.unitsToRenovate ?? 0)} placeholder="0"
-                                        className="input text-sm text-right w-full"
-                                        value={(entry.leaseUpUnits ?? 0) === 0 ? '' : entry.leaseUpUnits}
-                                        onChange={e => {
-                                          const val = Math.min(Number(e.target.value) || 0, entry.count - (entry.unitsToRenovate ?? 0));
-                                          updateAcquisition('unitMix', acquisition.unitMix.map(u =>
-                                            u.id === entry.id ? { ...u, leaseUpUnits: val } : u
-                                          ));
-                                        }}
-                                      />
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </>
+                          <div className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                            {acquisition.unitMix.map(entry => (
+                              <div key={entry.id} className="px-4 py-3 space-y-2">
+                                <p className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                                  {entry.beds}BR/{entry.baths}BA <span className="text-slate-400 font-normal">×{entry.count}</span>
+                                </p>
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <label className="text-[10px] font-medium text-slate-400 uppercase mb-1 block">Renovation</label>
+                                    <input
+                                      type="number" min={0} max={entry.count} placeholder="0"
+                                      className="input text-sm text-right w-full"
+                                      value={(entry.unitsToRenovate ?? 0) === 0 ? '' : entry.unitsToRenovate}
+                                      onChange={e => updateAcquisition('unitMix', acquisition.unitMix.map(u =>
+                                        u.id === entry.id ? { ...u, unitsToRenovate: Math.min(Number(e.target.value) || 0, entry.count) } : u
+                                      ))}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-[10px] font-medium text-slate-400 uppercase mb-1 block">Lease-up</label>
+                                    <input
+                                      type="number" min={0} max={entry.count - (entry.unitsToRenovate ?? 0)} placeholder="0"
+                                      className="input text-sm text-right w-full"
+                                      value={(entry.leaseUpUnits ?? 0) === 0 ? '' : entry.leaseUpUnits}
+                                      onChange={e => {
+                                        const val = Math.min(Number(e.target.value) || 0, entry.count - (entry.unitsToRenovate ?? 0));
+                                        updateAcquisition('unitMix', acquisition.unitMix.map(u =>
+                                          u.id === entry.id ? { ...u, leaseUpUnits: val } : u
+                                        ));
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         ) : (
                           <div className="px-4 py-3.5 flex items-center justify-between">
                             <span className="text-sm text-slate-600 dark:text-slate-300">1 unit to renovate</span>
