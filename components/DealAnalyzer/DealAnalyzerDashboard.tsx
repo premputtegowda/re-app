@@ -265,17 +265,32 @@ function DealCard({ deal, selected, compareMode, onLoad, onDelete, onToggleSelec
             <span className="text-[10px] text-slate-400">{formatRelativeDate(deal.savedAt)}</span>
           </div>
           <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={handleDelete}
-              className={`p-1.5 rounded-lg transition-all ${
-                confirmDelete
-                  ? 'bg-red-100 dark:bg-red-900/30 text-red-500'
-                  : 'text-slate-300 dark:text-slate-600 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 opacity-0 group-hover:opacity-100'
-              }`}
-            >
-              <Trash2 size={12} />
-            </button>
+            {confirmDelete ? (
+              <div className="flex items-center gap-1 animate-fade-in">
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  className="px-2 py-1 rounded-lg bg-red-500 text-white text-[10px] font-semibold hover:bg-red-600 transition-colors"
+                >
+                  Delete
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setConfirmDelete(false); }}
+                  className="px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-500 dark:text-slate-400 text-[10px] font-medium hover:border-slate-400 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleDelete}
+                className="p-1.5 rounded-lg transition-all text-slate-300 dark:text-slate-600 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 opacity-0 group-hover:opacity-100"
+              >
+                <Trash2 size={12} />
+              </button>
+            )}
             {!compareMode && (
               <ArrowRight size={15} className="text-slate-300 dark:text-slate-600 group-hover:text-primary-400 transition-colors" />
             )}
