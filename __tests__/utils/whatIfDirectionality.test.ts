@@ -101,6 +101,7 @@ const baseDeps = {
 
 const baseOverrides = {
   targetRentPerUnit: avgTargetRent,
+  targetRentsByType: [1500, 1000], // per-type rents matching the unit mix
   preStabRentPerUnit: avgPreStabRent,
   vacancyPct: proForma.vacancyPct.stabilized,
   rentGrowthPct: proForma.grossRent.growthPct,
@@ -133,7 +134,7 @@ describe('What-If directionality — every variable moves IRR correctly', () => 
   // ── Variables where LOWER = worse (IRR should decrease) ──
 
   it('target rent ↓ → IRR ↓ (the bug this fix addresses)', () => {
-    const worse = getIRR({ ...baseOverrides, targetRentPerUnit: avgTargetRent * 0.8 });
+    const worse = getIRR({ ...baseOverrides, targetRentsByType: [1500 * 0.8, 1000 * 0.8] });
     expect(worse).toBeLessThan(baseIRR);
   });
 
@@ -195,7 +196,7 @@ describe('What-If directionality — every variable moves IRR correctly', () => 
   // ── Variables where BETTER = higher IRR ──
 
   it('target rent ↑ → IRR ↑', () => {
-    const better = getIRR({ ...baseOverrides, targetRentPerUnit: avgTargetRent * 1.2 });
+    const better = getIRR({ ...baseOverrides, targetRentsByType: [1500 * 1.2, 1000 * 1.2] });
     expect(better).toBeGreaterThan(baseIRR);
   });
 

@@ -10,6 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildWhatIfResult, computeAvgRents } from '@/utils/whatIfCalc';
 import { projectScenario } from '@/utils/dealAnalyzerCalc';
+import { simulateFromSchedule } from '@/components/DealAnalyzer/RehabRentCalculator';
 import type { CoCAcquisition, CoCOperations, CoCRefinance, ProFormaData, CoCScenario, CalcPersistedState } from '@/types';
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
@@ -184,6 +185,92 @@ describe('What-If identity — defaults must match base case exactly', () => {
   it('Year 5 NOI matches', () => {
     expect(whatif.yearlyProjections[4].noi).toBeCloseTo(base.yearlyProjections[4].noi, 0);
   });
+});
+
+describe('What-If identity — random scenarios all match base exactly', () => {
+  // Run multiple scenarios with varied inputs to verify the simulator path
+  // produces identical results for base and What-If at defaults.
+
+  function makeScenario(targetA: number, targetB: number, countA: number, countB: number, growth: number, vacancy: number, rate: number, capRate: number, price: number) {
+    const acq = { ...acquisition, purchasePrice: price, interestRate: rate, exitCapRate: capRate, unitMix: [
+      { ...acquisition.unitMix[0], count: countA, rentMonthly: targetA, inPlaceRent: acquisition.unitMix[0].inPlaceRent },
+      { ...acquisition.unitMix[1], count: countB, rentMonthly: targetB, inPlaceRent: acquisition.unitMix[1].inPlaceRent },
+    ]};
+
+    // Run the simulator FIRST — same as handleCalculate does in production.
+    // Both base and What-If use this simulator output, guaranteeing identity.
+    const simUnitTypes = acq.unitMix.map(e => ({
+      label: `${e.beds}BR`, count: e.count,
+      inPlaceRent: e.inPlaceRent || 0, targetRent: e.rentMonthly || 0,
+    }));
+    const simResult = simulateFromSchedule(
+      simUnitTypes,
+      calcState.scheduleByType ?? simUnitTypes.map(() => []),
+      calcState.leaseUpScheduleByType ?? simUnitTypes.map(() => []),
+      calcState.perUnitMonths ?? simUnitTypes.map(() => 0),
+      5,
+    );
+    const stabYear = Math.ceil(simResult.stabilizationMonth / 12);
+    const freshOverrides: ProFormaData['yearOverrides'] = { 1: { vacancyPct: vacancy } };
+    for (let y = 1; y <= Math.min(stabYear, 5); y++) {
+      freshOverrides[y] = { ...(freshOverrides[y] ?? {}), grossRent: simResult.yearlyRents[y - 1], grossRentSystem: true };
+    }
+
+    const pf: ProFormaData = {
+      ...proForma,
+      grossRent: { t12: 0, stab: null, stabilized: (targetA * countA + targetB * countB) * 12, growthPct: growth },
+      vacancyPct: { t12: vacancy, stab: null, stabilized: vacancy },
+      yearOverrides: freshOverrides,
+      leaseAnniversaryByType: simResult.anniversaryByType,
+      leaseAnniversaryDistribution: simResult.anniversaryDistribution,
+    };
+    const ref: CoCRefinance = { ...refinance, newInterestRate: rate - 0.5 };
+    const { units: u, avgTargetRent: avg, avgPreStabRent: pre } = computeAvgRents(acq);
+    const baseScenario: CoCScenario = { id: 'b', name: 'B', scenarioType: 'base', acquisition: acq, operations, proForma: pf, refinance: ref, createdAt: '', updatedAt: '' };
+    const baseR = projectScenario(baseScenario);
+    const whatIfR = buildWhatIfResult({
+      targetRentPerUnit: avg,
+      targetRentsByType: [targetA, targetB],
+      preStabRentPerUnit: pre,
+      vacancyPct: vacancy,
+      vacancyByYear: { 1: vacancy },
+      rentGrowthPct: growth,
+      propertyMgmtPct: 8, maintenancePct: 5, fixedExpenseGrowthPct: 2,
+      interestRate: rate, exitCapRate: capRate, purchasePrice: price, projectionYears: 5,
+      refiRate: rate - 0.5, refiYear: 3,
+    }, {
+      acquisition: acq, operations, proForma: pf, refinance: ref,
+      units: u, origStabilizedAnnual: pf.grossRent.stabilized,
+      defaultPreStabAnnual: pre * u * 12, defaultFixedExpenseGrowthPct: 2,
+      calcState, baseResult: baseR,
+    });
+    return { baseR, whatIfR };
+  }
+
+  const scenarios = [
+    { name: 'cheap SFR-like',         a: 800,  b: 600,  cA: 3,  cB: 2,  g: 2, v: 8,  r: 6,   cap: 7,  p: 400_000 },
+    { name: 'mid-range MFR',          a: 1500, b: 1000, cA: 10, cB: 5,  g: 3, v: 5,  r: 7,   cap: 8,  p: 1_500_000 },
+    { name: 'luxury high-rise',       a: 3000, b: 2200, cA: 20, cB: 10, g: 4, v: 3,  r: 5.5, cap: 6,  p: 8_000_000 },
+    { name: 'high vacancy distressed', a: 900,  b: 700,  cA: 8,  cB: 4,  g: 1, v: 15, r: 8,   cap: 10, p: 600_000 },
+    { name: 'zero growth stable',     a: 1200, b: 1200, cA: 6,  cB: 6,  g: 0, v: 5,  r: 7,   cap: 9,  p: 1_000_000 },
+  ];
+
+  for (const s of scenarios) {
+    it(`${s.name}: IRR matches`, () => {
+      const { baseR, whatIfR } = makeScenario(s.a, s.b, s.cA, s.cB, s.g, s.v, s.r, s.cap, s.p);
+      expect(whatIfR.irr).toBeCloseTo(baseR.irr ?? 0, 2);
+    });
+
+    it(`${s.name}: total cash flow matches`, () => {
+      const { baseR, whatIfR } = makeScenario(s.a, s.b, s.cA, s.cB, s.g, s.v, s.r, s.cap, s.p);
+      expect(whatIfR.totalCashFlow).toBeCloseTo(baseR.totalCashFlow, 0);
+    });
+
+    it(`${s.name}: equity multiple matches`, () => {
+      const { baseR, whatIfR } = makeScenario(s.a, s.b, s.cA, s.cB, s.g, s.v, s.r, s.cap, s.p);
+      expect(whatIfR.equityMultiple).toBeCloseTo(baseR.equityMultiple, 3);
+    });
+  }
 });
 
 describe('What-If per-year overrides use the same projector as the base', () => {

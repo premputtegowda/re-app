@@ -90,9 +90,13 @@ export function buildWhatIfResult(ov: WhatIfOverrides, deps: BuildDeps): CoCResu
   // ── Re-run the stabilization simulator with the What-If target rents ──
   // Uses per-type rents so each type gets its exact What-If value.
   // In-place rents stay unchanged — only target rent moves.
-  // ── Always re-run the simulator — no ratio-based fallback ──
-  // Deals without schedule data get empty schedules → all units stable from month 1
-  // → Year 1 = target × units × 12 (no transition). Same result as a non-value-add deal.
+  // ── Always re-run the simulator with the What-If target rents ──
+  // The simulator is deterministic: same inputs → same output. If the What-If
+  // at defaults doesn't match the base case, the root cause is stale data in
+  // the ProForma (anniversary or yearOverrides not matching current calcState).
+  // We never skip the simulator — it IS the source of truth.
+  const projYears = Math.max(Math.round(ov.projectionYears), 2);
+
   const unitTypes = isMfr
     ? acquisition.unitMix.map((e, i) => ({
         label: `${e.beds}BR/${e.baths}BA`,
@@ -110,12 +114,11 @@ export function buildWhatIfResult(ov: WhatIfOverrides, deps: BuildDeps): CoCResu
   const scheduleByType = calcState?.scheduleByType ?? unitTypes.map(() => []);
   const leaseUpScheduleByType = calcState?.leaseUpScheduleByType ?? unitTypes.map(() => []);
   const perUnitMonths = calcState?.perUnitMonths ?? unitTypes.map(() => 0);
-  const projYears = Math.max(Math.round(ov.projectionYears), 2);
 
   const simResult = simulateFromSchedule(unitTypes, scheduleByType, leaseUpScheduleByType, perUnitMonths, projYears);
 
-  // Start with ALL existing yearOverrides from the ProForma (vacancy, growth, expenses, etc.)
-  // so non-rent overrides carry through. Then layer the simulator's transition-year rents on top.
+  // Start with ALL existing yearOverrides from the ProForma, then overlay
+  // the simulator's transition-year rents on top.
   const freshYearOverrides: ProFormaData['yearOverrides'] = {};
   for (const [yrStr, yrOv] of Object.entries(proForma.yearOverrides ?? {})) {
     if (yrOv) freshYearOverrides[Number(yrStr)] = { ...yrOv };

@@ -13,7 +13,7 @@ import { StepRenovation } from './steps/StepRenovation';
 import { StepExit } from './steps/StepExit';
 import { ResultsPanel } from './ResultsPanel';
 import { ProFormaGrid, defaultProForma } from './ProFormaGrid';
-import { RehabRentCalculator } from './RehabRentCalculator';
+import { RehabRentCalculator, simulateFromSchedule } from './RehabRentCalculator';
 import type { CalcPersistedState } from '@/types';
 import { projectScenario, formatCurrencyCompact } from '@/utils/dealAnalyzerCalc';
 import { useDealAnalyzerStore, type DealAnalyzerDraft } from '@/lib/dealAnalyzerStore';
@@ -832,11 +832,45 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
     // Delay to let the UI show the loading state before heavy computation
     setTimeout(() => {
+    // Re-run the simulator to ensure the base result uses the same fresh data
+    // that the What-If panel would produce. This eliminates any mismatch from
+    // stale anniversary data or year overrides in the stored ProForma.
+    let freshProForma = proForma;
+    if (calcState && isValueAdd === true) {
+      const isMfr = acquisition.propertyType === 'mfr' && acquisition.unitMix.length > 0;
+      const simUnitTypes = isMfr
+        ? acquisition.unitMix.map(e => ({
+            label: `${e.beds}BR/${e.baths}BA`,
+            count: e.count,
+            inPlaceRent: e.inPlaceRent || 0,
+            targetRent: e.rentMonthly || 0,
+          }))
+        : [{ label: 'SFR', count: 1, inPlaceRent: acquisition.sfrInPlaceRent || 0, targetRent: acquisition.sfrTargetRent || 0 }];
+      const simSchedule = calcState.scheduleByType ?? simUnitTypes.map(() => []);
+      const simLeaseUp = calcState.leaseUpScheduleByType ?? simUnitTypes.map(() => []);
+      const simOffline = calcState.perUnitMonths ?? simUnitTypes.map(() => 0);
+      const simResult = simulateFromSchedule(simUnitTypes, simSchedule, simLeaseUp, simOffline, Math.max(acquisition.projectionYears, 2));
+
+      const freshOverrides = { ...(proForma.yearOverrides ?? {}) };
+      const simStabYear = Math.ceil(simResult.stabilizationMonth / 12);
+      for (let y = 1; y <= Math.min(simStabYear, acquisition.projectionYears); y++) {
+        freshOverrides[y] = { ...(freshOverrides[y] ?? {}), grossRent: simResult.yearlyRents[y - 1], grossRentSystem: true };
+      }
+      freshProForma = {
+        ...proForma,
+        yearOverrides: freshOverrides,
+        leaseAnniversaryByType: simResult.anniversaryByType,
+        leaseAnniversaryDistribution: simResult.anniversaryDistribution,
+      };
+      // Also update the in-memory proForma so it stays in sync
+      setProForma(freshProForma);
+    }
+
     const scenario: CoCScenario = {
       id: Date.now().toString(36),
       name: CHIP_LABELS[activeType],
       scenarioType: activeType,
-      acquisition, operations, proForma, refinance,
+      acquisition, operations, proForma: freshProForma, refinance,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };

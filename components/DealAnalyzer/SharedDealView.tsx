@@ -170,6 +170,7 @@ export function SharedDealView({ deal, token }: SharedDealViewProps) {
           onMcRangesChange={setMcRanges}
           mcResults={mcResults}
           onMcResultsChange={setMcResults}
+          calcState={deal.calcState}
         />
 
         {/* Add to dashboard CTA */}
