@@ -2249,6 +2249,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     onMcResultsChange={setMcResults}
                     mcSimRunRef={mcSimRunRef}
                     calcPhase={calcPhase}
+                    calcState={calcState}
                   />
                 </div>
               )

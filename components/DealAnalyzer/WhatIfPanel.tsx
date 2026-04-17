@@ -19,6 +19,7 @@ interface WhatIfPanelProps {
   refinance: CoCRefinance;
   baseResult: CoCResult;
   embedded?: boolean;
+  calcState?: import('@/types').CalcPersistedState;
 }
 
 
@@ -573,7 +574,7 @@ function SectionLabel({ label }: { label: string }) {
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
-export function WhatIfPanel({ acquisition, operations, proForma, refinance, baseResult, embedded }: WhatIfPanelProps) {
+export function WhatIfPanel({ acquisition, operations, proForma, refinance, baseResult, embedded, calcState }: WhatIfPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [panelMode, setPanelMode] = useState<'explore' | 'goalseek'>('explore');
   const [goalMetric, setGoalMetric] = useState<GoalMetric>('irr');
@@ -638,6 +639,7 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
     origStabilizedAnnual,
     defaultPreStabAnnual: defaults.preStabRentPerUnit * effectiveUnits * 12,
     defaultFixedExpenseGrowthPct: Math.round(avgFixedGrowthPct * 4) / 4,
+    calcState,
   };
 
   // ── Main what-if result ──

@@ -137,9 +137,12 @@ describe('What-If directionality — every variable moves IRR correctly', () => 
     expect(worse).toBeLessThan(baseIRR);
   });
 
-  it('pre-stab rent ↓ → IRR ↓', () => {
-    const worse = getIRR({ ...baseOverrides, preStabRentPerUnit: avgPreStabRent * 0.7 });
-    expect(worse).toBeLessThan(baseIRR);
+  it('pre-stab rent slider does not affect IRR (simulator computes Year 1 from in-place + target)', () => {
+    // With the simulator-based What-If, pre-stab is not an input — the simulator
+    // derives Year 1 from in-place and target rents directly. So changing pre-stab
+    // has no effect on projections.
+    const same = getIRR({ ...baseOverrides, preStabRentPerUnit: avgPreStabRent * 0.7 });
+    expect(Math.abs(same - baseIRR)).toBeLessThan(0.01);
   });
 
   it('rent growth ↓ → IRR ↓', () => {
