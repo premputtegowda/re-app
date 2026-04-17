@@ -319,9 +319,10 @@ interface ResultsPanelProps {
   mcResults?: SavedMCResults | null;
   onMcResultsChange?: (r: SavedMCResults) => void;
   /** Ref filled with the MC simulation run function — caller can trigger a run externally */
-  mcSimRunRef?: React.MutableRefObject<(() => void) | null>;
+  mcSimRunRef?: React.MutableRefObject<(() => Promise<void>) | null>;
   calcPhase?: CalcPhase;
   calcState?: import('@/types').CalcPersistedState;
+  onCalcPhaseChange?: (phase: CalcPhase) => void;
 }
 
 function computeAvgRents(acquisition: CoCAcquisition): { units: number; avgTargetRent: number; avgPreStabRent: number } {
@@ -340,13 +341,13 @@ function computeAvgRents(acquisition: CoCAcquisition): { units: number; avgTarge
   return { units: acquisition.units || 1, avgTargetRent: 0, avgPreStabRent: 0 };
 }
 
-export function ResultsPanel({ result, acquisition, operations, proForma, refinance, mcRanges, onMcRangesChange, mcResults, onMcResultsChange, mcSimRunRef, calcPhase = 'idle', calcState }: ResultsPanelProps) {
+export function ResultsPanel({ result, acquisition, operations, proForma, refinance, mcRanges, onMcRangesChange, mcResults, onMcResultsChange, mcSimRunRef, calcPhase = 'idle', calcState, onCalcPhaseChange }: ResultsPanelProps) {
   const [activeTab, setActiveTab] = useState<ResultTab>('summary');
   const { units, avgTargetRent, avgPreStabRent } = computeAvgRents(acquisition);
   const { totalInvested, avgCoCReturn, irr, equityMultiple, peakCoCReturn, totalCashFlow } = result;
   const v = verdict(irr, avgCoCReturn);
 
-  const internalRunRef = useRef<(() => void) | null>(null);
+  const internalRunRef = useRef<(() => Promise<void>) | null>(null);
   const stressRunRef = mcSimRunRef ?? internalRunRef;
   const openEditorRef = useRef<(() => void) | null>(null);
 
@@ -510,6 +511,7 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
           onResultsChange={onMcResultsChange}
           runTriggerRef={stressRunRef}
           openEditorRef={openEditorRef}
+          onCalcPhaseChange={onCalcPhaseChange}
         />
       )}
       </>)}

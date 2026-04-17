@@ -29,6 +29,8 @@ import type {
   SavedDeal,
 } from '@/types';
 import type { MCRanges, SavedMCResults } from '@/utils/monteCarlo';
+import { runSimulation, computeDefaultRanges, toSavedMCResults, findMaxPriceAtConditions } from '@/utils/monteCarlo';
+import { computeAvgRents } from '@/utils/whatIfCalc';
 
 // ── Step definitions ───────────────────────────────────────────────────────────
 
@@ -562,7 +564,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   isDirtyRef.current = isDirty;
 
   const resultsRef = useRef<HTMLDivElement>(null);
-  const mcSimRunRef = useRef<(() => void) | null>(null);
+  const mcSimRunRef = useRef<(() => Promise<void>) | null>(null);
   const calcDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Recompute results when opening a saved deal
@@ -868,10 +870,43 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       savedSnapshot.current = JSON.stringify({ acquisition, operations, proForma, refinance });
     }
 
-    // Show uncertainty phase briefly, then reveal results
+    // Run Monte Carlo simulation directly — no dependency on MC panel being mounted.
+    // Minimum 1.5s on the "uncertainty" phase so the message is readable (matches
+    // the original timing), then 0.5s on "done" before results fade in.
     setCalcPhase('uncertainty');
-    setTimeout(() => setCalcPhase('done'), 1500);
-    setTimeout(() => setCalcPhase('idle'), 2000);
+    const uncertaintyStart = Date.now();
+    const { units: mcUnits, avgPreStabRent: mcPreStab } = computeAvgRents(acquisition);
+    const effectiveRanges = mcRanges ?? computeDefaultRanges(acquisition, proForma, 0, Math.max(1, mcUnits), refinance);
+    runSimulation({
+      n: 500,
+      ranges: effectiveRanges,
+      acquisition, operations, proForma, refinance,
+      units: Math.max(1, mcUnits),
+      avgPreStabPerUnit: mcPreStab,
+    }).then(r => {
+      const targetIRR = 15;
+      const p20 = r.p20 ?? r.p50;
+      const args = [acquisition, operations, proForma, refinance, Math.max(1, mcUnits), mcPreStab] as const;
+      const recMax = findMaxPriceAtConditions(r.p50.sampled, targetIRR, ...args);
+      const conMax = findMaxPriceAtConditions(p20.sampled, targetIRR, ...args);
+      const saved = toSavedMCResults(r, recMax, conMax, targetIRR, 8);
+      setMcResults(saved);
+      if (!mcRanges) setMcRanges(effectiveRanges);
+      // Wait for minimum 1.5s on uncertainty phase, then transition
+      const elapsed = Date.now() - uncertaintyStart;
+      const remaining = Math.max(0, 1500 - elapsed);
+      setTimeout(() => {
+        setCalcPhase('done');
+        setTimeout(() => setCalcPhase('idle'), 500);
+      }, remaining);
+    }).catch(() => {
+      const elapsed = Date.now() - uncertaintyStart;
+      const remaining = Math.max(0, 1500 - elapsed);
+      setTimeout(() => {
+        setCalcPhase('done');
+        setTimeout(() => setCalcPhase('idle'), 500);
+      }, remaining);
+    });
     }, 100); // end of setTimeout from setCalcPhase('returns')
   };
 
@@ -1832,25 +1867,26 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const _someLUOps = _mfrOps && acquisition.unitMix.some(e => (e.leaseUpUnits ?? 0) > 0);
   const _hasAnyUnitsOps = _someRenoOps || _someLUOps;
   const opsValueAddIncomplete = isValueAdd === true && !_hasAnyUnitsOps;
-  // Calculator applied = at least one yearOverride has grossRentSystem (set by the calculator's auto-apply)
-  const _calcApplied = Object.values(proForma.yearOverrides ?? {}).some(ov => ov?.grossRentSystem);
-  // Schedule mismatch: assigned units in value-add don't match the calculator's saved schedule
+  // Schedule mismatch: assigned units in value-add don't match the calculator's saved schedule.
+  // Only check when calcState HAS schedule data — if null/empty, the always-mounted calculator
+  // will populate it momentarily (not a real mismatch, just a loading race).
+  const _hasScheduleData = calcState?.scheduleByType?.some(s => s.length > 0) ||
+    calcState?.leaseUpScheduleByType?.some(s => s.length > 0);
   const _renoArr = _mfrOps ? acquisition.unitMix.map(e => e.unitsToRenovate ?? 0) : [1];
   const _luArr = _mfrOps ? acquisition.unitMix.map(e => e.leaseUpUnits ?? 0) : [0];
   const _renoTotals = _renoArr.map((_, t) =>
     (calcState?.scheduleByType?.[t] ?? []).reduce((s: number, n: number) => s + n, 0));
   const _luTotals = _luArr.map((_, t) =>
     (calcState?.leaseUpScheduleByType?.[t] ?? []).reduce((s: number, n: number) => s + n, 0));
-  const _scheduleHasMismatch =
+  const _scheduleHasMismatch = _hasScheduleData && (
     _renoArr.some((u, t) => u > 0 && _renoTotals[t] !== u) ||
-    _luArr.some((u, t) => u > 0 && _luTotals[t] !== u);
-  const _calcNotAppliedYet = preStabMethod === 'calculator' && (_someRenoOps || _someLUOps) && !_calcApplied;
+    _luArr.some((u, t) => u > 0 && _luTotals[t] !== u)
+  );
   const _calcScheduleIncomplete = preStabMethod === 'calculator' && (_someRenoOps || _someLUOps) && _scheduleHasMismatch;
   const opsStabIncomplete = isValueAdd === true && (
     !_hasAnyUnitsOps ||
     stabDuration === 0 ||
     (_someRenoOps && offlinePerUnit === 0) ||
-    _calcNotAppliedYet ||
     _calcScheduleIncomplete
   );
 
@@ -2250,6 +2286,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     mcSimRunRef={mcSimRunRef}
                     calcPhase={calcPhase}
                     calcState={calcState}
+                    onCalcPhaseChange={setCalcPhase}
                   />
                 </div>
               )

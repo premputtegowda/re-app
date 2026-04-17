@@ -25,8 +25,10 @@ interface MonteCarloPanelProps {
   onResultsChange?: (r: SavedMCResults) => void;
   onStaleChange?: (stale: boolean) => void;
   onRunningChange?: (running: boolean, progress: number) => void;
-  runTriggerRef?: React.MutableRefObject<(() => void) | null>;
+  runTriggerRef?: React.MutableRefObject<(() => Promise<void>) | null>;
   openEditorRef?: React.MutableRefObject<(() => void) | null>;
+  /** Parent's calc phase setter — allows range-commit re-runs to show the loading banner */
+  onCalcPhaseChange?: (phase: 'idle' | 'returns' | 'uncertainty' | 'done') => void;
 }
 
 const N_RUNS = 10000;
@@ -527,7 +529,7 @@ export function MonteCarloPanel({
   avgTargetRentPerUnit, avgPreStabPerUnit, units,
   savedRanges, onRangesChange,
   savedResults, onResultsChange,
-  onStaleChange, onRunningChange, runTriggerRef, openEditorRef,
+  onStaleChange, onRunningChange, runTriggerRef, openEditorRef, onCalcPhaseChange,
 }: MonteCarloPanelProps) {
   const { mcRangeDefaults, setMCRangeDefaults } = useDealSettingsStore();
   const defaults = useMemo(
@@ -725,17 +727,8 @@ export function MonteCarloPanel({
   const isStaleRef = useRef(isStale);
   useEffect(() => { isStaleRef.current = isStale; }, [isStale]);
 
-  // Auto-run on first visit if no saved results, stale, or fingerprint was never stored
-  useEffect(() => {
-    if (!savedResults || !savedResults.inputFingerprint || isStale) {
-      runRef.current();
-    }
-    // Auto-run on unmount if stale (keeps dashboard card fresh)
-    return () => {
-      if (isStaleRef.current) runRef.current();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Simulation runs from handleCalculate (alongside base calc) and when ranges
+  // are committed via Done. No auto-run on panel mount or unmount.
 
   return (
     <div className="space-y-5">
@@ -805,7 +798,19 @@ export function MonteCarloPanel({
                   setShowEditor(false);
                   if (changed) {
                     handleRangesChange(draftRanges);
-                    runRef.current(draftRanges);
+                    // Show loading banner with same timing as base calculation
+                    onCalcPhaseChange?.('uncertainty');
+                    const start = Date.now();
+                    runRef.current(draftRanges).then(() => {
+                      const remaining = Math.max(0, 1500 - (Date.now() - start));
+                      setTimeout(() => {
+                        onCalcPhaseChange?.('done');
+                        setTimeout(() => onCalcPhaseChange?.('idle'), 500);
+                      }, remaining);
+                    }).catch(() => {
+                      onCalcPhaseChange?.('done');
+                      setTimeout(() => onCalcPhaseChange?.('idle'), 500);
+                    });
                   }
                 }}
                 className="px-3 py-1 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-xs font-semibold transition-colors"

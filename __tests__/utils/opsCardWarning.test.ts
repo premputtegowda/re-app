@@ -223,6 +223,25 @@ describe('Stabilization OpsCard — stabIncomplete (warning trigger)', () => {
       }),
     ).toBe(false);
   });
+
+  it('value-add yes + valid schedule + calculator not yet applied → NOT incomplete (no flash on load)', () => {
+    // Regression test: previously _calcNotAppliedYet fired a warning during the
+    // brief window between page load and the calculator's auto-apply. This caused
+    // the Operations step warning to flash on every refresh. Now the warning only
+    // fires for real issues — transient "not yet applied" state is NOT a warning.
+    // The key: calcScheduleIncomplete=false (schedule matches) + all inputs valid
+    // → no warning, even though the calculator hasn't written grossRentSystem yet.
+    expect(
+      computeStabIncomplete({
+        isValueAdd: true,
+        hasMfr: true,
+        unitMix: baseUnits,
+        stabDuration: 12,
+        offlinePerUnit: 2,
+        calcScheduleIncomplete: false,
+      }),
+    ).toBe(false);
+  });
 });
 
 // ── Pre-ProForma banner — message construction ───────────────────────────────
