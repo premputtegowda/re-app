@@ -689,7 +689,27 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
   };
 
   // ── Main what-if result ──
-  const whatIfResult = useMemo(() => buildWhatIfResult(overrides, deps),
+  const whatIfResult = useMemo(() => {
+    const r = buildWhatIfResult(overrides, deps);
+    if (baseResult && Math.abs((r.irr ?? 0) - (baseResult.irr ?? 0)) > 0.01) {
+      const yrs = Math.min(r.yearlyProjections.length, baseResult.yearlyProjections.length);
+      for (let y = 0; y < yrs; y++) {
+        const bp = baseResult.yearlyProjections[y];
+        const wp = r.yearlyProjections[y];
+        if (Math.abs(bp.noi - wp.noi) > 1) {
+          console.log(`[WhatIf] Yr${y+1} diff:`, {
+            baseMarket: bp.marketRent, wiMarket: wp.marketRent,
+            baseGross: bp.grossRent, wiGross: wp.grossRent,
+            baseEGI: bp.effectiveRent, wiEGI: wp.effectiveRent,
+            baseOpex: bp.opex, wiOpex: wp.opex,
+            baseNOI: bp.noi, wiNOI: wp.noi,
+          });
+          break; // first differing year only
+        }
+      }
+    }
+    return r;
+  },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [overrides, acquisition, operations, proForma, refinance]);
 
