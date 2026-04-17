@@ -6,12 +6,24 @@ import type { CoCAcquisition, CoCOperations, CoCRefinance, CoCResult, ProFormaDa
 
 export interface WhatIfOverrides {
   targetRentPerUnit: number;
+  /** Per-type target rents (indexed by unit-mix order). When present, used instead of targetRentPerUnit. */
+  targetRentsByType?: number[];
   preStabRentPerUnit: number;
   vacancyPct: number;
+  /** Per-year vacancy overrides (keyed by year number). Unset years use vacancyPct. */
+  vacancyByYear?: Record<number, number>;
   rentGrowthPct: number;
+  /** Per-year growth overrides (keyed by year number, e.g. {3: 5} = Year 3 at 5%). Unset years use rentGrowthPct. */
+  rentGrowthByYear?: Record<number, number>;
   propertyMgmtPct: number;
   maintenancePct: number;
   fixedExpenseGrowthPct: number;
+  /** Property tax growth per year — split from other fixed expenses. */
+  propertyTaxGrowthByYear?: Record<number, number>;
+  /** Non-tax fixed expense growth per year. */
+  fixedExpenseGrowthByYear?: Record<number, number>;
+  /** Total OpEx as % of EGI — per-year overrides keyed by year number. */
+  opexRatioByYear?: Record<number, number>;
   interestRate: number;
   exitCapRate: number;
   purchasePrice: number;
@@ -30,6 +42,7 @@ export interface BuildDeps {
   defaultPreStabAnnual: number;
   defaultFixedExpenseGrowthPct: number;
   calcState?: CalcPersistedState;
+  baseResult?: CoCResult;
 }
 
 // ── Pure helpers ───────────────────────────────────────────────────────────────
@@ -53,8 +66,20 @@ export function computeAvgRents(acquisition: CoCAcquisition): { units: number; a
 export function buildWhatIfResult(ov: WhatIfOverrides, deps: BuildDeps): CoCResult {
   const { acquisition, operations, proForma, refinance, units, origStabilizedAnnual, calcState } = deps;
   const effectiveUnits = Math.max(1, units);
-  const newTargetAnnual = ov.targetRentPerUnit * effectiveUnits * 12;
-  const rentRatio = origStabilizedAnnual > 0 ? newTargetAnnual / origStabilizedAnnual : 1;
+  const isMfr = acquisition.propertyType === 'mfr' && acquisition.unitMix.length > 0;
+
+  // Per-type target rents: use explicit per-type values when available.
+  // Single-type deals or single-slider mode: just use targetRentPerUnit for every type.
+  const perTypeRents: number[] = ov.targetRentsByType && ov.targetRentsByType.length > 0
+    ? ov.targetRentsByType
+    : isMfr
+    ? acquisition.unitMix.map(() => ov.targetRentPerUnit)
+    : [ov.targetRentPerUnit];
+
+  // Compute the actual new stabilized annual from per-type rents
+  const newTargetAnnual = isMfr
+    ? acquisition.unitMix.reduce((s, e, i) => s + (perTypeRents[i] ?? e.rentMonthly ?? 0) * e.count * 12, 0)
+    : perTypeRents[0] * effectiveUnits * 12;
 
   const priceRatio = acquisition.purchasePrice > 0 ? ov.purchasePrice / acquisition.purchasePrice : 1;
   const fixedGrowthChanged = ov.fixedExpenseGrowthPct !== deps.defaultFixedExpenseGrowthPct;
@@ -62,73 +87,51 @@ export function buildWhatIfResult(ov: WhatIfOverrides, deps: BuildDeps): CoCResu
   const vacancyChanged = ov.vacancyPct !== proForma.vacancyPct.stabilized;
   const expGrowthChanged = ov.fixedExpenseGrowthPct !== deps.defaultFixedExpenseGrowthPct;
 
-  // ── Re-run the stabilization simulator with the What-If target rent ──
-  // This gives exact Year 1 rent (not proportionally scaled) because
-  // in-place rents stay unchanged — only target rent moves.
-  let freshYearOverrides: ProFormaData['yearOverrides'] = {};
-  let freshAnniversaryByType: ProFormaData['leaseAnniversaryByType'] | undefined;
-  let freshAnniversaryDist: number[] | undefined;
+  // ── Re-run the stabilization simulator with the What-If target rents ──
+  // Uses per-type rents so each type gets its exact What-If value.
+  // In-place rents stay unchanged — only target rent moves.
+  // ── Always re-run the simulator — no ratio-based fallback ──
+  // Deals without schedule data get empty schedules → all units stable from month 1
+  // → Year 1 = target × units × 12 (no transition). Same result as a non-value-add deal.
+  const unitTypes = isMfr
+    ? acquisition.unitMix.map((e, i) => ({
+        label: `${e.beds}BR/${e.baths}BA`,
+        count: e.count,
+        inPlaceRent: e.inPlaceRent || 0,
+        targetRent: perTypeRents[i] ?? e.rentMonthly ?? 0,
+      }))
+    : [{
+        label: 'SFR',
+        count: 1,
+        inPlaceRent: acquisition.sfrInPlaceRent || 0,
+        targetRent: perTypeRents[0] ?? ov.targetRentPerUnit,
+      }];
 
-  const hasSchedule = calcState?.scheduleByType?.some(s => s.some(n => n > 0)) ||
-    calcState?.leaseUpScheduleByType?.some(s => s.some(n => n > 0));
+  const scheduleByType = calcState?.scheduleByType ?? unitTypes.map(() => []);
+  const leaseUpScheduleByType = calcState?.leaseUpScheduleByType ?? unitTypes.map(() => []);
+  const perUnitMonths = calcState?.perUnitMonths ?? unitTypes.map(() => 0);
+  const projYears = Math.max(Math.round(ov.projectionYears), 2);
 
-  if (hasSchedule && calcState) {
-    // Build unit types with the What-If target rent (in-place stays the same)
-    const isMfr = acquisition.propertyType === 'mfr' && acquisition.unitMix.length > 0;
-    const unitTypes = isMfr
-      ? acquisition.unitMix.map(e => ({
-          label: `${e.beds}BR/${e.baths}BA`,
-          count: e.count,
-          inPlaceRent: e.inPlaceRent || 0,
-          targetRent: (e.rentMonthly || 0) * rentRatio,
-        }))
-      : [{
-          label: 'SFR',
-          count: 1,
-          inPlaceRent: acquisition.sfrInPlaceRent || 0,
-          targetRent: ov.targetRentPerUnit,
-        }];
+  const simResult = simulateFromSchedule(unitTypes, scheduleByType, leaseUpScheduleByType, perUnitMonths, projYears);
 
-    const scheduleByType = calcState.scheduleByType ?? unitTypes.map(() => []);
-    const leaseUpScheduleByType = calcState.leaseUpScheduleByType ?? unitTypes.map(() => []);
-    const perUnitMonths = calcState.perUnitMonths ?? unitTypes.map(() => 0);
-    const projYears = Math.max(Math.round(ov.projectionYears), 2);
-
-    const simResult = simulateFromSchedule(unitTypes, scheduleByType, leaseUpScheduleByType, perUnitMonths, projYears);
-
-    // Build year overrides from fresh simulation (same logic as the calculator's auto-apply)
-    const stabYear = Math.ceil(simResult.stabilizationMonth / 12);
-    const transitionYears = Array.from({ length: Math.min(stabYear, projYears) }, (_, i) => i + 1);
-    transitionYears.forEach(y => {
-      freshYearOverrides[y] = {
-        ...(proForma.yearOverrides?.[y] ?? {}),
-        grossRent: simResult.yearlyRents[y - 1],
-        grossRentSystem: true,
-      };
-    });
-
-    freshAnniversaryByType = simResult.anniversaryByType;
-    freshAnniversaryDist = simResult.anniversaryDistribution;
-  } else {
-    // No schedule data — fall back to proportional scaling of existing overrides
-    for (const [yearStr, yearOv] of Object.entries(proForma.yearOverrides ?? {})) {
-      if (!yearOv) continue;
-      const y = Number(yearStr);
-      const cleaned = { ...yearOv };
-      if (rentGrowthChanged) delete cleaned.grossRentGrowthPct;
-      if (vacancyChanged) delete cleaned.vacancyPct;
-      if (expGrowthChanged) delete cleaned.expenseGrowthPcts;
-      if (cleaned.grossRent !== undefined && cleaned.grossRentSystem) {
-        freshYearOverrides[y] = { ...cleaned, grossRent: cleaned.grossRent * rentRatio };
-      } else {
-        freshYearOverrides[y] = cleaned;
-      }
-    }
-    freshAnniversaryByType = proForma.leaseAnniversaryByType?.map(t => ({
-      ...t,
-      targetRent: t.targetRent * rentRatio,
-    }));
+  // Start with ALL existing yearOverrides from the ProForma (vacancy, growth, expenses, etc.)
+  // so non-rent overrides carry through. Then layer the simulator's transition-year rents on top.
+  const freshYearOverrides: ProFormaData['yearOverrides'] = {};
+  for (const [yrStr, yrOv] of Object.entries(proForma.yearOverrides ?? {})) {
+    if (yrOv) freshYearOverrides[Number(yrStr)] = { ...yrOv };
   }
+  const stabYear = Math.ceil(simResult.stabilizationMonth / 12);
+  const transitionYears = Array.from({ length: Math.min(stabYear, projYears) }, (_, i) => i + 1);
+  transitionYears.forEach(y => {
+    freshYearOverrides[y] = {
+      ...(freshYearOverrides[y] ?? {}),
+      grossRent: simResult.yearlyRents[y - 1],
+      grossRentSystem: true,
+    };
+  });
+
+  const freshAnniversaryByType = simResult.anniversaryByType;
+  const freshAnniversaryDist = simResult.anniversaryDistribution;
 
   // Strip per-year overrides when what-if changes the corresponding variable
   for (const [yearStr] of Object.entries(freshYearOverrides)) {
@@ -145,12 +148,75 @@ export function buildWhatIfResult(ov: WhatIfOverrides, deps: BuildDeps): CoCResu
       return { ...e, stabilizedValue: ov.propertyMgmtPct };
     if (e.isPercentOfEGI && (e.name.toLowerCase().includes('maintenance') || e.name.toLowerCase().includes('repair')))
       return { ...e, stabilizedValue: ov.maintenancePct };
-    if (!e.isPercentOfEGI && e.name.toLowerCase().includes('tax'))
+    const isTax = !e.isPercentOfEGI && e.name.toLowerCase().includes('tax');
+    if (isTax)
       return { ...e, stabilizedValue: e.stabilizedValue * priceRatio, ...(fixedGrowthChanged ? { growthPct: ov.fixedExpenseGrowthPct } : {}) };
     if (!e.isPercentOfEGI)
       return fixedGrowthChanged ? { ...e, growthPct: ov.fixedExpenseGrowthPct } : e;
     return e;
   });
+
+  // Inject per-year property tax growth overrides
+  if (ov.propertyTaxGrowthByYear) {
+    const taxExpense = modifiedExpenses.find(e => !e.isPercentOfEGI && e.name.toLowerCase().includes('tax'));
+    if (taxExpense) {
+      for (const [yrStr, rate] of Object.entries(ov.propertyTaxGrowthByYear)) {
+        const y = Number(yrStr);
+        const ye = freshYearOverrides[y] ?? {};
+        freshYearOverrides[y] = { ...ye, expenseGrowthPcts: { ...(ye.expenseGrowthPcts ?? {}), [taxExpense.id]: rate } };
+      }
+    }
+  }
+  // Inject per-year non-tax fixed expense growth overrides
+  if (ov.fixedExpenseGrowthByYear) {
+    const nonTaxFixed = modifiedExpenses.filter(e => !e.isPercentOfEGI && !e.name.toLowerCase().includes('tax'));
+    for (const exp of nonTaxFixed) {
+      for (const [yrStr, rate] of Object.entries(ov.fixedExpenseGrowthByYear)) {
+        const y = Number(yrStr);
+        const ye = freshYearOverrides[y] ?? {};
+        freshYearOverrides[y] = { ...ye, expenseGrowthPcts: { ...(ye.expenseGrowthPcts ?? {}), [exp.id]: rate } };
+      }
+    }
+  }
+
+  // Inject per-year rent growth overrides into yearOverrides
+  if (ov.rentGrowthByYear) {
+    for (const [yrStr, rate] of Object.entries(ov.rentGrowthByYear)) {
+      const y = Number(yrStr);
+      freshYearOverrides[y] = { ...(freshYearOverrides[y] ?? {}), grossRentGrowthPct: rate };
+    }
+  }
+  // Inject per-year vacancy overrides into yearOverrides
+  if (ov.vacancyByYear) {
+    for (const [yrStr, pct] of Object.entries(ov.vacancyByYear)) {
+      const y = Number(yrStr);
+      freshYearOverrides[y] = { ...(freshYearOverrides[y] ?? {}), vacancyPct: pct };
+    }
+  }
+  // Inject per-year OpEx ratio overrides — scale each expense's year override
+  // proportionally so total OpEx/EGI hits the target percentage.
+  if (ov.opexRatioByYear && deps.baseResult) {
+    for (const [yrStr, targetPct] of Object.entries(ov.opexRatioByYear)) {
+      const y = Number(yrStr);
+      const proj = deps.baseResult.yearlyProjections?.[y - 1];
+      if (!proj || proj.effectiveRent <= 0) continue;
+      const baseRatio = proj.opex / proj.effectiveRent * 100;
+      if (baseRatio <= 0) continue;
+      const multiplier = targetPct / baseRatio;
+      // Scale each expense for this year
+      const expOvs: Record<string, number> = {};
+      for (const exp of modifiedExpenses) {
+        if (exp.isPercentOfEGI) {
+          expOvs[exp.id] = exp.stabilizedValue * multiplier;
+        } else {
+          // For fixed expenses, scale the chained value for this year
+          const baseVal = exp.stabilizedValue * Math.pow(1 + exp.growthPct / 100, y - 1);
+          expOvs[exp.id] = baseVal * multiplier;
+        }
+      }
+      freshYearOverrides[y] = { ...(freshYearOverrides[y] ?? {}), expenses: { ...(freshYearOverrides[y]?.expenses ?? {}), ...expOvs } };
+    }
+  }
 
   const scenario: CoCScenario = {
     id: 'whatif',
@@ -166,8 +232,8 @@ export function buildWhatIfResult(ov: WhatIfOverrides, deps: BuildDeps): CoCResu
     operations,
     proForma: {
       ...proForma,
-      grossRent: { t12: newTargetAnnual, stab: newTargetAnnual, stabilized: newTargetAnnual, growthPct: ov.rentGrowthPct },
-      vacancyPct: { t12: ov.vacancyPct, stab: null, stabilized: ov.vacancyPct },
+      grossRent: { t12: proForma.grossRent.t12, stab: newTargetAnnual, stabilized: newTargetAnnual, growthPct: ov.rentGrowthPct },
+      vacancyPct: { t12: proForma.vacancyPct.t12, stab: null, stabilized: ov.vacancyPct },
       creditLossPct: proForma.creditLossPct ?? { t12: 0, stab: null, stabilized: 0 },
       expenses: modifiedExpenses,
       yearOverrides: freshYearOverrides,

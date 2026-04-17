@@ -25,14 +25,15 @@ interface WhatIfPanelProps {
 
 // ── Slider ─────────────────────────────────────────────────────────────────────
 
-function Slider({ label, sublabel, value, min, max, step, displayValue, annotation, onChange, isChanged }: {
+function Slider({ label, sublabel, value, min, max, step, displayValue, annotation, onChange, isChanged, disabled }: {
   label: string; sublabel?: string; value: number; min: number; max: number; step: number;
   displayValue: string; annotation?: string; onChange: (v: number) => void; isChanged: boolean;
+  disabled?: boolean;
 }) {
   const pct = ((value - min) / (max - min)) * 100;
   const clamped = Math.min(Math.max(pct, 0), 100);
   return (
-    <div className="space-y-1.5">
+    <div className={`space-y-1.5 ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
       <div className="flex items-start justify-between gap-2">
         <div>
           <span className={`text-xs font-medium ${isChanged ? 'text-primary-600 dark:text-primary-400' : 'text-slate-600 dark:text-slate-400'}`}>
@@ -51,7 +52,7 @@ function Slider({ label, sublabel, value, min, max, step, displayValue, annotati
           <div className={`h-full rounded-full transition-all ${isChanged ? 'bg-primary-500' : 'bg-slate-400 dark:bg-slate-500'}`} style={{ width: `${clamped}%` }} />
         </div>
         <input type="range" min={min} max={max} step={step} value={value} onChange={e => onChange(Number(e.target.value))}
-          className="absolute inset-0 w-full opacity-0 cursor-pointer h-full" />
+          className="absolute inset-0 w-full opacity-0 cursor-pointer h-full" disabled={disabled} />
         <div className={`absolute w-4 h-4 rounded-full border-2 shadow-sm pointer-events-none transition-colors ${isChanged ? 'bg-white border-primary-500' : 'bg-white dark:bg-slate-300 border-slate-400 dark:border-slate-500'}`}
           style={{ left: `calc(${clamped}% - 8px)` }} />
       </div>
@@ -587,11 +588,17 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
   // ── Anchor values from unit mix ──
   const { units, avgTargetRent, avgPreStabRent } = useMemo(() => computeAvgRents(acquisition), [acquisition]);
   const effectiveUnits = Math.max(1, units);
-  // Derive per-unit rent from proForma.grossRent.stabilized so the What-If default
-  // exactly matches the base result (unit-mix values can diverge from the ProForma).
   const proFormaPerUnit = (proForma.grossRent.stabilized || proForma.grossRent.t12 || 12000) / (effectiveUnits * 12);
   const baseTargetRent = proFormaPerUnit;
   const basePreStabRent = avgPreStabRent > 0 ? Math.min(avgPreStabRent, baseTargetRent) : baseTargetRent;
+  const isMfr = acquisition.propertyType === 'mfr' && acquisition.unitMix.length > 0;
+  const hasMultipleTypes = isMfr && acquisition.unitMix.length > 1;
+  // Per-type base rents from the unit mix (for per-type sliders)
+  const baseRentsByType = useMemo(
+    () => isMfr ? acquisition.unitMix.map(e => e.rentMonthly || 0) : [baseTargetRent],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isMfr, acquisition.unitMix.map(e => e.rentMonthly).join(','), baseTargetRent]
+  );
 
   const origStabilizedAnnual = proForma.grossRent.stabilized;
   const hasStabilizingYears = Object.values(proForma.yearOverrides ?? {}).some(
@@ -606,12 +613,50 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
     ? fixedExpenses.reduce((s, e) => s + e.growthPct, 0) / fixedExpenses.length
     : 2;
 
-  // ── Defaults ──
+  // ── Defaults — sourced from ProForma's effective (chained) values per year ──
+  // Uses the same chaining logic as the ProForma grid so the What-If starts at
+  // what the user actually SEES, not the raw stabilized/override values.
+  const { defaultRentGrowthByYear, defaultVacancyByYear, effectiveBaseVacancy } = useMemo(() => {
+    const projYears = acquisition.projectionYears || 5;
+    const growthByYear: Record<number, number> = {};
+    const vacByYear: Record<number, number> = {};
+    const baseGrowth = proForma.grossRent.growthPct;
+    const baseVac = proForma.vacancyPct.stabilized;
+
+    // Walk the chain for rent growth (Year 2+)
+    let lastGrowth = baseGrowth;
+    for (let y = 2; y <= projYears; y++) {
+      const ov = proForma.yearOverrides?.[y]?.grossRentGrowthPct;
+      if (ov !== undefined) lastGrowth = ov;
+      if (lastGrowth !== baseGrowth) growthByYear[y] = lastGrowth;
+    }
+
+    // Walk the chain for vacancy (Year 1+) — vacancy doesn't grow, just overrides cascade
+    let lastVac = baseVac;
+    for (let y = 1; y <= projYears; y++) {
+      const ov = proForma.yearOverrides?.[y]?.vacancyPct;
+      if (ov !== undefined) lastVac = ov;
+      if (lastVac !== baseVac) vacByYear[y] = lastVac;
+    }
+
+    // If Year 1 override cascaded to ALL years, use that as the effective base
+    const effectiveVac = proForma.yearOverrides?.[1]?.vacancyPct ?? baseVac;
+
+    return {
+      defaultRentGrowthByYear: Object.keys(growthByYear).length > 0 ? growthByYear : undefined,
+      defaultVacancyByYear: Object.keys(vacByYear).length > 0 ? vacByYear : undefined,
+      effectiveBaseVacancy: effectiveVac,
+    };
+  }, [proForma.yearOverrides, proForma.grossRent.growthPct, proForma.vacancyPct.stabilized, acquisition.projectionYears]);
+
   const defaults: WhatIfOverrides = useMemo(() => ({
     targetRentPerUnit: baseTargetRent,
+    targetRentsByType: hasMultipleTypes ? baseRentsByType : undefined,
     preStabRentPerUnit: basePreStabRent,
-    vacancyPct: proForma.vacancyPct.stabilized || proForma.vacancyPct.t12 || 5,
+    vacancyPct: effectiveBaseVacancy || proForma.vacancyPct.t12 || 5,
+    vacancyByYear: defaultVacancyByYear,
     rentGrowthPct: proForma.grossRent.growthPct,
+    rentGrowthByYear: defaultRentGrowthByYear,
     propertyMgmtPct: propMgmtExpense?.stabilizedValue ?? 8,
     maintenancePct: maintenanceExpense?.stabilizedValue ?? 5,
     fixedExpenseGrowthPct: Math.round(avgFixedGrowthPct * 4) / 4,
@@ -640,6 +685,7 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
     defaultPreStabAnnual: defaults.preStabRentPerUnit * effectiveUnits * 12,
     defaultFixedExpenseGrowthPct: Math.round(avgFixedGrowthPct * 4) / 4,
     calcState,
+    baseResult,
   };
 
   // ── Main what-if result ──
@@ -808,32 +854,279 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
         {/* Sliders — scrollable */}
         <div className="overflow-y-auto max-h-[60vh] pt-5 space-y-6 px-1 -mx-1">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-5">
+            <SectionLabel label="Rent" />
+            {isMfr && acquisition.unitMix.length > 0 ? (
+              acquisition.unitMix.map((entry, i) => {
+                const typeRent = overrides.targetRentsByType?.[i] ?? baseRentsByType[i] ?? 0;
+                const baseRent = baseRentsByType[i] ?? 0;
+                const typeMin = Math.max(50, Math.round(baseRent * 0.3));
+                const typeMax = Math.max(Math.round(baseRent * 2.5), 2000);
+                return (
+                  <Slider
+                    key={entry.id ?? i}
+                    label={`${entry.beds}BR/${entry.baths}BA`}
+                    sublabel={`${entry.count} units · $${Math.round(typeRent * entry.count).toLocaleString()}/mo total`}
+                    value={typeRent}
+                    min={typeMin}
+                    max={typeMax}
+                    step={25}
+                    displayValue={`$${Math.round(typeRent).toLocaleString()}/mo`}
+                    onChange={v => {
+                      const updated = [...(overrides.targetRentsByType ?? baseRentsByType)];
+                      updated[i] = v;
+                      const totalUnits = acquisition.unitMix.reduce((s, e) => s + e.count, 0);
+                      const blended = totalUnits > 0
+                        ? acquisition.unitMix.reduce((s, e, j) => s + (updated[j] ?? e.rentMonthly ?? 0) * e.count, 0) / totalUnits
+                        : v;
+                      setOverrides(prev => ({ ...prev, targetRentsByType: updated, targetRentPerUnit: blended }));
+                    }}
+                    isChanged={typeRent !== baseRent}
+                  />
+                );
+              })
+            ) : (
+              <Slider label="Target Rent" sublabel="Stabilized rent once fully leased up"
+                value={overrides.targetRentPerUnit} min={targetMin} max={targetMax} step={25}
+                displayValue={`$${Math.round(overrides.targetRentPerUnit).toLocaleString()}/mo`}
+                annotation={annOf(overrides.targetRentPerUnit)}
+                onChange={set('targetRentPerUnit')} isChanged={isChanged('targetRentPerUnit')} />
+            )}
+
             <SectionLabel label="Income" />
-            <Slider label="Target Rent / unit" sublabel="Stabilized rent once fully leased up"
-              value={overrides.targetRentPerUnit} min={targetMin} max={targetMax} step={25}
-              displayValue={`$${Math.round(overrides.targetRentPerUnit).toLocaleString()}/mo`}
-              annotation={annOf(overrides.targetRentPerUnit)}
-              onChange={set('targetRentPerUnit')} isChanged={isChanged('targetRentPerUnit')} />
-            <Slider label="Rent Growth / yr" value={overrides.rentGrowthPct} min={-5} max={15} step={0.25}
-              displayValue={formatPct(overrides.rentGrowthPct)}
-              onChange={set('rentGrowthPct')} isChanged={isChanged('rentGrowthPct')} />
-            <Slider label="Vacancy Rate" value={overrides.vacancyPct} min={0} max={25} step={0.5}
-              displayValue={formatPct(overrides.vacancyPct)}
-              onChange={set('vacancyPct')} isChanged={isChanged('vacancyPct')} />
+            {/* Rent Growth — select a year to adjust, slider disabled when nothing selected */}
+            {(() => {
+              const projYears = Math.round(overrides.projectionYears);
+              const growthYears = Array.from({ length: Math.max(0, projYears - 1) }, (_, i) => i + 2);
+              const sel = (overrides as unknown as Record<string, unknown>)._selectedGrowthYear as number | null ?? null;
+              const byYear = overrides.rentGrowthByYear ?? {};
+              const effRate = (yr: number) => byYear[yr] ?? overrides.rentGrowthPct;
+
+              return (
+                <div className="space-y-2 min-w-0">
+                  <Slider
+                    label={sel ? `Yr ${sel} Growth` : 'Rent Growth'}
+                    sublabel={sel ? undefined : 'Select a year below to adjust'}
+                    value={sel ? effRate(sel) : overrides.rentGrowthPct}
+                    min={-5} max={15} step={0.25}
+                    displayValue={formatPct(sel ? effRate(sel) : overrides.rentGrowthPct)}
+                    onChange={v => {
+                      if (!sel) return;
+                      setOverrides(prev => ({
+                        ...prev,
+                        rentGrowthByYear: { ...(prev.rentGrowthByYear ?? {}), [sel]: v },
+                      }));
+                    }}
+                    isChanged={sel ? effRate(sel) !== overrides.rentGrowthPct : false}
+                    disabled={!sel}
+                  />
+                  <div className="flex items-center gap-1.5 flex-wrap px-1">
+                    {growthYears.map(yr => (
+                      <button
+                        key={yr}
+                        type="button"
+                        onClick={() => setOverrides(prev => ({ ...prev, _selectedGrowthYear: sel === yr ? null : yr } as typeof prev))}
+                        className={`px-2 py-1 rounded-lg text-[11px] font-medium tabular-nums transition-all ${
+                          sel === yr
+                            ? 'bg-primary-600 text-white ring-2 ring-primary-300 dark:ring-primary-700'
+                            : byYear[yr] !== undefined && byYear[yr] !== overrides.rentGrowthPct
+                            ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300'
+                            : 'bg-slate-100 dark:bg-slate-700/60 text-slate-500 dark:text-slate-400'
+                        }`}
+                      >
+                        <span className="block text-[9px] opacity-70">Yr {yr}</span>
+                        {formatPct(effRate(yr))}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+            {/* Vacancy Rate — select a year to adjust, slider disabled when nothing selected */}
+            {(() => {
+              const projYears = Math.round(overrides.projectionYears);
+              const vacYears = Array.from({ length: projYears }, (_, i) => i + 1);
+              const sel = (overrides as unknown as Record<string, unknown>)._selectedVacYear as number | null ?? null;
+              const byYear = overrides.vacancyByYear ?? {};
+              const effRate = (yr: number) => byYear[yr] ?? overrides.vacancyPct;
+
+              return (
+                <div className="space-y-2 min-w-0">
+                  <Slider
+                    label={sel ? `Yr ${sel} Vacancy` : 'Vacancy Rate'}
+                    sublabel={sel ? undefined : 'Select a year below to adjust'}
+                    value={sel ? effRate(sel) : overrides.vacancyPct}
+                    min={0} max={25} step={0.5}
+                    displayValue={formatPct(sel ? effRate(sel) : overrides.vacancyPct)}
+                    onChange={v => {
+                      if (!sel) return;
+                      setOverrides(prev => ({
+                        ...prev,
+                        vacancyByYear: { ...(prev.vacancyByYear ?? {}), [sel]: v },
+                      }));
+                    }}
+                    isChanged={sel ? effRate(sel) !== overrides.vacancyPct : false}
+                    disabled={!sel}
+                  />
+                  <div className="flex items-center gap-1.5 flex-wrap px-1">
+                    {vacYears.map(yr => (
+                      <button
+                        key={yr}
+                        type="button"
+                        onClick={() => setOverrides(prev => ({ ...prev, _selectedVacYear: sel === yr ? null : yr } as typeof prev))}
+                        className={`px-2 py-1 rounded-lg text-[11px] font-medium tabular-nums transition-all ${
+                          sel === yr
+                            ? 'bg-primary-600 text-white ring-2 ring-primary-300 dark:ring-primary-700'
+                            : byYear[yr] !== undefined && byYear[yr] !== overrides.vacancyPct
+                            ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300'
+                            : 'bg-slate-100 dark:bg-slate-700/60 text-slate-500 dark:text-slate-400'
+                        }`}
+                      >
+                        <span className="block text-[9px] opacity-70">Yr {yr}</span>
+                        {formatPct(effRate(yr))}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             <SectionLabel label="Expenses" />
-            <Slider label="Property Mgmt %" sublabel="% of EGI — auto-scales with rent"
-              value={overrides.propertyMgmtPct} min={0} max={15} step={0.5}
-              displayValue={formatPct(overrides.propertyMgmtPct)}
-              onChange={set('propertyMgmtPct')} isChanged={isChanged('propertyMgmtPct')} />
-            <Slider label="Maintenance & Repairs %" sublabel="% of EGI — auto-scales with rent"
-              value={overrides.maintenancePct} min={0} max={20} step={0.5}
-              displayValue={formatPct(overrides.maintenancePct)}
-              onChange={set('maintenancePct')} isChanged={isChanged('maintenancePct')} />
-            <Slider label="Fixed Expense Growth / yr" sublabel="Taxes, insurance, utilities, CapEx"
-              value={overrides.fixedExpenseGrowthPct} min={-2} max={10} step={0.25}
-              displayValue={formatPct(overrides.fixedExpenseGrowthPct)}
-              onChange={set('fixedExpenseGrowthPct')} isChanged={isChanged('fixedExpenseGrowthPct')} />
+            {/* OpEx % of EGI — per-year control, slider disabled when nothing selected */}
+            {(() => {
+              const projYears = Math.round(overrides.projectionYears);
+              const expYears = Array.from({ length: projYears }, (_, i) => i + 1);
+              const sel = (overrides as unknown as Record<string, unknown>)._selectedOpexYear as number | null ?? null;
+              const byYear = overrides.opexRatioByYear ?? {};
+              // Compute base OpEx/EGI ratio per year from the base result
+              const baseRatios: Record<number, number> = {};
+              if (baseResult?.yearlyProjections) {
+                for (const p of baseResult.yearlyProjections) {
+                  baseRatios[p.year] = p.effectiveRent > 0 ? (p.opex / p.effectiveRent) * 100 : 0;
+                }
+              }
+              const effRate = (yr: number) => byYear[yr] ?? baseRatios[yr] ?? 0;
+
+              return (
+                <div className="space-y-2 min-w-0">
+                  <Slider
+                    label={sel ? `Yr ${sel} OpEx % of EGI` : 'OpEx % of EGI'}
+                    sublabel={sel ? undefined : 'Select a year below to adjust'}
+                    value={sel ? effRate(sel) : (baseRatios[1] ?? 0)}
+                    min={0} max={80} step={0.5}
+                    displayValue={formatPct(sel ? effRate(sel) : (baseRatios[1] ?? 0))}
+                    onChange={v => {
+                      if (!sel) return;
+                      setOverrides(prev => ({
+                        ...prev,
+                        opexRatioByYear: { ...(prev.opexRatioByYear ?? {}), [sel]: v },
+                      }));
+                    }}
+                    isChanged={sel ? byYear[sel] !== undefined : false}
+                    disabled={!sel}
+                  />
+                  <div className="flex items-center gap-1.5 flex-wrap px-1">
+                    {expYears.map(yr => (
+                      <button
+                        key={yr}
+                        type="button"
+                        onClick={() => setOverrides(prev => ({ ...prev, _selectedOpexYear: sel === yr ? null : yr } as typeof prev))}
+                        className={`px-2 py-1 rounded-lg text-[11px] font-medium tabular-nums transition-all ${
+                          sel === yr
+                            ? 'bg-primary-600 text-white ring-2 ring-primary-300 dark:ring-primary-700'
+                            : byYear[yr] !== undefined
+                            ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300'
+                            : 'bg-slate-100 dark:bg-slate-700/60 text-slate-500 dark:text-slate-400'
+                        }`}
+                      >
+                        <span className="block text-[9px] opacity-70">Yr {yr}</span>
+                        {formatPct(effRate(yr))}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+            {/* Property Tax Growth — per-year, select to adjust */}
+            {(() => {
+              const projYears = Math.round(overrides.projectionYears);
+              const years = Array.from({ length: Math.max(0, projYears - 1) }, (_, i) => i + 2);
+              const sel = (overrides as unknown as Record<string, unknown>)._selectedTaxGrowthYear as number | null ?? null;
+              const byYear = overrides.propertyTaxGrowthByYear ?? {};
+              const taxExp = proForma.expenses.find(e => !e.isPercentOfEGI && e.name.toLowerCase().includes('tax'));
+              const baseRate = taxExp?.growthPct ?? 2;
+              const effRate = (yr: number) => byYear[yr] ?? baseRate;
+              return (
+                <div className="space-y-2 min-w-0">
+                  <Slider
+                    label={sel ? `Yr ${sel} Tax Growth` : 'Property Tax Growth'}
+                    sublabel={sel ? undefined : 'Select a year to adjust'}
+                    value={sel ? effRate(sel) : baseRate}
+                    min={-5} max={15} step={0.25}
+                    displayValue={formatPct(sel ? effRate(sel) : baseRate)}
+                    onChange={v => {
+                      if (!sel) return;
+                      setOverrides(prev => ({ ...prev, propertyTaxGrowthByYear: { ...(prev.propertyTaxGrowthByYear ?? {}), [sel]: v } }));
+                    }}
+                    isChanged={sel ? byYear[sel] !== undefined : false}
+                    disabled={!sel}
+                  />
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {years.map(yr => (
+                      <button key={yr} type="button"
+                        onClick={() => setOverrides(prev => ({ ...prev, _selectedTaxGrowthYear: sel === yr ? null : yr } as typeof prev))}
+                        className={`px-2 py-1 rounded-lg text-[11px] font-medium tabular-nums transition-all ${
+                          sel === yr ? 'bg-primary-600 text-white ring-2 ring-primary-300 dark:ring-primary-700'
+                          : byYear[yr] !== undefined ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300'
+                          : 'bg-slate-100 dark:bg-slate-700/60 text-slate-500 dark:text-slate-400'
+                        }`}>
+                        <span className="block text-[9px] opacity-70">Yr {yr}</span>
+                        {formatPct(effRate(yr))}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+            {/* Other Fixed Expense Growth — per-year, select to adjust */}
+            {(() => {
+              const projYears = Math.round(overrides.projectionYears);
+              const years = Array.from({ length: Math.max(0, projYears - 1) }, (_, i) => i + 2);
+              const sel = (overrides as unknown as Record<string, unknown>)._selectedFixedGrowthYear as number | null ?? null;
+              const byYear = overrides.fixedExpenseGrowthByYear ?? {};
+              const baseRate = overrides.fixedExpenseGrowthPct;
+              const effRate = (yr: number) => byYear[yr] ?? baseRate;
+              return (
+                <div className="space-y-2 min-w-0">
+                  <Slider
+                    label={sel ? `Yr ${sel} Expense Growth` : 'Other Expense Growth'}
+                    sublabel={sel ? undefined : 'Insurance, utilities, CapEx'}
+                    value={sel ? effRate(sel) : baseRate}
+                    min={-2} max={10} step={0.25}
+                    displayValue={formatPct(sel ? effRate(sel) : baseRate)}
+                    onChange={v => {
+                      if (!sel) return;
+                      setOverrides(prev => ({ ...prev, fixedExpenseGrowthByYear: { ...(prev.fixedExpenseGrowthByYear ?? {}), [sel]: v } }));
+                    }}
+                    isChanged={sel ? byYear[sel] !== undefined : false}
+                    disabled={!sel}
+                  />
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {years.map(yr => (
+                      <button key={yr} type="button"
+                        onClick={() => setOverrides(prev => ({ ...prev, _selectedFixedGrowthYear: sel === yr ? null : yr } as typeof prev))}
+                        className={`px-2 py-1 rounded-lg text-[11px] font-medium tabular-nums transition-all ${
+                          sel === yr ? 'bg-primary-600 text-white ring-2 ring-primary-300 dark:ring-primary-700'
+                          : byYear[yr] !== undefined ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300'
+                          : 'bg-slate-100 dark:bg-slate-700/60 text-slate-500 dark:text-slate-400'
+                        }`}>
+                        <span className="block text-[9px] opacity-70">Yr {yr}</span>
+                        {formatPct(effRate(yr))}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             <SectionLabel label="Financing & Exit" />
             <Slider label="Interest Rate" value={overrides.interestRate} min={2} max={15} step={0.125}

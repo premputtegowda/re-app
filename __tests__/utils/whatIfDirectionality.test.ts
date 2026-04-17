@@ -213,4 +213,30 @@ describe('What-If directionality — every variable moves IRR correctly', () => 
     const better = getIRR({ ...baseOverrides, interestRate: 5 });
     expect(better).toBeGreaterThan(baseIRR);
   });
+
+  // ── Per-type rent overrides ──
+
+  it('per-type: lowering one type\'s rent → IRR ↓', () => {
+    const worse = getIRR({
+      ...baseOverrides,
+      targetRentsByType: [1200, 1000], // Type A lowered from 1500 to 1200
+    });
+    expect(worse).toBeLessThan(baseIRR);
+  });
+
+  it('per-type: raising one type\'s rent → IRR ↑', () => {
+    const better = getIRR({
+      ...baseOverrides,
+      targetRentsByType: [1800, 1000], // Type A raised from 1500 to 1800
+    });
+    expect(better).toBeGreaterThan(baseIRR);
+  });
+
+  it('per-type: same rents as base → same IRR (exact match)', () => {
+    const same = getIRR({
+      ...baseOverrides,
+      targetRentsByType: [1500, 1000], // original values
+    });
+    expect(Math.abs(same - baseIRR)).toBeLessThan(0.01);
+  });
 });
