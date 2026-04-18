@@ -303,7 +303,17 @@ function GoalSeekPanel({ metric, target, onMetricChange, onTargetChange, default
 
   const currentValue = metricFn(baseResult);
   const currentDefaultValue = defaults[varDef.key] as number;
-  const build = (v: number) => buildWhatIfResult({ ...defaults, [varDef.key]: v }, deps);
+  const build = (v: number) => {
+    const ov = { ...defaults, [varDef.key]: v };
+    // When Goal Seek varies rent, scale all per-type rents proportionally
+    // so the solver actually moves the numbers (targetRentsByType takes priority
+    // over targetRentPerUnit in buildWhatIfResult).
+    if (varDef.key === 'targetRentPerUnit' && defaults.targetRentsByType?.length) {
+      const ratio = defaults.targetRentPerUnit > 0 ? v / defaults.targetRentPerUnit : 1;
+      ov.targetRentsByType = defaults.targetRentsByType.map(r => r * ratio);
+    }
+    return buildWhatIfResult(ov, deps);
+  };
   const fmtGap = varDef.formatGap ?? varDef.format;
   const progressPct = target > 0 ? Math.min(100, Math.max(0, (currentValue / target) * 100)) : 100;
 
