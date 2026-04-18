@@ -305,12 +305,33 @@ function GoalSeekPanel({ metric, target, onMetricChange, onTargetChange, default
   const currentDefaultValue = defaults[varDef.key] as number;
   const build = (v: number) => {
     const ov = { ...defaults, [varDef.key]: v };
-    // When Goal Seek varies rent, scale all per-type rents proportionally
-    // so the solver actually moves the numbers (targetRentsByType takes priority
-    // over targetRentPerUnit in buildWhatIfResult).
+    // When Goal Seek varies a variable that has per-year overrides,
+    // also update those overrides so they don't override the solver's value.
     if (varDef.key === 'targetRentPerUnit' && defaults.targetRentsByType?.length) {
       const ratio = defaults.targetRentPerUnit > 0 ? v / defaults.targetRentPerUnit : 1;
       ov.targetRentsByType = defaults.targetRentsByType.map(r => r * ratio);
+    }
+    if (varDef.key === 'vacancyPct' && defaults.vacancyByYear) {
+      const updated: Record<number, number> = {};
+      for (const [yr] of Object.entries(defaults.vacancyByYear)) updated[Number(yr)] = v;
+      ov.vacancyByYear = updated;
+    }
+    if (varDef.key === 'rentGrowthPct' && defaults.rentGrowthByYear) {
+      const updated: Record<number, number> = {};
+      for (const [yr] of Object.entries(defaults.rentGrowthByYear)) updated[Number(yr)] = v;
+      ov.rentGrowthByYear = updated;
+    }
+    if (varDef.key === 'fixedExpenseGrowthPct') {
+      if (defaults.fixedExpenseGrowthByYear) {
+        const updated: Record<number, number> = {};
+        for (const [yr] of Object.entries(defaults.fixedExpenseGrowthByYear)) updated[Number(yr)] = v;
+        ov.fixedExpenseGrowthByYear = updated;
+      }
+      if (defaults.propertyTaxGrowthByYear) {
+        const updated: Record<number, number> = {};
+        for (const [yr] of Object.entries(defaults.propertyTaxGrowthByYear)) updated[Number(yr)] = v;
+        ov.propertyTaxGrowthByYear = updated;
+      }
     }
     return buildWhatIfResult(ov, deps);
   };
@@ -725,7 +746,38 @@ export function WhatIfPanel({ acquisition, operations, proForma, refinance, base
 
   // ── Break-even computations ──
   const breakEvenRows = useMemo((): BreakEvenRow[] => {
-    const build = (partial: Partial<WhatIfOverrides>) => buildWhatIfResult({ ...overrides, ...partial }, deps);
+    const build = (partial: Partial<WhatIfOverrides>) => {
+      const ov = { ...overrides, ...partial };
+      // Sync per-year/per-type overrides when the solver varies a base variable
+      if ('targetRentPerUnit' in partial && overrides.targetRentsByType?.length) {
+        const ratio = overrides.targetRentPerUnit > 0 ? (partial.targetRentPerUnit ?? overrides.targetRentPerUnit) / overrides.targetRentPerUnit : 1;
+        ov.targetRentsByType = overrides.targetRentsByType.map(r => r * ratio);
+      }
+      if ('vacancyPct' in partial && overrides.vacancyByYear) {
+        const updated: Record<number, number> = {};
+        for (const yr of Object.keys(overrides.vacancyByYear)) updated[Number(yr)] = partial.vacancyPct ?? overrides.vacancyPct;
+        ov.vacancyByYear = updated;
+      }
+      if ('rentGrowthPct' in partial && overrides.rentGrowthByYear) {
+        const updated: Record<number, number> = {};
+        for (const yr of Object.keys(overrides.rentGrowthByYear)) updated[Number(yr)] = partial.rentGrowthPct ?? overrides.rentGrowthPct;
+        ov.rentGrowthByYear = updated;
+      }
+      if ('fixedExpenseGrowthPct' in partial) {
+        const val = partial.fixedExpenseGrowthPct ?? overrides.fixedExpenseGrowthPct;
+        if (overrides.fixedExpenseGrowthByYear) {
+          const updated: Record<number, number> = {};
+          for (const yr of Object.keys(overrides.fixedExpenseGrowthByYear)) updated[Number(yr)] = val;
+          ov.fixedExpenseGrowthByYear = updated;
+        }
+        if (overrides.propertyTaxGrowthByYear) {
+          const updated: Record<number, number> = {};
+          for (const yr of Object.keys(overrides.propertyTaxGrowthByYear)) updated[Number(yr)] = val;
+          ov.propertyTaxGrowthByYear = updated;
+        }
+      }
+      return buildWhatIfResult(ov, deps);
+    };
     const cocMetric = (r: CoCResult) => r.avgCoCReturn;
     const irrMetric = (r: CoCResult) => r.irr ?? -999;
     const target = targetCoCReturn;
