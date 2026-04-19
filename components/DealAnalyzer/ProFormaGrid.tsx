@@ -651,6 +651,10 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
     onChange({ ...data, creditLossPct: { ...data.creditLossPct, [field]: value } });
   }, [data, onChange]);
 
+  const setLossToLeaseT12 = useCallback((value: number) => {
+    onChange({ ...data, lossToLeaseT12: value });
+  }, [data, onChange]);
+
   const updateExpense = useCallback((id: string, patch: Partial<ProFormaItem>) => {
     const newExpenses = data.expenses.map(e => {
       if (e.id !== id) return e;
@@ -739,7 +743,8 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
   const hasLTLDistribution = !!data.leaseAnniversaryDistribution &&
     data.leaseAnniversaryDistribution.reduce((s, n) => s + n, 0) > 0;
 
-  function getT12EGI() { return computeEGI(data.grossRent.t12, data.otherIncome.t12, data.vacancyPct.t12, cl.t12); }
+  const ltlT12 = data.lossToLeaseT12 ?? 0;
+  function getT12EGI() { return computeEGI(data.grossRent.t12 - ltlT12, data.otherIncome.t12, data.vacancyPct.t12, cl.t12); }
   function getT12OpEx(t12egi: number) { return data.expenses.reduce((s, e) => s + (e.isPercentOfEGI ? t12egi * (e.t12Value / 100) : e.t12Value), 0); }
 
   // ── Page dot indicator — any override in that page's years? ──
@@ -1353,7 +1358,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
             <div className="grid grid-cols-2 gap-3">
               <div className="text-right">
                 <p className="text-[10px] font-semibold uppercase text-slate-400 mb-1">T12</p>
-                <span className="text-sm font-medium tabular-nums text-slate-700 dark:text-slate-300">{fmt$(data.grossRent.t12)}</span>
+                <Cell value={data.grossRent.t12} onChange={v => setGrossRent('t12', v)} format="currency" />
               </div>
               <div className="text-right">
                 <p className="text-[10px] font-semibold uppercase text-slate-400 mb-1">Yr {mobileYear}{mobileYear === projectionYears ? ' ★' : ''}</p>
@@ -1375,23 +1380,40 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
           </div>
           {hasLTLDistribution && (
             <>
-              <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-700/50 flex items-center justify-between">
-                <div>
+              <div className="px-3 py-3 border-b border-slate-100 dark:border-slate-700/50">
+                <div className="mb-2">
                   <p className="text-sm text-slate-500 dark:text-slate-400">Loss to Lease</p>
-                  <p className="text-[10px] text-slate-400">Anniversary lag · Yr {mobileYear}</p>
                 </div>
-                <span className="text-sm tabular-nums text-slate-500 dark:text-slate-400">
-                  {suppressRent ? '—' : getLossToLeaseForYear(mobileYear) > 0 ? `(${fmt$(getLossToLeaseForYear(mobileYear))})` : '—'}
-                </span>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="text-right">
+                    <p className="text-[10px] font-semibold uppercase text-slate-400 mb-1">T12</p>
+                    <Cell value={ltlT12} onChange={setLossToLeaseT12} format="currency" />
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[10px] font-semibold uppercase text-slate-400 mb-1">Yr {mobileYear}</p>
+                    <span className="text-sm tabular-nums text-slate-500 dark:text-slate-400">
+                      {suppressRent ? '—' : getLossToLeaseForYear(mobileYear) > 0 ? `(${fmt$(getLossToLeaseForYear(mobileYear))})` : '—'}
+                    </span>
+                  </div>
+                </div>
               </div>
-              <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-700/50 flex items-center justify-between">
-                <div>
+              <div className="px-3 py-3 border-b border-slate-100 dark:border-slate-700/50">
+                <div className="mb-2">
                   <p className="text-sm text-slate-700 dark:text-slate-300">Gross Lease Rent</p>
-                  <p className="text-[10px] text-slate-400">Market − LTL · Yr {mobileYear}</p>
+                  <p className="text-[10px] text-slate-400">Market − LTL</p>
                 </div>
-                <span className="text-sm font-medium tabular-nums text-slate-700 dark:text-slate-300">
-                  {suppressRent ? '—' : fmt$(getGrossLeaseRentForYear(mobileYear))}
-                </span>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="text-right">
+                    <p className="text-[10px] font-semibold uppercase text-slate-400 mb-1">T12</p>
+                    <span className="text-sm font-medium tabular-nums text-slate-700 dark:text-slate-300">{fmt$(data.grossRent.t12 - ltlT12)}</span>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[10px] font-semibold uppercase text-slate-400 mb-1">Yr {mobileYear}</p>
+                    <span className="text-sm font-medium tabular-nums text-slate-700 dark:text-slate-300">
+                      {suppressRent ? '—' : fmt$(getGrossLeaseRentForYear(mobileYear))}
+                    </span>
+                  </div>
+                </div>
               </div>
             </>
           )}
@@ -1562,8 +1584,10 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                 {visibleCols.map((col, i) => {
                   if (col.type === 't12') {
                     return (
-                      <td key={`mr-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap align-top">
-                        <span className="text-sm tabular-nums text-slate-700 dark:text-slate-300">{fmt$(data.grossRent.t12)}</span>
+                      <td key={`mr-${i}`} className="px-2 py-2.5 align-top">
+                        <div className="flex flex-col items-end gap-0.5">
+                          <Cell value={data.grossRent.t12} onChange={v => setGrossRent('t12', v)} format="currency" />
+                        </div>
                       </td>
                     );
                   }
@@ -1605,14 +1629,23 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                       <p className="text-[10px] text-slate-400 leading-tight">Anniversary lag</p>
                     </td>
                     {visibleCols.map((col, i) => {
-                      if (col.type === 't12' || suppressRent) {
+                      if (suppressRent) {
                         return <td key={`ltl-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap"><span className="text-sm text-slate-300 dark:text-slate-600">—</span></td>;
+                      }
+                      if (col.type === 't12') {
+                        return (
+                          <td key={`ltl-${i}`} className="px-2 py-2.5 align-top">
+                            <div className="flex flex-col items-end gap-0.5">
+                              <Cell value={ltlT12} onChange={setLossToLeaseT12} format="currency" />
+                            </div>
+                          </td>
+                        );
                       }
                       const ltl = getLossToLeaseForYear(col.year);
                       return (
                         <td key={`ltl-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap">
                           <span className="text-sm tabular-nums text-slate-500 dark:text-slate-400">
-                            {ltl > 0 ? `(${fmt$(ltl).replace('$', '$')})` : '—'}
+                            {ltl > 0 ? `(${fmt$(ltl)})` : '—'}
                           </span>
                         </td>
                       );
@@ -1627,7 +1660,7 @@ export function ProFormaGrid({ data, onChange, projectionYears = 5, showWarnings
                       if (suppressRent) {
                         return <td key={`glr-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap"><span className="text-sm text-slate-300 dark:text-slate-600">—</span></td>;
                       }
-                      const v = col.type === 't12' ? data.grossRent.t12 : getGrossLeaseRentForYear(col.year);
+                      const v = col.type === 't12' ? (data.grossRent.t12 - ltlT12) : getGrossLeaseRentForYear(col.year);
                       return (
                         <td key={`glr-${i}`} className="px-2 py-2.5 text-right whitespace-nowrap">
                           <span className="text-sm font-medium tabular-nums text-slate-700 dark:text-slate-300">{fmt$(v)}</span>

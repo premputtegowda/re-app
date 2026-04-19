@@ -316,6 +316,7 @@ export interface ProFormaData {
     stabilized: number;
   };
   expenses: ProFormaItem[];
+  lossToLeaseT12?: number;    // user-entered T12 loss to lease (annual $) — only for T12 column
   propertyTaxRatePct?: number; // derived: (stabilizedValue * 12) / purchasePrice — used in bisection, never shown to user
   /** 12-month histogram: units renewing per month (from reno/lease-up schedule). Sum = total units. */
   leaseAnniversaryDistribution?: number[];
