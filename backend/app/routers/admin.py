@@ -19,7 +19,8 @@ from app.services.email import get_smtp_sender
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
-INVITE_EXPIRY_DAYS = 7
+# Invitations never expire — set far-future expiry for DB column compatibility
+INVITE_EXPIRY_YEARS = 100
 
 
 # ── Schemas ────────────────────────────────────────────────────────────────────
@@ -224,7 +225,7 @@ async def list_invitations(
             created_at=inv.created_at.date().isoformat(),
             expires_at=inv.expires_at.date().isoformat(),
             accepted_at=inv.accepted_at.date().isoformat() if inv.accepted_at else None,
-            is_expired=inv.accepted_at is None and inv.expires_at < now,
+            is_expired=False,
         )
         for inv in invitations
     ]
@@ -253,7 +254,6 @@ async def create_invitation(
         select(Invitation).where(
             Invitation.email == body.email,
             Invitation.accepted_at.is_(None),
-            Invitation.expires_at > now,
         )
     )
     if existing_invite.scalar_one_or_none():
@@ -263,7 +263,7 @@ async def create_invitation(
         )
 
     token = secrets.token_urlsafe(32)
-    expires_at = now + timedelta(days=INVITE_EXPIRY_DAYS)
+    expires_at = now + timedelta(days=365 * INVITE_EXPIRY_YEARS)
 
     invitation = Invitation(
         email=body.email,
@@ -281,7 +281,7 @@ async def create_invitation(
         body_text = (
             f"Hi,\n\n"
             f"You've been invited to join DealstackRE with complimentary access.\n\n"
-            f"Click the link below to accept your invitation (expires in {INVITE_EXPIRY_DAYS} days):\n"
+            f"Click the link below to accept your invitation:\n"
             f"{invite_url}\n\n"
             f"DealstackRE is an all-in-one toolkit for real estate investors:\n\n"
             f"  • REPS Tracker — log and document hours for IRS Real Estate Professional\n"
@@ -381,7 +381,7 @@ async def approve_access_request(
     settings = get_settings()
     now = datetime.utcnow()
     token = secrets.token_urlsafe(32)
-    expires_at = now + timedelta(days=INVITE_EXPIRY_DAYS)
+    expires_at = now + timedelta(days=365 * INVITE_EXPIRY_YEARS)
 
     invitation = Invitation(
         email=req.email,
@@ -401,7 +401,7 @@ async def approve_access_request(
         body_text = (
             f"Hi {req.name},\n\n"
             f"Your request to join DealstackRE has been approved!\n\n"
-            f"Click the link below to accept your invitation (expires in {INVITE_EXPIRY_DAYS} days):\n"
+            f"Click the link below to accept your invitation:\n"
             f"{invite_url}\n\n"
             f"— The DealstackRE Team"
         )

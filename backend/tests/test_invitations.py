@@ -12,13 +12,13 @@ Tests for the invite email flow and user acceptance:
      - New user with valid invite → created, has_complimentary_access=True, invite marked accepted
      - New user with no invite (invite_only=True) → 403 ACCESS_REQUEST_SUBMITTED
      - New user who already has a pending request → 403 ACCESS_REQUEST_PENDING
-     - New user with expired invite → blocked, request created
+     - New user with past-expiry invite → still accepted (invitations never expire)
      - Existing user logs in → always succeeds regardless of invite status
 
   3. apply_pending_invite (unit-level)
      - Valid unaccepted invite → grants access, sets accepted_at
      - No invite exists → no change
-     - Expired invite → ignored
+     - Past-expiry invite → still applied (invitations never expire)
      - Already-accepted invite → ignored
 
   4. Admin lists and revokes invitations
@@ -267,11 +267,11 @@ async def test_invite_email_contains_token_url(
 
 
 @pytest.mark.asyncio
-async def test_invite_email_mentions_expiry(
+async def test_invite_email_does_not_mention_expiry(
     async_client: AsyncClient,
     admin_auth_headers: dict,
 ):
-    """The email body mentions the expiry window (days)."""
+    """Invitations never expire — email body should NOT mention an expiry window."""
     captured_body: list[str] = []
 
     async def fake_send_plain(to_email, subject, body):
@@ -293,7 +293,8 @@ async def test_invite_email_mentions_expiry(
             headers=admin_auth_headers,
         )
 
-    assert any("day" in body.lower() for body in captured_body)
+    assert len(captured_body) > 0
+    assert not any("expires" in body.lower() for body in captured_body)
 
 
 # ── 3. User accepts invite (POST /api/auth/google/token) ──────────────────────
@@ -420,14 +421,14 @@ async def test_new_user_already_pending_gets_403_pending(
 
 
 @pytest.mark.asyncio
-async def test_new_user_with_expired_invite_is_blocked(
+async def test_new_user_with_past_expiry_still_accepted(
     async_client: AsyncClient,
     admin_user: User,
     test_db: AsyncSession,
 ):
     """
-    New user whose only invite is expired → treated as uninvited,
-    access request is created.
+    Invitations never expire — even if expires_at is in the past,
+    the user is still accepted.
     """
     email = "expired@example.com"
     await _create_invitation(test_db, email, admin_user, expires_at=_past(1))
@@ -447,8 +448,7 @@ async def test_new_user_with_expired_invite_is_blocked(
             json={"credential": "fake-credential"},
         )
 
-    assert resp.status_code == 403
-    assert resp.json()["detail"] == "ACCESS_REQUEST_SUBMITTED"
+    assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
@@ -578,11 +578,11 @@ async def test_apply_pending_invite_no_invite_no_change(
 
 
 @pytest.mark.asyncio
-async def test_apply_pending_invite_ignores_expired(
+async def test_apply_pending_invite_accepts_past_expiry(
     test_db: AsyncSession,
     admin_user: User,
 ):
-    """Expired invite → treated as no invite, user not granted access."""
+    """Invitations never expire — even past-expiry invite grants access."""
     from app.routers.auth import apply_pending_invite
 
     email = "expiredapply@example.com"
@@ -600,7 +600,7 @@ async def test_apply_pending_invite_ignores_expired(
     await apply_pending_invite(test_db, user)
 
     await test_db.refresh(user)
-    assert user.has_complimentary_access is False
+    assert user.has_complimentary_access is True
 
 
 @pytest.mark.asyncio
@@ -652,13 +652,13 @@ async def test_list_invitations_returns_all(
 
 
 @pytest.mark.asyncio
-async def test_list_invitations_shows_expired_status(
+async def test_list_invitations_never_shows_expired(
     async_client: AsyncClient,
     admin_auth_headers: dict,
     admin_user: User,
     test_db: AsyncSession,
 ):
-    """An invite past its expiry is listed with is_expired=True."""
+    """Invitations never expire — is_expired is always False."""
     await _create_invitation(
         test_db, "expiredlist@example.com", admin_user, expires_at=_past(1)
     )
@@ -667,7 +667,7 @@ async def test_list_invitations_shows_expired_status(
     assert resp.status_code == 200
     expired_items = [i for i in resp.json() if i["email"] == "expiredlist@example.com"]
     assert len(expired_items) == 1
-    assert expired_items[0]["is_expired"] is True
+    assert expired_items[0]["is_expired"] is False
 
 
 @pytest.mark.asyncio

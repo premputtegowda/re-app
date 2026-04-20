@@ -81,7 +81,6 @@ async def apply_pending_invite(db: AsyncSession, user: User) -> None:
         select(Invitation).where(
             Invitation.email == user.email,
             Invitation.accepted_at.is_(None),
-            Invitation.expires_at > now,
         )
     )
     invite = result.scalar_one_or_none()
@@ -119,7 +118,6 @@ async def get_or_create_user(db: AsyncSession, user_info: dict) -> tuple[User, b
             select(Invitation).where(
                 Invitation.email == user_info["email"],
                 Invitation.accepted_at.is_(None),
-                Invitation.expires_at > now,
             )
         )
         has_invite = invite_result.scalar_one_or_none() is not None

@@ -32,9 +32,10 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scheduler = create_scheduler()
-    if settings.smtp_enabled:
-        scheduler.start()
-        logger.info("APScheduler started")
+    # Weekly REPS email reports disabled
+    # if settings.smtp_enabled:
+    #     scheduler.start()
+    #     logger.info("APScheduler started")
 
     yield
 
