@@ -10,6 +10,7 @@ import { formatCurrency, formatCurrencyCompact, formatPct, formatMultiple } from
 import { computeDeterministicPrices } from '@/utils/monteCarlo';
 import type { SavedDeal, CoCResult, CoCScenarioType } from '@/types';
 import type { SavedMCResults, MCRanges } from '@/utils/monteCarlo';
+import { STATE_ABBR, parseAddress, normalizeStateInput } from '@/utils/stateSearch';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -394,15 +395,6 @@ const DEFAULT_FILTERS: Filters = {
   city:  '',
 };
 
-function parseAddress(address: string): { city: string; state: string } {
-  // Handles "123 Main St, Austin, TX 78701" or "123 Main St, Austin TX 78701"
-  const parts = address.split(',').map(s => s.trim());
-  const last = parts[parts.length - 1] ?? '';
-  const stateMatch = last.match(/\b([A-Z]{2})\b/);
-  const state = stateMatch?.[1] ?? '';
-  const city = parts.length >= 3 ? parts[parts.length - 2] : parts.length === 2 ? parts[0] : '';
-  return { city: city.replace(/\d+/g, '').trim(), state };
-}
 
 function applyFilters(deals: SavedDeal[], filters: Filters): SavedDeal[] {
   return deals.filter(deal => {
@@ -439,8 +431,8 @@ function applyFilters(deals: SavedDeal[], filters: Filters): SavedDeal[] {
 
     if (filters.state || filters.city) {
       const { city, state } = parseAddress(acq.propertyAddress ?? '');
-      if (filters.state && !state.toLowerCase().includes(filters.state.toLowerCase())) return false;
-      if (filters.city  && !city.toLowerCase().includes(filters.city.toLowerCase()))  return false;
+      if (filters.state && state !== normalizeStateInput(filters.state)) return false;
+      if (filters.city && !city.toLowerCase().includes(filters.city.toLowerCase())) return false;
     }
 
     return true;
@@ -590,10 +582,16 @@ function FilterBar({ filters, onChange, onClear, activeCount, totalCount, filter
             </div>
             <div>
               <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5">State</p>
-              <input type="text" placeholder="e.g. TX" maxLength={2}
+              <input type="text" placeholder="e.g. TX or Texas"
+                list="state-options"
                 value={filters.state}
-                onChange={e => onChange({ ...filters, state: e.target.value.toUpperCase() })}
+                onChange={e => onChange({ ...filters, state: e.target.value })}
                 className="input text-sm w-full" />
+              <datalist id="state-options">
+                {Object.entries(STATE_ABBR).map(([name, abbr]) => (
+                  <option key={abbr} value={abbr}>{name.replace(/\b\w/g, c => c.toUpperCase())}</option>
+                ))}
+              </datalist>
             </div>
           </div>
         </div>
@@ -624,7 +622,8 @@ export function DealAnalyzerDashboard() {
   ].filter(Boolean).length;
 
   const analyses = savedDeals.filter(d => getBestResult(d));
-  const drafts   = savedDeals.filter(d => !getBestResult(d));
+  const allDrafts = savedDeals.filter(d => !getBestResult(d));
+  const drafts = useMemo(() => applyFilters(allDrafts, filters), [allDrafts, filters]);
 
   const sortedAnalyses = useMemo(() => {
     const filtered = applyFilters(analyses, filters);
@@ -674,8 +673,8 @@ export function DealAnalyzerDashboard() {
                 onChange={setFilters}
                 onClear={() => setFilters(DEFAULT_FILTERS)}
                 activeCount={activeFilterCount}
-                totalCount={analyses.length}
-                filteredCount={sortedAnalyses.length}
+                totalCount={savedDeals.length}
+                filteredCount={sortedAnalyses.length + drafts.length}
               />
             )}
 
