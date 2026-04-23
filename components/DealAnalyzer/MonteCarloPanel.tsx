@@ -231,7 +231,7 @@ function PriceGuidanceCard({ recommendedMaxPrice, conservativeMaxPrice, targetIR
         })}
       </div>
       <p className="px-4 pt-2 pb-0.5 text-[10px] text-slate-400 dark:text-slate-500 leading-snug">
-        Thresholds tied to your target IRR under typical / stress-tested market conditions.
+        Both prices are driven by the uncertainty ranges — wider ranges or ranges skewed toward the downside will pull these prices down. Recommended Max: balanced case. Ideal Entry: each variable toward the worse end.
       </p>
       {inverted && (
         <div className="px-4 py-2 bg-red-50 dark:bg-red-900/20 border-t border-red-200 dark:border-red-800/50 flex items-center justify-between gap-2">
