@@ -29,6 +29,8 @@ class SavedDeal(Base):
     refinance_data: Mapped[dict] = mapped_column(JSON, nullable=False)
     results_data: Mapped[dict] = mapped_column(JSON, nullable=False)
     mc_ranges_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Null = user has never reviewed ranges (triggers the wizard-step dirty flag).
+    mc_ranges_reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     mc_results_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     current_step: Mapped[int | None] = mapped_column(Integer, nullable=True)
     calc_state_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)

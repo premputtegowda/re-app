@@ -29,6 +29,7 @@ class DealPayload(BaseModel):
     refinance: dict[str, Any]
     results: dict[str, Any]
     mcRanges: dict[str, Any] | None = None
+    mcRangesReviewedAt: str | None = None
     mcResults: Any | None = None
     currentStep: int | None = None
     calcState: dict[str, Any] | None = None
@@ -45,6 +46,7 @@ class DealResponse(BaseModel):
     refinance: dict[str, Any]
     results: dict[str, Any]
     mcRanges: dict[str, Any] | None
+    mcRangesReviewedAt: str | None
     mcResults: Any | None
     currentStep: int | None
     calcState: dict[str, Any] | None
@@ -63,6 +65,7 @@ class DealUpdatePayload(BaseModel):
     refinance: dict[str, Any]
     results: dict[str, Any]
     mcRanges: dict[str, Any] | None = None
+    mcRangesReviewedAt: str | None = None
     mcResults: Any | None = None
     currentStep: int | None = None
     calcState: dict[str, Any] | None = None
@@ -70,6 +73,16 @@ class DealUpdatePayload(BaseModel):
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    # Accept trailing Z or offset; datetime.fromisoformat handles most JS ISO strings.
+    try:
+        return datetime.fromisoformat(value.replace('Z', '+00:00'))
+    except ValueError:
+        return None
+
 
 def _to_response(deal: SavedDeal) -> DealResponse:
     return DealResponse(
@@ -81,6 +94,7 @@ def _to_response(deal: SavedDeal) -> DealResponse:
         refinance=deal.refinance_data,
         results=deal.results_data,
         mcRanges=deal.mc_ranges_data,
+        mcRangesReviewedAt=deal.mc_ranges_reviewed_at.isoformat() if deal.mc_ranges_reviewed_at else None,
         mcResults=deal.mc_results_data,
         currentStep=deal.current_step,
         calcState=deal.calc_state_data,
@@ -142,6 +156,7 @@ async def create_deal(
         refinance_data=payload.refinance,
         results_data=payload.results,
         mc_ranges_data=payload.mcRanges,
+        mc_ranges_reviewed_at=_parse_iso(payload.mcRangesReviewedAt),
         mc_results_data=payload.mcResults,
         current_step=payload.currentStep,
         calc_state_data=payload.calcState,
@@ -179,6 +194,7 @@ async def update_deal(
     deal.refinance_data = payload.refinance
     deal.results_data = payload.results
     deal.mc_ranges_data = payload.mcRanges
+    deal.mc_ranges_reviewed_at = _parse_iso(payload.mcRangesReviewedAt)
     deal.mc_results_data = payload.mcResults
     deal.current_step = payload.currentStep
     deal.calc_state_data = payload.calcState

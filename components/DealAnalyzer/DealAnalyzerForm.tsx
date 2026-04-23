@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Pencil, Calculator, AlertTriangle, MapPin, CreditCard, Hammer, BarChart2, TrendingUp, ChevronRight, ChevronUp, ChevronDown, Check, Zap, X, FileText, RotateCcw } from 'lucide-react';
+import { Pencil, Calculator, AlertTriangle, MapPin, CreditCard, Hammer, BarChart2, TrendingUp, ChevronRight, ChevronUp, ChevronDown, Check, Zap, X, FileText, RotateCcw, SlidersHorizontal } from 'lucide-react';
 import { ShareButton } from './ShareButton';
 import { Card } from '@/components/UI/Card';
 import { Button } from '@/components/UI/Button';
@@ -11,6 +11,8 @@ import { StepProperty } from './steps/StepProperty';
 import { StepFinancing } from './steps/StepFinancing';
 import { StepRenovation } from './steps/StepRenovation';
 import { StepExit } from './steps/StepExit';
+import { StepMarketUncertainty } from './steps/StepMarketUncertainty';
+import { computeMcRangesStatus } from '@/utils/mcRangesStatus';
 import { ResultsPanel } from './ResultsPanel';
 import { ProFormaGrid, defaultProForma } from './ProFormaGrid';
 import { RehabRentCalculator, simulateFromSchedule } from './RehabRentCalculator';
@@ -40,6 +42,7 @@ const FORM_STEPS = [
   { id: 2, label: 'Renovation' },
   { id: 3, label: 'Operations' },
   { id: 4, label: 'Exit & Refi' },
+  { id: 5, label: 'Market Uncertainty' },
 ] as const;
 
 const STEP_ICONS: Record<number, React.ReactNode> = {
@@ -48,6 +51,7 @@ const STEP_ICONS: Record<number, React.ReactNode> = {
   2: <Hammer size={20} />,
   3: <BarChart2 size={20} />,
   4: <TrendingUp size={20} />,
+  5: <SlidersHorizontal size={20} />,
 };
 
 const STEP_CARD_STYLE = {
@@ -120,6 +124,11 @@ function getStepCardData(
         refinance.enabled ? `Yr${refinance.refiYear} refi` : '',
       ].filter(Boolean);
       return { primary: exitVal, primaryExtra: null, sub: subParts.join(' · ') };
+    }
+    case 5: {
+      // Reviewed status is resolved at the component level; this gives the
+      // user a quick summary string on the collapsed card.
+      return { primary: 'Uncertainty ranges', primaryExtra: null, sub: 'Drives Ideal Entry / Recommended Max prices' };
     }
     default: return { primary: '—', primaryExtra: null, sub: '' };
   }
@@ -352,7 +361,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     initialDeal?.currentStep ?? (initialDeal ? 4 : 0)
   );
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(
-    new Set(initialDeal ? [0, 1, 2, 3, 4] : [])
+    new Set(initialDeal ? [0, 1, 2, 3, 4, 5] : [])
   );
   const [editingStep, setEditingStep] = useState<number | null>(null);
   const [pausedActiveStep, setPausedActiveStep] = useState<number | null>(null);
@@ -518,6 +527,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   // MC ranges state — persisted with deal
   const [mcRanges, setMcRanges] = useState<MCRanges | null>(
     initialDeal?.mcRanges ? (initialDeal.mcRanges as unknown as MCRanges) : null
+  );
+  const [mcRangesReviewedAt, setMcRangesReviewedAt] = useState<string | null>(
+    initialDeal?.mcRangesReviewedAt ?? null
   );
   const [mcResults, setMcResults] = useState<SavedMCResults | null>(
     initialDeal?.mcResults ? (initialDeal.mcResults as SavedMCResults) : null
@@ -1874,6 +1886,30 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
             computedRefiValue={computedRefiValue}
           />
         );
+      case 5:
+        return (
+          <StepMarketUncertainty
+            acquisition={acquisition}
+            proForma={proForma}
+            refinance={refinance}
+            ranges={mcRanges}
+            reviewedAt={mcRangesReviewedAt}
+            onAccept={(nextRanges) => {
+              const reviewedAt = new Date().toISOString();
+              setMcRanges(nextRanges);
+              setMcRangesReviewedAt(reviewedAt);
+              setActiveStep((s) => Math.max(s, 5));
+              if (savedDealId) {
+                updateMCData(
+                  savedDealId,
+                  nextRanges as unknown as SavedDeal['mcRanges'],
+                  undefined,
+                  reviewedAt,
+                );
+              }
+            }}
+          />
+        );
     }
   };
 
@@ -1886,6 +1922,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       case 2: return summarizeRenovation(acquisition);
       case 3: return summarizeOperations(proForma, acquisition.projectionYears);
       case 4: return summarizeExit(acquisition, refinance);
+      case 5: return mcRangesReviewedAt ? `Reviewed ${new Date(mcRangesReviewedAt).toLocaleDateString()}` : 'Not reviewed yet';
       default: return '';
     }
   };
@@ -1971,6 +2008,11 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         )) return 'incomplete';
         return null;
       }
+      case 5: {
+        const s = computeMcRangesStatus({ acquisition, refinance, ranges: mcRanges, reviewedAt: mcRangesReviewedAt });
+        if (s.status === 'hard') return 'incomplete';
+        return null; // soft-dirty doesn't block; it's a quiet nudge elsewhere
+      }
       default:
         return null;
     }
@@ -1991,8 +2033,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   })();
   const hasAddress = acquisition.propertyAddress.trim().length > 0;
   const hasNewDealData = !savedDealId && (hasAddress || acquisition.purchasePrice > 0);
-  const allStepsCompleted = [0, 1, 2, 3, 4].every(id => completedSteps.has(id));
-  const hasAnyWarning = [0, 1, 2, 3, 4].some(id => getStepWarning(id) !== null);
+  const allStepsCompleted = [0, 1, 2, 3, 4, 5].every(id => completedSteps.has(id));
+  const hasAnyWarning = [0, 1, 2, 3, 4, 5].some(id => getStepWarning(id) !== null);
 
   // ── Render ──
 

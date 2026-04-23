@@ -411,6 +411,9 @@ export interface SavedDeal {
   refinance: CoCRefinance;
   results: Partial<Record<CoCScenarioType, CoCResult>>;
   mcRanges?: Record<string, MCRangeEntry>;
+  /** ISO timestamp — when the user last confirmed the market uncertainty ranges.
+   *  null means never reviewed; drives the "needs review" dirty flag on the wizard step. */
+  mcRangesReviewedAt?: string | null;
   mcResults?: unknown; // SavedMCResults — typed as unknown to avoid circular import
   currentStep?: number;
   calcState?: CalcPersistedState;

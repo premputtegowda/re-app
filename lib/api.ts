@@ -536,6 +536,7 @@ export const api = {
     refinance: unknown;
     results: unknown;
     mcRanges?: unknown;
+    mcRangesReviewedAt?: string | null;
     mcResults?: unknown;
     currentStep?: number;
     calcState?: unknown;
@@ -562,6 +563,7 @@ export const api = {
     refinance: unknown;
     results: unknown;
     mcRanges?: unknown;
+    mcRangesReviewedAt?: string | null;
     mcResults?: unknown;
     currentStep?: number;
     calcState?: unknown;

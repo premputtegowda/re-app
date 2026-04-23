@@ -450,7 +450,7 @@ function RiskDrivers({ results }: { results: MCResults }) {
 
 // ── Assumption Editor ─────────────────────────────────────────────────────────
 
-function RangeEditor({ ranges, defaults, onChange, onReset, onSaveAsDefaults, showRefiRate, showArvRange }: {
+export function RangeEditor({ ranges, defaults, onChange, onReset, onSaveAsDefaults, showRefiRate, showArvRange }: {
   ranges:             MCRanges;
   defaults:           MCRanges;
   onChange:           (r: MCRanges) => void;

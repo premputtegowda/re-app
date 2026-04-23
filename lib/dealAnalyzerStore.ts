@@ -38,7 +38,7 @@ interface CoCStore {
   saveDeal: (name: string, draft: DealAnalyzerDraft, results: Partial<Record<CoCScenarioType, CoCResult>>, mcRanges?: SavedDeal['mcRanges'], mcResults?: SavedDeal['mcResults']) => string;
   updateSavedDeal: (id: string, name: string, results: Partial<Record<CoCScenarioType, CoCResult>>, draft?: DealAnalyzerDraft, mcRanges?: SavedDeal['mcRanges'], mcResults?: SavedDeal['mcResults']) => void;
   deleteSavedDeal: (id: string) => void;
-  updateMCData: (id: string, mcRanges?: SavedDeal['mcRanges'], mcResults?: SavedDeal['mcResults']) => void;
+  updateMCData: (id: string, mcRanges?: SavedDeal['mcRanges'], mcResults?: SavedDeal['mcResults'], mcRangesReviewedAt?: string | null) => void;
   updateCurrentStep: (id: string, step: number) => void;
   /** Fetch all deals from backend and replace local store. Called on login. */
   syncDealsFromBackend: () => Promise<void>;
@@ -212,7 +212,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
         }
       },
 
-      updateMCData: (id, mcRanges?, mcResults?) => {
+      updateMCData: (id, mcRanges?, mcResults?, mcRangesReviewedAt?) => {
         const updatedAt = now();
         set((state) => ({
           savedDeals: state.savedDeals.map((d) =>
@@ -220,6 +220,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
               ...d,
               ...(mcRanges !== undefined ? { mcRanges } : {}),
               ...(mcResults !== undefined ? { mcResults } : {}),
+              ...(mcRangesReviewedAt !== undefined ? { mcRangesReviewedAt } : {}),
               updatedAt,
             } : d
           ),
@@ -234,6 +235,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
             refinance: deal.refinance,
             results: deal.results,
             mcRanges: mcRanges !== undefined ? mcRanges : deal.mcRanges,
+            mcRangesReviewedAt: mcRangesReviewedAt !== undefined ? mcRangesReviewedAt : deal.mcRangesReviewedAt,
             mcResults: mcResults !== undefined ? mcResults : deal.mcResults,
             currentStep: deal.currentStep,
             updatedAt,
@@ -255,6 +257,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
             refinance: d.refinance,
             results: d.results,
             mcRanges: d.mcRanges ?? undefined,
+            mcRangesReviewedAt: d.mcRangesReviewedAt ?? null,
             mcResults: d.mcResults ?? undefined,
             currentStep: d.currentStep ?? undefined,
             calcState: d.calcState ?? undefined,
