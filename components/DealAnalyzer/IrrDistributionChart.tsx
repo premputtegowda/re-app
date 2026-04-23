@@ -92,6 +92,7 @@ export function IrrDistributionChart({ results, targetIRR }: IrrDistributionChar
             />
             <ReferenceLine y={0} stroke="#cbd5e1" />
             <ReferenceLine x={downsideIrr} stroke="#ef4444" strokeDasharray="3 3" label={{ value: 'Downside', position: 'top', fontSize: 9, fill: '#ef4444' }} />
+            <ReferenceLine x={typicalIrr}  stroke="#f59e0b" strokeDasharray="3 3" label={{ value: 'Typical',  position: 'top', fontSize: 9, fill: '#f59e0b' }} />
             <ReferenceLine x={upsideIrr}   stroke="#10b981" strokeDasharray="3 3" label={{ value: 'Upside',   position: 'top', fontSize: 9, fill: '#10b981' }} />
             <ReferenceLine x={targetIRR} stroke="#2563eb" strokeWidth={2} label={{ value: `Target ${fmtPct(targetIRR)}`, position: 'top', fontSize: 10, fill: '#2563eb' }} />
             <Bar dataKey="count" radius={[2, 2, 0, 0]}>
