@@ -9,7 +9,7 @@ import { detectPriceInversion, logPriceInversion, diagnosticPayload } from '@/ut
 import type { MCRanges, MCResults, MCPercentileMetrics, SavedMCResults } from '@/utils/monteCarlo';
 import type { CoCAcquisition, CoCOperations, CoCRefinance, ProFormaData } from '@/types';
 import { useDealSettingsStore, BEAR_OPTIONS, BULL_OPTIONS } from '@/lib/dealSettingsStore';
-import { IrrConfidenceChart } from './IrrConfidenceChart';
+import { IrrConfidenceBar } from './IrrConfidenceBar';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -864,7 +864,7 @@ export function MonteCarloPanel({
             onTargetIRRChange={setTargetIRR}
             currentPrice={acquisition.purchasePrice}
           />
-          <IrrConfidenceChart results={results} targetIRR={targetIRR} />
+          <IrrConfidenceBar results={results} targetIRR={targetIRR} />
           <ScenarioOutcomes results={results} />
           <RiskDrivers results={results} />
         </div>
