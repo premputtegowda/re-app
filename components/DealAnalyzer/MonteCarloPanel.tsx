@@ -4,7 +4,8 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import React from 'react';
 import { RotateCcw, CheckCircle2, Pencil, Info } from 'lucide-react';
 import { formatCurrency, formatPct, formatMultiple } from '@/utils/dealAnalyzerCalc';
-import { runSimulation, computeDefaultRanges, rangesToMCRangeDefaults, toSavedMCResults, hydrateMCResults, findMaxPriceAtConditions } from '@/utils/monteCarlo';
+import { runSimulation, computeDefaultRanges, rangesToMCRangeDefaults, toSavedMCResults, hydrateMCResults, computeDeterministicPrices } from '@/utils/monteCarlo';
+import { detectPriceInversion, logPriceInversion, diagnosticPayload } from '@/utils/priceInversionDiagnostic';
 import type { MCRanges, MCResults, MCPercentileMetrics, SavedMCResults } from '@/utils/monteCarlo';
 import type { CoCAcquisition, CoCOperations, CoCRefinance, ProFormaData } from '@/types';
 import { useDealSettingsStore, BEAR_OPTIONS, BULL_OPTIONS } from '@/lib/dealSettingsStore';
@@ -159,6 +160,29 @@ function PriceGuidanceCard({ recommendedMaxPrice, conservativeMaxPrice, targetIR
     { label: 'Ideal Entry',      sub: "Holds up even if things don't go as planned", price: conservativeMaxPrice },
     { label: 'Recommended Max',  sub: 'Works under typical market conditions',        price: recommendedMaxPrice },
   ];
+  const inverted = detectPriceInversion({ recommendedMaxPrice, conservativeMaxPrice });
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyDiagnostic = async () => {
+    const payload = diagnosticPayload();
+    if (!payload) return;
+    try {
+      await navigator.clipboard.writeText(payload);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch {
+      // fall back: download as a file
+      const blob = new Blob([payload], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `price-inversion-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }
+  };
 
   return (
     <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
@@ -206,6 +230,24 @@ function PriceGuidanceCard({ recommendedMaxPrice, conservativeMaxPrice, targetIR
           );
         })}
       </div>
+      <p className="px-4 pt-2 pb-0.5 text-[10px] text-slate-400 dark:text-slate-500 leading-snug">
+        Thresholds tied to your target IRR under typical / stress-tested market conditions.
+        The distribution chart below answers a different question: what IRR range would you see at your current price?
+      </p>
+      {inverted && (
+        <div className="px-4 py-2 bg-red-50 dark:bg-red-900/20 border-t border-red-200 dark:border-red-800/50 flex items-center justify-between gap-2">
+          <p className="text-[11px] text-red-900 dark:text-red-200">
+            Diagnostic: Ideal Entry &gt; Recommended Max (shouldn&apos;t happen). Copy and share to help fix.
+          </p>
+          <button
+            type="button"
+            onClick={handleCopyDiagnostic}
+            className="text-[11px] font-medium text-red-700 dark:text-red-300 hover:underline shrink-0"
+          >
+            {copied ? 'Copied' : 'Copy diagnostic'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -667,17 +709,40 @@ export function MonteCarloPanel({
   // Lift running/progress state to parent
   useEffect(() => { onRunningChange?.(running, progress); }, [running, progress, onRunningChange]);
 
-  const { bearPercentile } = useDealSettingsStore();
-
   const { recommendedMaxPrice, conservativeMaxPrice } = useMemo(() => {
+    // Guidance only appears after the user runs a simulation (keeps the
+    // mental model that prices require MC to be current). The calculation
+    // itself is analytical: computeDeterministicPrices uses P50 / stress
+    // quantiles per-variable (monotonic by construction — rec ≥ con always),
+    // replacing the earlier sampled-run method that could produce inversions.
     if (!results) return { recommendedMaxPrice: null, conservativeMaxPrice: null };
-    const bearData = results[bearPercentile] ?? results.p20 ?? results.p50;
-    const args = [acquisition, operations, proForma, refinance, units, avgPreStabPerUnit] as const;
-    return {
-      recommendedMaxPrice:  findMaxPriceAtConditions(results.p50.sampled,  targetIRR, ...args),
-      conservativeMaxPrice: findMaxPriceAtConditions(bearData.sampled,      targetIRR, ...args),
-    };
-  }, [results, bearPercentile, targetIRR, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit]);
+    const prices = computeDeterministicPrices(
+      ranges, targetIRR,
+      acquisition, operations, proForma, refinance, units, avgPreStabPerUnit,
+    );
+    // Trip-wire: if the analytical method ever produces an inversion, capture
+    // it. In theory impossible; in practice we want to know if our assumptions
+    // about monotonicity ever break in a real deal.
+    if (detectPriceInversion(prices)) {
+      logPriceInversion({
+        recommendedMaxPrice: prices.recommendedMaxPrice as number,
+        conservativeMaxPrice: prices.conservativeMaxPrice as number,
+        recommendedSampled: 'analytical P50 quantiles per variable',
+        conservativeSampled: 'analytical P80/P20 stress quantiles per variable',
+        targetIRR,
+        acquisitionSnapshot: {
+          propertyAddress: acquisition.propertyAddress,
+          units: acquisition.units,
+          purchasePrice: acquisition.purchasePrice,
+          interestRate: acquisition.interestRate,
+          exitCapRate: acquisition.exitCapRate,
+          projectionYears: acquisition.projectionYears,
+        },
+        source: 'MonteCarloPanel (analytical display)',
+      });
+    }
+    return prices;
+  }, [results, ranges, targetIRR, acquisition, operations, proForma, refinance, units, avgPreStabPerUnit]);
 
   const run = useCallback(async (effectiveRanges?: MCRanges) => {
     if (simRunningRef.current) return;
@@ -691,10 +756,30 @@ export function MonteCarloPanel({
         units, avgPreStabPerUnit, onProgress: pct => { if (isMountedRef.current) setProgress(pct); },
       });
       const fp = computeFingerprint(acquisition, proForma, activeRanges, refinance);
-      const bearRun = r[bearPercentile] ?? r.p20 ?? r.p50;
-      const args = [acquisition, operations, proForma, refinance, units, avgPreStabPerUnit] as const;
-      const recMax  = findMaxPriceAtConditions(r.p50.sampled,    targetIRR, ...args);
-      const conMax  = findMaxPriceAtConditions(bearRun.sampled,  targetIRR, ...args);
+      // Prices saved alongside results use the analytical method so persisted
+      // values stay monotonic (rec ≥ con). Matches the display-time path.
+      const { recommendedMaxPrice: recMax, conservativeMaxPrice: conMax } = computeDeterministicPrices(
+        activeRanges, targetIRR,
+        acquisition, operations, proForma, refinance, units, avgPreStabPerUnit,
+      );
+      if (detectPriceInversion({ recommendedMaxPrice: recMax, conservativeMaxPrice: conMax })) {
+        logPriceInversion({
+          recommendedMaxPrice: recMax as number,
+          conservativeMaxPrice: conMax as number,
+          recommendedSampled: 'analytical P50 quantiles per variable',
+          conservativeSampled: 'analytical P80/P20 stress quantiles per variable',
+          targetIRR,
+          acquisitionSnapshot: {
+            propertyAddress: acquisition.propertyAddress,
+            units: acquisition.units,
+            purchasePrice: acquisition.purchasePrice,
+            interestRate: acquisition.interestRate,
+            exitCapRate: acquisition.exitCapRate,
+            projectionYears: acquisition.projectionYears,
+          },
+          source: 'MonteCarloPanel.run (save path, analytical)',
+        });
+      }
       const saved = toSavedMCResults(r, recMax, conMax, targetIRR, targetCoC, fp);
       onResultsChange?.(saved);
       lastRunFingerprintRef.current = fp;
