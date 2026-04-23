@@ -9,7 +9,6 @@ import { detectPriceInversion, logPriceInversion, diagnosticPayload } from '@/ut
 import type { MCRanges, MCResults, MCPercentileMetrics, SavedMCResults } from '@/utils/monteCarlo';
 import type { CoCAcquisition, CoCOperations, CoCRefinance, ProFormaData } from '@/types';
 import { useDealSettingsStore, BEAR_OPTIONS, BULL_OPTIONS } from '@/lib/dealSettingsStore';
-import { IrrConfidenceBar } from './IrrConfidenceBar';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -233,7 +232,6 @@ function PriceGuidanceCard({ recommendedMaxPrice, conservativeMaxPrice, targetIR
       </div>
       <p className="px-4 pt-2 pb-0.5 text-[10px] text-slate-400 dark:text-slate-500 leading-snug">
         Thresholds tied to your target IRR under typical / stress-tested market conditions.
-        The distribution chart below answers a different question: what IRR range would you see at your current price?
       </p>
       {inverted && (
         <div className="px-4 py-2 bg-red-50 dark:bg-red-900/20 border-t border-red-200 dark:border-red-800/50 flex items-center justify-between gap-2">
@@ -864,7 +862,6 @@ export function MonteCarloPanel({
             onTargetIRRChange={setTargetIRR}
             currentPrice={acquisition.purchasePrice}
           />
-          <IrrConfidenceBar results={results} targetIRR={targetIRR} />
           <ScenarioOutcomes results={results} />
           <RiskDrivers results={results} />
         </div>
