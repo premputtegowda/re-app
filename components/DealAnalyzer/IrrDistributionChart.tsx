@@ -28,7 +28,14 @@ export function IrrDistributionChart({ results, targetIRR }: IrrDistributionChar
 
   if (!results.irrBuckets || results.irrBuckets.length === 0) return null;
 
-  const data = results.irrBuckets.map(b => ({ center: b.center, count: b.count }));
+  // Buckets whose IRR center is negative are drawn BELOW the y=0 baseline so
+  // the chart visually separates gain from loss territory. The tooltip still
+  // reports the underlying (positive) run count.
+  const data = results.irrBuckets.map(b => ({
+    center: b.center,
+    count: b.center < 0 ? -b.count : b.count,
+    absCount: b.count,
+  }));
   const downsideIrr = (results[bearPercentile] ?? results.p20).irr;
   const typicalIrr  = results.p50.irr;
   const upsideIrr   = (results[bullPercentile] ?? results.p80).irr;
@@ -74,12 +81,16 @@ export function IrrDistributionChart({ results, targetIRR }: IrrDistributionChar
               axisLine={false}
               tickLine={false}
               width={28}
+              tickFormatter={(v: number) => String(Math.abs(v))}
             />
             <Tooltip
-              formatter={(value: number) => [`${value} runs`, 'Count']}
+              formatter={(_: number, __: string, entry: { payload?: { absCount?: number } }) =>
+                [`${entry.payload?.absCount ?? 0} runs`, 'Count']
+              }
               labelFormatter={(label: number) => `IRR ${fmtPct(label)}`}
               contentStyle={{ fontSize: 11, padding: '4px 8px', borderRadius: 6 }}
             />
+            <ReferenceLine y={0} stroke="#cbd5e1" />
             <ReferenceLine x={downsideIrr} stroke="#ef4444" strokeDasharray="3 3" label={{ value: 'Downside', position: 'top', fontSize: 9, fill: '#ef4444' }} />
             <ReferenceLine x={upsideIrr}   stroke="#10b981" strokeDasharray="3 3" label={{ value: 'Upside',   position: 'top', fontSize: 9, fill: '#10b981' }} />
             <ReferenceLine x={targetIRR} stroke="#2563eb" strokeWidth={2} label={{ value: `Target ${fmtPct(targetIRR)}`, position: 'top', fontSize: 10, fill: '#2563eb' }} />
