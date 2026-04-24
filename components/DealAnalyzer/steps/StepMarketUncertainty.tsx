@@ -61,7 +61,10 @@ export function StepMarketUncertainty({
 
   // Local draft ranges — seeded from what's saved (or defaults if never reviewed).
   const [draftRanges, setDraftRanges] = useState<MCRanges>(ranges ?? defaults);
-  const [userEdited, setUserEdited] = useState(false);
+  // Initialize the "has the user customized?" flag to match whether ranges
+  // were already saved. Otherwise the mount-time defaults-watch effect below
+  // would see userEditedRef=false and wipe saved ranges back to defaults.
+  const [userEdited, setUserEdited] = useState(ranges !== null);
 
   // When deal inputs change, the `defaults` object recomputes.
   //  - If the user hasn't customized → draft tracks the new defaults exactly.
@@ -70,7 +73,7 @@ export function StepMarketUncertainty({
   // Mirrors the logic in MonteCarloPanel so ranges always stay anchored on
   // current deal inputs, no matter where they're edited.
   const prevDefaultsRef = useRef<MCRanges>(defaults);
-  const userEditedRef = useRef(false);
+  const userEditedRef = useRef<boolean>(ranges !== null);
   useEffect(() => {
     const prev = prevDefaultsRef.current;
     prevDefaultsRef.current = defaults;
