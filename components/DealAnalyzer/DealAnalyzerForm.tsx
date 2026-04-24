@@ -12,7 +12,7 @@ import { StepFinancing } from './steps/StepFinancing';
 import { StepRenovation } from './steps/StepRenovation';
 import { StepExit } from './steps/StepExit';
 import { StepMarketUncertainty } from './steps/StepMarketUncertainty';
-import { computeMcRangesStatus } from '@/utils/mcRangesStatus';
+import { computeMcRangesStatus, getRebasedFieldLabels } from '@/utils/mcRangesStatus';
 import { ResultsPanel } from './ResultsPanel';
 import { ProFormaGrid, defaultProForma } from './ProFormaGrid';
 import { RehabRentCalculator, simulateFromSchedule } from './RehabRentCalculator';
@@ -1931,31 +1931,15 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   // modes while preserving spread. We surface a short notice on the
   // collapsed step card naming which variables drifted. Dismissable, and
   // auto-hides when a fresh MC result is produced (user ran a new sim).
-  const mcRebasedLabels = useMemo<string[]>(() => {
-    if (!mcRanges) return [];
-    const mcUnits = acquisition.propertyType === 'mfr' && acquisition.unitMix.length > 0
-      ? acquisition.unitMix.reduce((s, u) => s + u.count, 0)
-      : (acquisition.units || 1);
-    const mcAvgRent = acquisition.propertyType === 'sfr'
-      ? (acquisition.sfrTargetRent || 0)
-      : (acquisition.unitMix.length > 0
-          ? acquisition.unitMix.reduce((s, u) => s + u.rentMonthly * u.count, 0) / Math.max(1, mcUnits)
-          : 0);
-    const d = computeDefaultRanges(acquisition, proForma, mcAvgRent, mcUnits, refinance);
-    const LABELS: Record<string, string> = {
-      targetRentPerUnit: 'Rent / unit', vacancyPct: 'Vacancy', rentGrowthPct: 'Rent growth',
-      exitCapRate: 'Exit cap rate', renoOverrunPct: 'Reno overrun', interestRate: 'Interest rate',
-      refiRate: 'Refi rate', expenseGrowthPct: 'Expense growth', arv: 'Exit value (ARV)',
-    };
-    const out: string[] = [];
-    for (const k of Object.keys(d) as (keyof MCRanges)[]) {
-      const def = d[k];
-      const saved = (mcRanges as unknown as MCRanges)[k];
-      if (!def || !saved) continue;
-      if (saved.mode !== def.mode) out.push(LABELS[k] ?? String(k));
-    }
-    return out;
-  }, [mcRanges, acquisition, proForma, refinance]);
+  const mcRebasedLabels = useMemo<string[]>(
+    () => getRebasedFieldLabels({
+      acquisition,
+      proForma,
+      refinance,
+      ranges: mcRanges as unknown as MCRanges | null,
+    }),
+    [mcRanges, acquisition, proForma, refinance],
+  );
 
   const [mcRebasedDismissed, setMcRebasedDismissed] = useState(false);
   // Re-arm notice whenever the set of drifted fields changes.

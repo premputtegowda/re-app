@@ -14,8 +14,9 @@
  * When both fire, `hard` wins.
  */
 
-import type { CoCAcquisition, CoCRefinance } from '@/types';
+import type { CoCAcquisition, CoCRefinance, ProFormaData } from '@/types';
 import type { MCRanges } from '@/utils/monteCarlo';
+import { computeDefaultRanges } from '@/utils/monteCarlo';
 
 export type McRangesStatus = 'clean' | 'soft' | 'hard';
 
@@ -88,4 +89,60 @@ export function computeMcRangesStatus(args: McRangesStatusArgs): McRangesStatusR
   if (hard.length > 0) return { status: 'hard', reasons: hard };
   if (soft.length > 0) return { status: 'soft', reasons: soft };
   return { status: 'clean', reasons: [] };
+}
+
+// ── Re-anchor detection ──────────────────────────────────────────────────────
+
+const VARIABLE_LABELS: Partial<Record<keyof MCRanges, string>> = {
+  targetRentPerUnit: 'Rent / unit',
+  vacancyPct: 'Vacancy',
+  rentGrowthPct: 'Rent growth',
+  exitCapRate: 'Exit cap rate',
+  renoOverrunPct: 'Reno overrun',
+  interestRate: 'Interest rate',
+  refiRate: 'Refi rate',
+  expenseGrowthPct: 'Expense growth',
+  arv: 'Exit value (ARV)',
+};
+
+export interface RebasedFieldsArgs {
+  acquisition: CoCAcquisition;
+  proForma: ProFormaData;
+  refinance: CoCRefinance;
+  /** Saved ranges (may be null for never-reviewed deals). */
+  ranges: MCRanges | null;
+}
+
+/**
+ * Return user-friendly labels of every MC range whose saved mode no longer
+ * matches the mode that `computeDefaultRanges` would produce from the
+ * current deal inputs — i.e., variables whose base values drifted since
+ * the user last reviewed ranges.
+ *
+ * Empty array means saved ranges are still anchored correctly; no drift
+ * signal needed.
+ */
+export function getRebasedFieldLabels(args: RebasedFieldsArgs): string[] {
+  const { acquisition, proForma, refinance, ranges } = args;
+  if (!ranges) return [];
+
+  const units = acquisition.propertyType === 'mfr' && acquisition.unitMix.length > 0
+    ? acquisition.unitMix.reduce((s, u) => s + u.count, 0)
+    : (acquisition.units || 1);
+  const avgRent = acquisition.propertyType === 'sfr'
+    ? (acquisition.sfrTargetRent || 0)
+    : (acquisition.unitMix.length > 0
+        ? acquisition.unitMix.reduce((s, u) => s + u.rentMonthly * u.count, 0) / Math.max(1, units)
+        : 0);
+
+  const defaults = computeDefaultRanges(acquisition, proForma, avgRent, units, refinance);
+
+  const out: string[] = [];
+  for (const key of Object.keys(defaults) as (keyof MCRanges)[]) {
+    const def = defaults[key];
+    const saved = ranges[key];
+    if (!def || !saved) continue;
+    if (saved.mode !== def.mode) out.push(VARIABLE_LABELS[key] ?? String(key));
+  }
+  return out;
 }

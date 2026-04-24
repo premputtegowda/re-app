@@ -1,7 +1,21 @@
 import { describe, it, expect } from 'vitest';
-import { computeMcRangesStatus } from '@/utils/mcRangesStatus';
+import { computeMcRangesStatus, getRebasedFieldLabels } from '@/utils/mcRangesStatus';
+import { computeDefaultRanges } from '@/utils/monteCarlo';
 import type { MCRanges } from '@/utils/monteCarlo';
-import type { CoCAcquisition, CoCRefinance } from '@/types';
+import type { CoCAcquisition, CoCRefinance, ProFormaData } from '@/types';
+
+function makeProForma(): ProFormaData {
+  return {
+    grossRent:     { t12: 960_000, stab: null, stabilized: 960_000, growthPct: 3 },
+    otherIncome:   { t12: 0, stab: null, stabilized: 0, growthPct: 2 },
+    vacancyPct:    { t12: 5, stab: null, stabilized: 5 },
+    creditLossPct: { t12: 0, stab: null, stabilized: 0 },
+    expenses: [
+      { id: 'tax', name: 'Property Taxes', isPercentOfEGI: false, t12Value: 48_000, stabValue: null, stabilizedValue: 48_000, growthPct: 2 },
+    ],
+    yearOverrides: {},
+  };
+}
 
 function makeAcquisition(overrides: Partial<CoCAcquisition> = {}): CoCAcquisition {
   return {
@@ -150,6 +164,80 @@ describe('computeMcRangesStatus — soft triggers', () => {
     });
     // No hard triggers, no interest drift, cap rate irrelevant → clean
     expect(s.status).toBe('clean');
+  });
+});
+
+describe('getRebasedFieldLabels', () => {
+  // Build the "saved ranges" by letting computeDefaultRanges produce defaults
+  // with the exact avgRent the utility will derive internally (acquisition
+  // has empty unitMix → utility passes 0). That way baseline comparison
+  // matches and we can isolate drift tests to single-field changes.
+  const baseAcq = makeAcquisition();
+  const baseProForma = makeProForma();
+  const baseRefi = makeRefinance();
+  const savedRanges = computeDefaultRanges(baseAcq, baseProForma, 0, 48, baseRefi);
+
+  it('returns empty when nothing has drifted', () => {
+    const labels = getRebasedFieldLabels({
+      acquisition: baseAcq,
+      proForma: baseProForma,
+      refinance: baseRefi,
+      ranges: savedRanges,
+    });
+    expect(labels).toEqual([]);
+  });
+
+  it('returns empty when ranges is null (never reviewed)', () => {
+    const labels = getRebasedFieldLabels({
+      acquisition: baseAcq,
+      proForma: baseProForma,
+      refinance: baseRefi,
+      ranges: null,
+    });
+    expect(labels).toEqual([]);
+  });
+
+  it('detects interest-rate drift', () => {
+    const labels = getRebasedFieldLabels({
+      acquisition: makeAcquisition({ interestRate: 8 }), // was 6.5
+      proForma: baseProForma,
+      refinance: baseRefi,
+      ranges: savedRanges,
+    });
+    expect(labels).toContain('Interest rate');
+  });
+
+  it('detects exit cap rate drift', () => {
+    const labels = getRebasedFieldLabels({
+      acquisition: makeAcquisition({ exitCapRate: 7 }), // was 6
+      proForma: baseProForma,
+      refinance: baseRefi,
+      ranges: savedRanges,
+    });
+    expect(labels).toContain('Exit cap rate');
+  });
+
+  it('returns multiple labels when several bases drift', () => {
+    const labels = getRebasedFieldLabels({
+      acquisition: makeAcquisition({ interestRate: 8, exitCapRate: 7 }),
+      proForma: baseProForma,
+      refinance: baseRefi,
+      ranges: savedRanges,
+    });
+    expect(labels).toContain('Interest rate');
+    expect(labels).toContain('Exit cap rate');
+    expect(labels.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('uses human-readable labels, not raw MCRanges keys', () => {
+    const labels = getRebasedFieldLabels({
+      acquisition: makeAcquisition({ interestRate: 8 }),
+      proForma: baseProForma,
+      refinance: baseRefi,
+      ranges: savedRanges,
+    });
+    expect(labels).toContain('Interest rate');
+    expect(labels).not.toContain('interestRate');
   });
 });
 
