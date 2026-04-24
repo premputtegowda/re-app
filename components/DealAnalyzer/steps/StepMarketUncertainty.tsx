@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { RotateCcw } from 'lucide-react';
+import { Check, RotateCcw, X } from 'lucide-react';
 import type { CoCAcquisition, CoCRefinance, ProFormaData } from '@/types';
 import type { MCRanges } from '@/utils/monteCarlo';
 import { computeDefaultRanges } from '@/utils/monteCarlo';
@@ -125,26 +125,21 @@ export function StepMarketUncertainty({
   // notice can sit in the collapsed step-card header instead of inside
   // the editor body. No banner rendered here anymore.
 
-  // Edits auto-commit: every RangeEditor onChange is piped up to onAccept,
-  // which updates parent state + persists to backend. No explicit Save
-  // button — the RangeEditor's own input-level commits ARE the save.
-  //
-  // Always merge with the current defaults before bubbling up so any
-  // optional key the editor doesn't currently expose (arv off, refi off)
-  // still lands in persisted ranges. Keeps later status checks simple.
+  // Edits are held in local draft state only — nothing persists to the
+  // parent/backend until the user hits Done. Cancel reverts the draft
+  // back to whatever was last saved (the `ranges` prop) merged with
+  // current defaults (so re-anchoring stays applied).
   const handleRangesChange = (r: MCRanges) => {
     const merged = { ...defaults, ...r };
     setDraftRanges(merged);
     setUserEdited(true);
     userEditedRef.current = true;
-    onAccept(merged);
   };
 
   const handleReset = () => {
     setDraftRanges(defaults);
     setUserEdited(false);
     userEditedRef.current = false;
-    onAccept(defaults);
   };
 
   const handleSaveDefaults = () => {
@@ -152,11 +147,26 @@ export function StepMarketUncertainty({
     // are a separate settings concern not surfaced here.
   };
 
-  // Opening the step IS the review. Auto-persist once on mount when the
-  // deal has never been reviewed before — parent gates step visibility
-  // behind "all earlier steps green," so reaching this component means
-  // the user has already moved past everything else and is looking at
-  // the uncertainty ranges.
+  const handleDone = () => {
+    onAccept({ ...defaults, ...draftRanges });
+  };
+
+  const handleCancel = () => {
+    // Revert draft to the last-saved ranges (or defaults if never saved),
+    // applying the same merge-with-defaults safeguard used at mount.
+    if (!ranges) {
+      setDraftRanges(defaults);
+    } else {
+      setDraftRanges({ ...defaults, ...ranges });
+    }
+    setUserEdited(ranges !== null);
+    userEditedRef.current = ranges !== null;
+  };
+
+  // Opening the step IS the review for a never-reviewed deal. Auto-persist
+  // once on mount — parent gates step visibility behind "all earlier steps
+  // green," so reaching here implies the user has moved past everything
+  // else. After this, further edits require an explicit Done click.
   const autoReviewedRef = useRef(false);
   useEffect(() => {
     if (reviewedAt === null && !autoReviewedRef.current) {
@@ -204,6 +214,26 @@ export function StepMarketUncertainty({
         showRefiRate={showRefiRate}
         showArvRange={showArvRange}
       />
+
+      {/* Done / Cancel — commits or reverts all in-flight edits at once. */}
+      <div className="flex items-center justify-end gap-2 pt-1">
+        <button
+          type="button"
+          onClick={handleCancel}
+          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-slate-400 text-xs font-medium transition-colors"
+        >
+          <X size={12} />
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={handleDone}
+          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-xs font-semibold transition-colors"
+        >
+          <Check size={12} />
+          Done
+        </button>
+      </div>
     </div>
   );
 }
