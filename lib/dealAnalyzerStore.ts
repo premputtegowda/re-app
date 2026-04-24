@@ -35,8 +35,8 @@ interface CoCStore {
   duplicateScenario: (id: string) => string;
   saveDraft: (draft: DealAnalyzerDraft) => void;
   clearDraft: () => void;
-  saveDeal: (name: string, draft: DealAnalyzerDraft, results: Partial<Record<CoCScenarioType, CoCResult>>, mcRanges?: SavedDeal['mcRanges'], mcResults?: SavedDeal['mcResults']) => string;
-  updateSavedDeal: (id: string, name: string, results: Partial<Record<CoCScenarioType, CoCResult>>, draft?: DealAnalyzerDraft, mcRanges?: SavedDeal['mcRanges'], mcResults?: SavedDeal['mcResults']) => void;
+  saveDeal: (name: string, draft: DealAnalyzerDraft, results: Partial<Record<CoCScenarioType, CoCResult>>, mcRanges?: SavedDeal['mcRanges'], mcResults?: SavedDeal['mcResults'], mcRangesReviewedAt?: string | null) => string;
+  updateSavedDeal: (id: string, name: string, results: Partial<Record<CoCScenarioType, CoCResult>>, draft?: DealAnalyzerDraft, mcRanges?: SavedDeal['mcRanges'], mcResults?: SavedDeal['mcResults'], mcRangesReviewedAt?: string | null) => void;
   deleteSavedDeal: (id: string) => void;
   updateMCData: (id: string, mcRanges?: SavedDeal['mcRanges'], mcResults?: SavedDeal['mcResults'], mcRangesReviewedAt?: string | null) => void;
   updateCurrentStep: (id: string, step: number) => void;
@@ -101,7 +101,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
       saveDraft: (draft) => set({ draft }),
       clearDraft: () => set({ draft: null }),
 
-      saveDeal: (name, draft, results, mcRanges?, mcResults?) => {
+      saveDeal: (name, draft, results, mcRanges?, mcResults?, mcRangesReviewedAt?) => {
         const id = generateId();
         const savedAt = now();
         const deal: SavedDeal = {
@@ -113,6 +113,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
           refinance: draft.refinance,
           results,
           ...(mcRanges ? { mcRanges } : {}),
+          ...(mcRangesReviewedAt !== undefined ? { mcRangesReviewedAt } : {}),
           ...(mcResults !== undefined ? { mcResults } : {}),
           ...(draft.calcState ? { calcState: draft.calcState } : {}),
           ...(draft.stepNotes && Object.keys(draft.stepNotes).length > 0 ? { stepNotes: draft.stepNotes } : {}),
@@ -131,6 +132,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
           refinance: draft.refinance,
           results,
           mcRanges,
+          mcRangesReviewedAt: mcRangesReviewedAt ?? null,
           mcResults,
           calcState: draft.calcState,
           stepNotes: draft.stepNotes,
@@ -140,7 +142,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
         return id;
       },
 
-      updateSavedDeal: (id, name, results, draft?, mcRanges?, mcResults?) => {
+      updateSavedDeal: (id, name, results, draft?, mcRanges?, mcResults?, mcRangesReviewedAt?) => {
         const updatedAt = now();
         set((state) => ({
           savedDeals: state.savedDeals.map((d) =>
@@ -157,6 +159,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
                 ...(draft.stepNotes !== undefined ? { stepNotes: draft.stepNotes } : {}),
               } : {}),
               ...(mcRanges !== undefined ? { mcRanges } : {}),
+              ...(mcRangesReviewedAt !== undefined ? { mcRangesReviewedAt } : {}),
               ...(mcResults !== undefined ? { mcResults } : {}),
               updatedAt,
             } : d
@@ -173,6 +176,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
             refinance: draft?.refinance ?? deal.refinance,
             results,
             mcRanges: mcRanges !== undefined ? mcRanges : deal.mcRanges,
+            mcRangesReviewedAt: mcRangesReviewedAt !== undefined ? mcRangesReviewedAt : deal.mcRangesReviewedAt,
             mcResults: mcResults !== undefined ? mcResults : deal.mcResults,
             currentStep: deal.currentStep,
             calcState: draft?.calcState ?? deal.calcState,
@@ -205,6 +209,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
             refinance: deal.refinance,
             results: deal.results,
             mcRanges: deal.mcRanges,
+            mcRangesReviewedAt: deal.mcRangesReviewedAt ?? null,
             mcResults: deal.mcResults,
             currentStep: step,
             updatedAt,

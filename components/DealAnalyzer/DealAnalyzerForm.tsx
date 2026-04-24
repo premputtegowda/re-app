@@ -824,7 +824,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         ...(enriched ? { calcState: enriched } : {}),
         ...(Object.keys(stepNotesObj).length > 0 ? { stepNotes: stepNotesObj } : {}),
       };
-      updateSavedDeal(savedDealId, name, scenarioResults, draft, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined);
+      updateSavedDeal(savedDealId, name, scenarioResults, draft, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined, mcRangesReviewedAt);
       savedSnapshot.current = currentSnapshot;
       isDirtyRef.current = false;
       flashSaved();
@@ -907,10 +907,10 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     };
 
     if (savedDealId) {
-      updateSavedDeal(savedDealId, name, updatedResults, draft, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined);
+      updateSavedDeal(savedDealId, name, updatedResults, draft, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined, mcRangesReviewedAt);
     } else if (acquisition.propertyAddress.trim()) {
       // Auto-save new deal on first calculate
-      const newId = saveDeal(name, draft, updatedResults, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined);
+      const newId = saveDeal(name, draft, updatedResults, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined, mcRangesReviewedAt);
       setSavedDealId(newId);
       setSaveName(name);
       savedSnapshot.current = JSON.stringify({ acquisition, operations, proForma, refinance });
@@ -995,12 +995,12 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       };
 
       if (savedDealId) {
-        updateSavedDeal(savedDealId, name, scenarioResults, draft, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined);
+        updateSavedDeal(savedDealId, name, scenarioResults, draft, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined, mcRangesReviewedAt);
         savedSnapshot.current = JSON.stringify({ acquisition, operations, proForma, refinance });
         isDirtyRef.current = false;
         flashSaved();
       } else if (acquisition.propertyAddress.trim()) {
-        const newId = saveDeal(name, draft, scenarioResults, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined);
+        const newId = saveDeal(name, draft, scenarioResults, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined, mcRangesReviewedAt);
         setSavedDealId(newId);
         setSaveName(name);
         savedSnapshot.current = JSON.stringify({ acquisition, operations, proForma, refinance });
@@ -1036,9 +1036,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     };
 
     if (savedDealId) {
-      updateSavedDeal(savedDealId, name, scenarioResults, currentDraft, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined);
+      updateSavedDeal(savedDealId, name, scenarioResults, currentDraft, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined, mcRangesReviewedAt);
     } else {
-      const newId = saveDeal(name, currentDraft, scenarioResults, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined);
+      const newId = saveDeal(name, currentDraft, scenarioResults, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined, mcRangesReviewedAt);
       setSavedDealId(newId);
     }
 
