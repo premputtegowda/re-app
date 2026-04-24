@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Pencil, Calculator, AlertTriangle, MapPin, CreditCard, Hammer, BarChart2, TrendingUp, ChevronRight, ChevronUp, ChevronDown, Check, Zap, X, FileText, RotateCcw, SlidersHorizontal } from 'lucide-react';
@@ -126,8 +126,6 @@ function getStepCardData(
       return { primary: exitVal, primaryExtra: null, sub: subParts.join(' · ') };
     }
     case 5: {
-      // Reviewed status is resolved at the component level; this gives the
-      // user a quick summary string on the collapsed card.
       return { primary: 'Uncertainty ranges', primaryExtra: null, sub: 'Drives Ideal Entry / Recommended Max prices' };
     }
     default: return { primary: '—', primaryExtra: null, sub: '' };
@@ -1927,6 +1925,59 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     }
   };
 
+  // ── MC-ranges drift detection ──
+  // When upstream deal inputs (interest rate, cap rate, rent, etc.) shift
+  // after the user last saved uncertainty ranges, the step auto-re-anchors
+  // modes while preserving spread. We surface a short notice on the
+  // collapsed step card naming which variables drifted. Dismissable, and
+  // auto-hides when a fresh MC result is produced (user ran a new sim).
+  const mcRebasedLabels = useMemo<string[]>(() => {
+    if (!mcRanges) return [];
+    const mcUnits = acquisition.propertyType === 'mfr' && acquisition.unitMix.length > 0
+      ? acquisition.unitMix.reduce((s, u) => s + u.count, 0)
+      : (acquisition.units || 1);
+    const mcAvgRent = acquisition.propertyType === 'sfr'
+      ? (acquisition.sfrTargetRent || 0)
+      : (acquisition.unitMix.length > 0
+          ? acquisition.unitMix.reduce((s, u) => s + u.rentMonthly * u.count, 0) / Math.max(1, mcUnits)
+          : 0);
+    const d = computeDefaultRanges(acquisition, proForma, mcAvgRent, mcUnits, refinance);
+    const LABELS: Record<string, string> = {
+      targetRentPerUnit: 'Rent / unit', vacancyPct: 'Vacancy', rentGrowthPct: 'Rent growth',
+      exitCapRate: 'Exit cap rate', renoOverrunPct: 'Reno overrun', interestRate: 'Interest rate',
+      refiRate: 'Refi rate', expenseGrowthPct: 'Expense growth', arv: 'Exit value (ARV)',
+    };
+    const out: string[] = [];
+    for (const k of Object.keys(d) as (keyof MCRanges)[]) {
+      const def = d[k];
+      const saved = (mcRanges as unknown as MCRanges)[k];
+      if (!def || !saved) continue;
+      if (saved.mode !== def.mode) out.push(LABELS[k] ?? String(k));
+    }
+    return out;
+  }, [mcRanges, acquisition, proForma, refinance]);
+
+  const [mcRebasedDismissed, setMcRebasedDismissed] = useState(false);
+  // Re-arm notice whenever the set of drifted fields changes.
+  const mcRebasedKey = mcRebasedLabels.join('|');
+  const prevMcRebasedKeyRef = useRef(mcRebasedKey);
+  useEffect(() => {
+    if (prevMcRebasedKeyRef.current !== mcRebasedKey) {
+      prevMcRebasedKeyRef.current = mcRebasedKey;
+      setMcRebasedDismissed(false);
+    }
+  }, [mcRebasedKey]);
+  // Auto-dismiss when the user produces a new MC result (they "refreshed
+  // to see the new returns", which counts as acknowledgment).
+  const prevMcResultsRef = useRef(mcResults);
+  useEffect(() => {
+    if (prevMcResultsRef.current !== mcResults && mcResults) {
+      prevMcResultsRef.current = mcResults;
+      setMcRebasedDismissed(true);
+    }
+  }, [mcResults]);
+  const showMcRebasedNotice = mcRebasedLabels.length > 0 && !mcRebasedDismissed;
+
   // ── Operations sub-section warning flags (used by getStepWarning AND renderStepContent) ──
   // Lifted to component level so both share the same source of truth.
   const _mfrOps = acquisition.propertyType === 'mfr' && acquisition.unitMix.length > 0;
@@ -2211,6 +2262,29 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                               <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wide mt-0.5 truncate">
                                 {sub}
                               </p>
+                            )}
+                            {step.id === 5 && showMcRebasedNotice && (
+                              <div
+                                className="mt-2 flex items-start gap-1.5 p-1.5 rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <AlertTriangle size={11} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                                <div className="flex-1 text-[10px] text-amber-900 dark:text-amber-200 leading-snug">
+                                  <strong>Base values changed — spread preserved.</strong>{' '}
+                                  {mcRebasedLabels.length === 1
+                                    ? `${mcRebasedLabels[0]} moved`
+                                    : `${mcRebasedLabels.slice(0, -1).join(', ')} & ${mcRebasedLabels[mcRebasedLabels.length - 1]} moved`}
+                                  {' '}since your last review. Review if you want to retune.
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); setMcRebasedDismissed(true); }}
+                                  aria-label="Dismiss notice"
+                                  className="text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 shrink-0"
+                                >
+                                  <X size={11} />
+                                </button>
+                              </div>
                             )}
                           </div>
 
