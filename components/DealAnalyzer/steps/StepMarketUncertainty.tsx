@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, Check, RotateCcw } from 'lucide-react';
+import { Check, RotateCcw } from 'lucide-react';
 import type { CoCAcquisition, CoCRefinance, ProFormaData } from '@/types';
 import type { MCRanges } from '@/utils/monteCarlo';
 import { computeDefaultRanges } from '@/utils/monteCarlo';
@@ -99,16 +99,21 @@ export function StepMarketUncertainty({
   const showRefiRate = refinance?.enabled === true;
   const showArvRange = acquisition.exitMethod !== 'capRate' && acquisition.arv > 0;
 
+  // Edits auto-commit: every RangeEditor onChange is piped up to onAccept,
+  // which updates parent state + persists to backend. No explicit Save
+  // button — the RangeEditor's own input-level commits ARE the save.
   const handleRangesChange = (r: MCRanges) => {
     setDraftRanges(r);
     setUserEdited(true);
     userEditedRef.current = true;
+    onAccept(r);
   };
 
   const handleReset = () => {
     setDraftRanges(defaults);
     setUserEdited(false);
     userEditedRef.current = false;
+    onAccept(defaults);
   };
 
   const handleSaveDefaults = () => {
@@ -117,11 +122,6 @@ export function StepMarketUncertainty({
   };
 
   const isFirstReview = reviewedAt === null;
-  const ctaLabel = userEdited
-    ? 'Save ranges and continue'
-    : isFirstReview
-    ? 'Accept recommended ranges and continue'
-    : 'Confirm ranges and continue';
 
   return (
     <div className="space-y-4">
@@ -131,14 +131,34 @@ export function StepMarketUncertainty({
         </p>
         <p className="text-xs text-primary-800 dark:text-primary-200 leading-relaxed">
           These ranges drive your Ideal Entry and Recommended Max prices. We&rsquo;ve pre-filled
-          each variable with sensible defaults based on your deal. Accept them as-is, or
-          stretch / tighten any variable if you have a stronger view.
+          each variable with sensible defaults based on your deal. Edits save automatically.
         </p>
-        {!isFirstReview && reviewedAt && (
-          <p className="text-[10px] text-primary-700 dark:text-primary-300 mt-2">
-            Last reviewed {new Date(reviewedAt).toLocaleString()}
-          </p>
-        )}
+        <div className="flex items-center justify-between mt-2 flex-wrap gap-2">
+          {isFirstReview ? (
+            <button
+              type="button"
+              onClick={() => onAccept(draftRanges)}
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary-700 dark:text-primary-300 hover:underline"
+            >
+              <Check size={12} />
+              Mark as reviewed (accept defaults as-is)
+            </button>
+          ) : reviewedAt ? (
+            <p className="text-[10px] text-primary-700 dark:text-primary-300">
+              Last reviewed {new Date(reviewedAt).toLocaleString()}
+            </p>
+          ) : null}
+          {userEdited && (
+            <button
+              type="button"
+              onClick={handleReset}
+              className="inline-flex items-center gap-1 text-[11px] text-primary-700 dark:text-primary-300 hover:underline"
+            >
+              <RotateCcw size={10} />
+              Reset to recommended
+            </button>
+          )}
+        </div>
       </div>
 
       <RangeEditor
@@ -150,27 +170,6 @@ export function StepMarketUncertainty({
         showRefiRate={showRefiRate}
         showArvRange={showArvRange}
       />
-
-      {userEdited && (
-        <div className="flex items-start gap-2 p-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
-          <AlertCircle size={12} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-          <p className="text-[11px] text-amber-900 dark:text-amber-200">
-            You&rsquo;ve changed the recommended defaults.
-            <button type="button" onClick={handleReset} className="ml-1 underline font-medium hover:text-amber-700 dark:hover:text-amber-300">
-              <RotateCcw size={10} className="inline mr-0.5" />Reset to defaults
-            </button>
-          </p>
-        </div>
-      )}
-
-      <button
-        type="button"
-        onClick={() => onAccept(draftRanges)}
-        className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-primary-600 hover:bg-primary-700 text-white text-sm font-semibold transition-colors shadow-sm"
-      >
-        <Check size={16} />
-        {ctaLabel}
-      </button>
     </div>
   );
 }
