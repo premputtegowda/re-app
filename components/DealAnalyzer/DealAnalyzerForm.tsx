@@ -1121,10 +1121,14 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         const scheduleHasMismatch =
           unitsToRenovate.some((u, t) => u > 0 && renoScheduleTotals[t] !== u) ||
           leaseUpUnitsArr.some((u, t) => u > 0 && luScheduleTotals[t] !== u);
-        const calcScheduleIncomplete = preStabMethod === 'calculator' && (someReno || someLU) && (
-          (!calcApplied && stabDuration === 0) ||
-          scheduleHasMismatch
-        );
+        // SFR hardcodes unitsToRenovate to [1], so someReno is always true
+        // for SFR — gate on isValueAdd so "No" mode doesn't trigger a
+        // bogus "clear warnings in Stabilization" banner. Mirrors the
+        // isValueAdd === true gate on opsStabIncomplete above.
+        const calcScheduleIncomplete = isValueAdd === true
+          && preStabMethod === 'calculator'
+          && (someReno || someLU)
+          && ((!calcApplied && stabDuration === 0) || scheduleHasMismatch);
 
         const hasAnyUnits = someReno || someLU;
         const valueAddIncomplete = opsValueAddIncomplete;
