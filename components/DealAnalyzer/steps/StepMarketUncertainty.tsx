@@ -59,12 +59,27 @@ export function StepMarketUncertainty({
     [acquisition, proForma, avgTargetRentPerUnit, units, refinance, mcRangeDefaults],
   );
 
-  // Local draft ranges — seeded from what's saved, merged with defaults so
-  // optional keys (arv, refiRate, expenseGrowthPct) are never missing just
-  // because an earlier save happened under different deal config.
-  const [draftRanges, setDraftRanges] = useState<MCRanges>(() =>
-    ranges ? { ...defaults, ...ranges } : defaults
-  );
+  // Local draft ranges — seeded from what's saved, then re-anchored to
+  // the current defaults so saved spreads stay valid after deal inputs
+  // change (e.g. user bumped interest rate from 6.5% to 8% since the last
+  // save — the interest-rate range's mode updates, min/max shift by the
+  // same delta, preserving the user's relative pessimism/optimism).
+  // Also merges defaults for any optional keys missing from the saved set.
+  const [draftRanges, setDraftRanges] = useState<MCRanges>(() => {
+    if (!ranges) return defaults;
+    const next: MCRanges = { ...defaults, ...ranges };
+    for (const key of Object.keys(defaults) as (keyof MCRanges)[]) {
+      const def = defaults[key];
+      const saved = next[key];
+      if (!def || !saved) continue;
+      if (saved.mode === def.mode) continue;
+      const minSpread = saved.min - saved.mode;
+      const maxSpread = saved.max - saved.mode;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (next as any)[key] = { min: def.mode + minSpread, mode: def.mode, max: def.mode + maxSpread };
+    }
+    return next;
+  });
   // Initialize the "has the user customized?" flag to match whether ranges
   // were already saved. Otherwise the mount-time defaults-watch effect below
   // would see userEditedRef=false and wipe saved ranges back to defaults.
