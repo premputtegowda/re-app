@@ -1,12 +1,24 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, RotateCcw } from 'lucide-react';
+import { AlertTriangle, Check, RotateCcw, X } from 'lucide-react';
 import type { CoCAcquisition, CoCRefinance, ProFormaData } from '@/types';
 import type { MCRanges } from '@/utils/monteCarlo';
 import { computeDefaultRanges } from '@/utils/monteCarlo';
 import { useDealSettingsStore } from '@/lib/dealSettingsStore';
 import { RangeEditor } from '../MonteCarloPanel';
+
+const VARIABLE_LABELS: Partial<Record<keyof MCRanges, string>> = {
+  targetRentPerUnit: 'Rent / unit',
+  vacancyPct: 'Vacancy',
+  rentGrowthPct: 'Rent growth',
+  exitCapRate: 'Exit cap rate',
+  renoOverrunPct: 'Reno overrun',
+  interestRate: 'Interest rate',
+  refiRate: 'Refi rate',
+  expenseGrowthPct: 'Expense growth',
+  arv: 'Exit value (ARV)',
+};
 
 interface StepMarketUncertaintyProps {
   acquisition: CoCAcquisition;
@@ -121,6 +133,27 @@ export function StepMarketUncertainty({
   const showRefiRate = refinance?.enabled === true;
   const showArvRange = acquisition.exitMethod !== 'capRate' && acquisition.arv > 0;
 
+  // Detect which variables had their base re-anchored since the saved ranges
+  // were written (user changed something upstream that moved the anchor).
+  // Empty list → saved ranges are still anchored on current deal inputs.
+  const rebasedFields = useMemo<string[]>(() => {
+    if (!ranges) return [];
+    const changed: string[] = [];
+    for (const key of Object.keys(defaults) as (keyof MCRanges)[]) {
+      const def = defaults[key];
+      const saved = ranges[key];
+      if (!def || !saved) continue;
+      if (saved.mode !== def.mode) {
+        const label = VARIABLE_LABELS[key] ?? key;
+        changed.push(label);
+      }
+    }
+    return changed;
+  }, [ranges, defaults]);
+
+  const [banner, setBanner] = useState<'auto' | 'dismissed'>('auto');
+  const showRebasedBanner = banner === 'auto' && rebasedFields.length > 0 && !userEdited;
+
   // Edits auto-commit: every RangeEditor onChange is piped up to onAccept,
   // which updates parent state + persists to backend. No explicit Save
   // button — the RangeEditor's own input-level commits ARE the save.
@@ -187,6 +220,27 @@ export function StepMarketUncertainty({
           )}
         </div>
       </div>
+
+      {showRebasedBanner && (
+        <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
+          <AlertTriangle size={14} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <div className="flex-1 text-xs text-amber-900 dark:text-amber-200 leading-relaxed">
+            <strong>Base values changed — your spread is preserved.</strong>{' '}
+            {rebasedFields.length === 1
+              ? `The ${rebasedFields[0]} base moved since your last review.`
+              : `The following bases moved since your last review: ${rebasedFields.join(', ')}.`}{' '}
+            Your pessimistic/optimistic distances are unchanged, but review if you want to retune the spread around the new anchor.
+          </div>
+          <button
+            type="button"
+            onClick={() => setBanner('dismissed')}
+            aria-label="Dismiss notice"
+            className="text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 shrink-0 mt-0.5"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
 
       <RangeEditor
         ranges={draftRanges}
