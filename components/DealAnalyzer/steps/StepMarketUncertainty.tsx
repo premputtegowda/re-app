@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, RotateCcw, X } from 'lucide-react';
+import { AlertTriangle, Check, RotateCcw } from 'lucide-react';
 import type { CoCAcquisition, CoCRefinance, ProFormaData } from '@/types';
 import type { MCRanges } from '@/utils/monteCarlo';
 import { computeDefaultRanges } from '@/utils/monteCarlo';
@@ -151,8 +151,14 @@ export function StepMarketUncertainty({
     return changed;
   }, [ranges, defaults]);
 
+  // Tracks in-session edits separately from userEdited (which reflects
+  // "has ever been customized" so stale saved ranges aren't wiped on mount).
+  // The banner should keep showing until the user actually touches a field
+  // during THIS visit — dismissing it by accident shouldn't lose the note
+  // if they haven't engaged yet.
+  const [editedThisSession, setEditedThisSession] = useState(false);
   const [banner, setBanner] = useState<'auto' | 'dismissed'>('auto');
-  const showRebasedBanner = banner === 'auto' && rebasedFields.length > 0 && !userEdited;
+  const showRebasedBanner = banner === 'auto' && rebasedFields.length > 0 && !editedThisSession;
 
   // Edits auto-commit: every RangeEditor onChange is piped up to onAccept,
   // which updates parent state + persists to backend. No explicit Save
@@ -166,6 +172,7 @@ export function StepMarketUncertainty({
     setDraftRanges(merged);
     setUserEdited(true);
     userEditedRef.current = true;
+    setEditedThisSession(true);
     onAccept(merged);
   };
 
@@ -173,6 +180,7 @@ export function StepMarketUncertainty({
     setDraftRanges(defaults);
     setUserEdited(false);
     userEditedRef.current = false;
+    setEditedThisSession(true);
     onAccept(defaults);
   };
 
@@ -229,15 +237,20 @@ export function StepMarketUncertainty({
             {rebasedFields.length === 1
               ? `The ${rebasedFields[0]} base moved since your last review.`
               : `The following bases moved since your last review: ${rebasedFields.join(', ')}.`}{' '}
-            Your pessimistic/optimistic distances are unchanged, but review if you want to retune the spread around the new anchor.
+            Your pessimistic/optimistic distances are unchanged. Click <strong>Got it</strong> to keep the new anchors, or tweak any row below.
           </div>
           <button
             type="button"
-            onClick={() => setBanner('dismissed')}
-            aria-label="Dismiss notice"
-            className="text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 shrink-0 mt-0.5"
+            onClick={() => {
+              // Persist the re-anchored draft so saved modes match current
+              // defaults — banner won't re-trigger on the next mount unless
+              // a further base shift occurs.
+              onAccept(draftRanges);
+              setBanner('dismissed');
+            }}
+            className="shrink-0 mt-0.5 px-2 py-1 rounded-md bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-semibold"
           >
-            <X size={12} />
+            Got it
           </button>
         </div>
       )}
