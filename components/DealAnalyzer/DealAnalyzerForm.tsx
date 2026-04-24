@@ -2068,8 +2068,11 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   })();
   const hasAddress = acquisition.propertyAddress.trim().length > 0;
   const hasNewDealData = !savedDealId && (hasAddress || acquisition.purchasePrice > 0);
-  const allStepsCompleted = [0, 1, 2, 3, 4, 5].every(id => completedSteps.has(id));
-  const hasAnyWarning = [0, 1, 2, 3, 4, 5].some(id => getStepWarning(id) !== null);
+  // Calculate-button gating deliberately uses steps 0-4 only — Market
+  // Uncertainty (step 5) is optional for the base projection. Its own
+  // warning is still surfaced on the step header via getStepWarning.
+  const allStepsCompleted = [0, 1, 2, 3, 4].every(id => completedSteps.has(id));
+  const hasAnyWarning = [0, 1, 2, 3, 4].some(id => getStepWarning(id) !== null);
 
   // ── Render ──
 
