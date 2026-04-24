@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, Check, RotateCcw } from 'lucide-react';
 import type { CoCAcquisition, CoCRefinance, ProFormaData } from '@/types';
 import type { MCRanges } from '@/utils/monteCarlo';
@@ -63,17 +63,52 @@ export function StepMarketUncertainty({
   const [draftRanges, setDraftRanges] = useState<MCRanges>(ranges ?? defaults);
   const [userEdited, setUserEdited] = useState(false);
 
+  // When deal inputs change, the `defaults` object recomputes.
+  //  - If the user hasn't customized → draft tracks the new defaults exactly.
+  //  - If the user has customized → preserve the point-spread they chose and
+  //    shift min/max by the same delta that each variable's base moved.
+  // Mirrors the logic in MonteCarloPanel so ranges always stay anchored on
+  // current deal inputs, no matter where they're edited.
+  const prevDefaultsRef = useRef<MCRanges>(defaults);
+  const userEditedRef = useRef(false);
+  useEffect(() => {
+    const prev = prevDefaultsRef.current;
+    prevDefaultsRef.current = defaults;
+    if (!userEditedRef.current) {
+      setDraftRanges(defaults);
+      return;
+    }
+    setDraftRanges(current => {
+      const next = { ...current };
+      let changed = false;
+      for (const key of Object.keys(defaults) as (keyof MCRanges)[]) {
+        const oldD = prev[key];
+        const newD = defaults[key];
+        const r = current[key];
+        if (!oldD || !newD || !r) continue;
+        if (oldD.mode === newD.mode) continue;
+        const minSpread = r.min - oldD.mode;
+        const maxSpread = r.max - oldD.mode;
+        next[key] = { min: newD.mode + minSpread, mode: newD.mode, max: newD.mode + maxSpread };
+        changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, [defaults]);
+
   const showRefiRate = refinance?.enabled === true;
   const showArvRange = acquisition.exitMethod !== 'capRate' && acquisition.arv > 0;
 
   const handleRangesChange = (r: MCRanges) => {
     setDraftRanges(r);
     setUserEdited(true);
+    userEditedRef.current = true;
   };
 
   const handleReset = () => {
     setDraftRanges(defaults);
     setUserEdited(false);
+    userEditedRef.current = false;
   };
 
   const handleSaveDefaults = () => {
