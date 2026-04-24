@@ -352,6 +352,15 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   };
   const isDirtyRef = useRef(false);
   const { addScenario, saveDeal, updateSavedDeal, updateMCData, updateCurrentStep } = useDealAnalyzerStore();
+  // Subscribe to the store's copy of this deal so fields added in newer
+  // feature versions (e.g. mcRangesReviewedAt) can hydrate into local
+  // state after the backend sync completes — the locally-persisted
+  // Zustand cache from an older release doesn't carry those fields,
+  // so first render sees null and the step shows an amber marker
+  // until sync finishes. We watch and propagate.
+  const storedDeal = useDealAnalyzerStore(
+    (s) => s.savedDeals.find((d) => d.id === initialDeal?.id),
+  );
   const { defaultPropertyMgmtPct, defaultCapExPerUnit, defaultMaintenancePct } = useDealSettingsStore();
 
   // Stepper state
@@ -529,6 +538,16 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const [mcRangesReviewedAt, setMcRangesReviewedAt] = useState<string | null>(
     initialDeal?.mcRangesReviewedAt ?? null
   );
+  // Hydrate mcRangesReviewedAt from backend when syncDealsFromBackend
+  // updates the store after mount. Only overwrites if we're still null
+  // (i.e., the cached initialDeal lacked the field) so we don't clobber
+  // a value the user just set in this session.
+  useEffect(() => {
+    if (mcRangesReviewedAt === null && storedDeal?.mcRangesReviewedAt) {
+      setMcRangesReviewedAt(storedDeal.mcRangesReviewedAt);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storedDeal?.mcRangesReviewedAt]);
   const [mcResults, setMcResults] = useState<SavedMCResults | null>(
     initialDeal?.mcResults ? (initialDeal.mcResults as SavedMCResults) : null
   );
