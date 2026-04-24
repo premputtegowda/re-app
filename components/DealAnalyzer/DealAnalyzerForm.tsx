@@ -538,6 +538,11 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const [mcRangesReviewedAt, setMcRangesReviewedAt] = useState<string | null>(
     initialDeal?.mcRangesReviewedAt ?? null
   );
+  // Ref the Market Uncertainty step populates with a function that
+  // commits its in-flight draft. The standard wizard Done button for
+  // step 5 calls this before handleContinue so the draft lands in
+  // parent state (and backend) via the same onAccept path.
+  const mcRangesCommitRef = useRef<(() => void) | null>(null);
   // Hydrate mcRangesReviewedAt from backend when syncDealsFromBackend
   // updates the store after mount. Only overwrites if we're still null
   // (i.e., the cached initialDeal lacked the field) so we don't clobber
@@ -984,6 +989,11 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     }
     setErrors([]);
     setErrorStep(null);
+
+    // Market Uncertainty step batches edits in its own draft until the
+    // user hits Done. Invoke its commit callback so the in-flight ranges
+    // land in parent state + backend via onAccept.
+    if (stepId === 5) mcRangesCommitRef.current?.();
 
     setCompletedSteps(prev => new Set(Array.from(prev).concat(stepId)));
 
@@ -1915,6 +1925,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
             refinance={refinance}
             ranges={mcRanges}
             reviewedAt={mcRangesReviewedAt}
+            commitRef={mcRangesCommitRef}
             onAccept={(nextRanges) => {
               const reviewedAt = new Date().toISOString();
               setMcRanges(nextRanges);
@@ -2365,7 +2376,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                               onClick={() => handleContinue(step.id)}
                               data-testid="header-next-btn"
                             >
-                              {step.id === 4 ? 'Done' : 'Next'}
+                              {step.id === 4 || step.id === 5 ? 'Done' : 'Next'}
                             </Button>
                           )}
                         </div>

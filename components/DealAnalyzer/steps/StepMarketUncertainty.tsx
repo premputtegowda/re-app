@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, RotateCcw, X } from 'lucide-react';
+import { RotateCcw } from 'lucide-react';
 import type { CoCAcquisition, CoCRefinance, ProFormaData } from '@/types';
 import type { MCRanges } from '@/utils/monteCarlo';
 import { computeDefaultRanges } from '@/utils/monteCarlo';
@@ -18,6 +18,9 @@ interface StepMarketUncertaintyProps {
   reviewedAt: string | null;
   /** Called when the user accepts ranges (either the recommended defaults or an edited set). */
   onAccept: (ranges: MCRanges) => void;
+  /** Ref filled with a commit function that the parent wizard's standard
+   *  Done button calls to persist the step's in-flight draft. */
+  commitRef?: React.MutableRefObject<(() => void) | null>;
 }
 
 /**
@@ -31,7 +34,7 @@ interface StepMarketUncertaintyProps {
  * changes.
  */
 export function StepMarketUncertainty({
-  acquisition, proForma, refinance, ranges, reviewedAt, onAccept,
+  acquisition, proForma, refinance, ranges, reviewedAt, onAccept, commitRef,
 }: StepMarketUncertaintyProps) {
   const { mcRangeDefaults } = useDealSettingsStore();
 
@@ -147,26 +150,21 @@ export function StepMarketUncertainty({
     // are a separate settings concern not surfaced here.
   };
 
-  const handleDone = () => {
-    onAccept({ ...defaults, ...draftRanges });
-  };
-
-  const handleCancel = () => {
-    // Revert draft to the last-saved ranges (or defaults if never saved),
-    // applying the same merge-with-defaults safeguard used at mount.
-    if (!ranges) {
-      setDraftRanges(defaults);
-    } else {
-      setDraftRanges({ ...defaults, ...ranges });
-    }
-    setUserEdited(ranges !== null);
-    userEditedRef.current = ranges !== null;
-  };
+  // Expose a commit function to the parent so the standard wizard Done
+  // button (bottom of the accordion) can persist whatever is currently in
+  // the draft. We update the ref whenever the draft changes so the ref
+  // always calls with the latest values.
+  useEffect(() => {
+    if (!commitRef) return;
+    commitRef.current = () => onAccept({ ...defaults, ...draftRanges });
+    return () => { if (commitRef) commitRef.current = null; };
+  }, [commitRef, draftRanges, defaults, onAccept]);
 
   // Opening the step IS the review for a never-reviewed deal. Auto-persist
   // once on mount — parent gates step visibility behind "all earlier steps
   // green," so reaching here implies the user has moved past everything
-  // else. After this, further edits require an explicit Done click.
+  // else. After this, further edits require the standard wizard Done click
+  // to persist.
   const autoReviewedRef = useRef(false);
   useEffect(() => {
     if (reviewedAt === null && !autoReviewedRef.current) {
@@ -214,26 +212,9 @@ export function StepMarketUncertainty({
         showRefiRate={showRefiRate}
         showArvRange={showArvRange}
       />
-
-      {/* Done / Cancel — commits or reverts all in-flight edits at once. */}
-      <div className="flex items-center justify-end gap-2 pt-1">
-        <button
-          type="button"
-          onClick={handleCancel}
-          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:border-slate-400 text-xs font-medium transition-colors"
-        >
-          <X size={12} />
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={handleDone}
-          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-xs font-semibold transition-colors"
-        >
-          <Check size={12} />
-          Done
-        </button>
-      </div>
+      {/* Done / Cancel lives on the parent wizard accordion, not here —
+          the standard Next/Done button at the bottom of the accordion
+          commits this step's draft via a ref. */}
     </div>
   );
 }
