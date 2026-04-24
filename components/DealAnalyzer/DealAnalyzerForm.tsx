@@ -2165,9 +2165,15 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
           </div>
         )}
 
+        {/* Market Uncertainty (step 5) is hidden until all earlier steps
+            are complete and warning-free. For a new deal, the user can't
+            skip ahead to it; for a loaded deal (all steps pre-completed)
+            it appears immediately. */}
+        {(() => { return null; })()}
+
         {/* ── Horizontal progress bar ── */}
         <div className="flex items-center gap-2">
-          {FORM_STEPS.map((step) => (
+          {FORM_STEPS.filter(s => s.id !== 5 || (allStepsCompleted && !hasAnyWarning)).map((step) => (
             <motion.div
               key={step.id}
               initial={{ scaleX: 0 }}
@@ -2182,7 +2188,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
         {/* ── Step cards ── */}
         <div className="space-y-3">
-          {FORM_STEPS.map((step) => {
+          {FORM_STEPS.filter(s => s.id !== 5 || (allStepsCompleted && !hasAnyWarning)).map((step) => {
             const isCompleted = completedSteps.has(step.id);
             const isActive = activeStep === step.id && editingStep === null;
             const isEditing = editingStep === step.id;

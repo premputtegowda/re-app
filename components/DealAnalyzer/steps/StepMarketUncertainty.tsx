@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, RotateCcw } from 'lucide-react';
+import { RotateCcw } from 'lucide-react';
 import type { CoCAcquisition, CoCRefinance, ProFormaData } from '@/types';
 import type { MCRanges } from '@/utils/monteCarlo';
 import { computeDefaultRanges } from '@/utils/monteCarlo';
@@ -152,7 +152,19 @@ export function StepMarketUncertainty({
     // are a separate settings concern not surfaced here.
   };
 
-  const isFirstReview = reviewedAt === null;
+  // Opening the step IS the review. Auto-persist once on mount when the
+  // deal has never been reviewed before — parent gates step visibility
+  // behind "all earlier steps green," so reaching this component means
+  // the user has already moved past everything else and is looking at
+  // the uncertainty ranges.
+  const autoReviewedRef = useRef(false);
+  useEffect(() => {
+    if (reviewedAt === null && !autoReviewedRef.current) {
+      autoReviewedRef.current = true;
+      onAccept({ ...defaults, ...draftRanges });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="space-y-4">
@@ -164,22 +176,13 @@ export function StepMarketUncertainty({
           These ranges drive your Ideal Entry and Recommended Max prices. We&rsquo;ve pre-filled
           each variable with sensible defaults based on your deal. Edits save automatically.
         </p>
-        <div className="flex items-center justify-between mt-2 flex-wrap gap-2">
-          {isFirstReview ? (
-            <button
-              type="button"
-              onClick={() => onAccept({ ...defaults, ...draftRanges })}
-              className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary-700 dark:text-primary-300 hover:underline"
-            >
-              <Check size={12} />
-              Mark as reviewed (accept defaults as-is)
-            </button>
-          ) : reviewedAt ? (
-            <p className="text-[10px] text-primary-700 dark:text-primary-300">
-              Last reviewed {new Date(reviewedAt).toLocaleString()}
-            </p>
-          ) : null}
-          {userEdited && (
+        {reviewedAt && !userEdited && (
+          <p className="text-[10px] text-primary-700 dark:text-primary-300 mt-2">
+            Last reviewed {new Date(reviewedAt).toLocaleString()}
+          </p>
+        )}
+        {userEdited && (
+          <div className="mt-2">
             <button
               type="button"
               onClick={handleReset}
@@ -188,8 +191,8 @@ export function StepMarketUncertainty({
               <RotateCcw size={10} />
               Reset to recommended
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       <RangeEditor
