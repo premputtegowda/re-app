@@ -51,30 +51,22 @@ export function computeMcRangesStatus(args: McRangesStatusArgs): McRangesStatusR
   const hard: string[] = [];
   const soft: string[] = [];
 
-  // ── Structural presence of variables ────────────────────────────────────
+  // ── Structural triggers ────────────────────────────────────────────────
+  // We used to flag "missing optional key" (arv, refiRate) as hard, but the
+  // MC engine backfills with defaults when a key is absent, and the Market
+  // Uncertainty step now always persists merged-with-defaults ranges. So
+  // missing keys aren't user-facing breakage — skip those checks.
+  //
+  // The one remaining hard trigger is a user-correctable misconfiguration:
+  // rehab costs exist but the renoOverrunPct range is zero (user actively
+  // zeroed it out, or saved before rehab was added). Flag so they retune.
   const hasRehab =
     (acquisition.hardCostItems?.length ?? 0) > 0 ||
     (acquisition.softCostItems?.length ?? 0) > 0 ||
     (acquisition.renovationMonths ?? 0) > 0;
 
-  // Reno overrun range is always present in ranges (it's in MCRanges as a
-  // required key), but when the deal has no rehab the meaningful content
-  // should be zero. If rehab exists now, the user should tune renoOverrunPct.
-  if (hasRehab && ranges && ranges.renoOverrunPct.max === 0) {
-    hard.push('Rehab costs were added — renovation overrun isn\'t set.');
-  }
-
-  // Refi rate range is only relevant when refinance is enabled. If refi is
-  // enabled but the range key isn't there, user needs to set it.
-  if (refinance.enabled && ranges && !ranges.refiRate) {
-    hard.push('Refinance was enabled — refi rate range isn\'t set.');
-  }
-
-  // ARV range is only relevant when exitMethod isn't capRate. If exitMethod
-  // now expects ARV but the arv range key isn't there, flag it.
-  const expectsArv = acquisition.exitMethod !== 'capRate' && acquisition.arv > 0;
-  if (expectsArv && ranges && !ranges.arv) {
-    hard.push('Exit method requires ARV — ARV range isn\'t set.');
+  if (hasRehab && ranges && ranges.renoOverrunPct && ranges.renoOverrunPct.max === 0) {
+    soft.push('Rehab costs are set, but the renovation-overrun range is at zero.');
   }
 
   // ── Soft: base-value drift ─────────────────────────────────────────────

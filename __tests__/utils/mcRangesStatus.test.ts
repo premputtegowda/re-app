@@ -81,8 +81,10 @@ describe('computeMcRangesStatus — clean cases', () => {
   });
 });
 
-describe('computeMcRangesStatus — hard triggers', () => {
-  it('flags hard when rehab added but renoOverrunPct range is zero', () => {
+describe('computeMcRangesStatus — soft triggers from structure', () => {
+  it('flags soft (not hard) when rehab is set but renoOverrunPct max is zero', () => {
+    // This is a user-correctable misconfiguration but doesn't break
+    // anything downstream — MC just runs with 0% overrun. Nudge, don't block.
     const s = computeMcRangesStatus({
       acquisition: makeAcquisition({
         hardCostItems: [{ id: 'a', description: 'Kitchen', amount: 50_000 }],
@@ -91,11 +93,11 @@ describe('computeMcRangesStatus — hard triggers', () => {
       ranges: makeRanges({ renoOverrunPct: { min: 0, mode: 0, max: 0 } }),
       reviewedAt: '2026-04-22T00:00:00Z',
     });
-    expect(s.status).toBe('hard');
+    expect(s.status).toBe('soft');
     expect(s.reasons.some(r => /rehab/i.test(r))).toBe(true);
   });
 
-  it('flags hard when refinance enabled but ranges lack refiRate', () => {
+  it('does NOT flag when refinance is enabled but ranges lack refiRate (step merges defaults)', () => {
     const { refiRate: _refiRate, ...rangesNoRefi } = makeRanges();
     const s = computeMcRangesStatus({
       acquisition: makeAcquisition(),
@@ -103,19 +105,17 @@ describe('computeMcRangesStatus — hard triggers', () => {
       ranges: rangesNoRefi as MCRanges,
       reviewedAt: '2026-04-22T00:00:00Z',
     });
-    expect(s.status).toBe('hard');
-    expect(s.reasons.some(r => /refi/i.test(r))).toBe(true);
+    expect(s.status).toBe('clean');
   });
 
-  it('flags hard when exit method expects ARV but ranges lack arv', () => {
+  it('does NOT flag when exit method expects ARV but ranges lack arv', () => {
     const s = computeMcRangesStatus({
       acquisition: makeAcquisition({ exitMethod: 'value', arv: 9_000_000 }),
       refinance: makeRefinance(),
       ranges: makeRanges(),  // no arv key
       reviewedAt: '2026-04-22T00:00:00Z',
     });
-    expect(s.status).toBe('hard');
-    expect(s.reasons.some(r => /ARV/i.test(r))).toBe(true);
+    expect(s.status).toBe('clean');
   });
 });
 
@@ -154,15 +154,14 @@ describe('computeMcRangesStatus — soft triggers', () => {
 });
 
 describe('computeMcRangesStatus — precedence', () => {
-  it('hard beats soft when both conditions fire', () => {
+  it('never-reviewed beats soft drift', () => {
+    // reviewedAt null is the only hard trigger now. Even with clean ranges
+    // and no drift, never-reviewed should come through as hard.
     const s = computeMcRangesStatus({
-      acquisition: makeAcquisition({
-        hardCostItems: [{ id: 'a', description: 'x', amount: 50_000 }],
-        interestRate: 8.5, // also soft-dirty
-      }),
+      acquisition: makeAcquisition({ interestRate: 8.5 }),
       refinance: makeRefinance(),
-      ranges: makeRanges({ renoOverrunPct: { min: 0, mode: 0, max: 0 } }),
-      reviewedAt: '2026-04-22T00:00:00Z',
+      ranges: null,
+      reviewedAt: null,
     });
     expect(s.status).toBe('hard');
   });

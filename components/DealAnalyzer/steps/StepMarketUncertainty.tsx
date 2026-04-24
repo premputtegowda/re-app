@@ -59,8 +59,12 @@ export function StepMarketUncertainty({
     [acquisition, proForma, avgTargetRentPerUnit, units, refinance, mcRangeDefaults],
   );
 
-  // Local draft ranges — seeded from what's saved (or defaults if never reviewed).
-  const [draftRanges, setDraftRanges] = useState<MCRanges>(ranges ?? defaults);
+  // Local draft ranges — seeded from what's saved, merged with defaults so
+  // optional keys (arv, refiRate, expenseGrowthPct) are never missing just
+  // because an earlier save happened under different deal config.
+  const [draftRanges, setDraftRanges] = useState<MCRanges>(() =>
+    ranges ? { ...defaults, ...ranges } : defaults
+  );
   // Initialize the "has the user customized?" flag to match whether ranges
   // were already saved. Otherwise the mount-time defaults-watch effect below
   // would see userEditedRef=false and wipe saved ranges back to defaults.
@@ -105,11 +109,16 @@ export function StepMarketUncertainty({
   // Edits auto-commit: every RangeEditor onChange is piped up to onAccept,
   // which updates parent state + persists to backend. No explicit Save
   // button — the RangeEditor's own input-level commits ARE the save.
+  //
+  // Always merge with the current defaults before bubbling up so any
+  // optional key the editor doesn't currently expose (arv off, refi off)
+  // still lands in persisted ranges. Keeps later status checks simple.
   const handleRangesChange = (r: MCRanges) => {
-    setDraftRanges(r);
+    const merged = { ...defaults, ...r };
+    setDraftRanges(merged);
     setUserEdited(true);
     userEditedRef.current = true;
-    onAccept(r);
+    onAccept(merged);
   };
 
   const handleReset = () => {
@@ -140,7 +149,7 @@ export function StepMarketUncertainty({
           {isFirstReview ? (
             <button
               type="button"
-              onClick={() => onAccept(draftRanges)}
+              onClick={() => onAccept({ ...defaults, ...draftRanges })}
               className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary-700 dark:text-primary-300 hover:underline"
             >
               <Check size={12} />
