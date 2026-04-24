@@ -43,10 +43,15 @@ export interface McRangesStatusArgs {
 export function computeMcRangesStatus(args: McRangesStatusArgs): McRangesStatusResult {
   const { acquisition, refinance, ranges, reviewedAt } = args;
 
-  // Never reviewed — always hard-dirty (user must touch the step at least
-  // once so we have a baseline).
+  // "Never reviewed" used to be hard-dirty, but surfaced a confusing
+  // amber step-card for brand-new deals (reviewedAt doesn't exist yet
+  // until the user commits via the wizard Done). Since the Market
+  // Uncertainty step now auto-reviews once the user expands it and
+  // commits, and the drift banner already surfaces real problems,
+  // null reviewedAt is treated as clean — the user just hasn't
+  // formalized anything yet.
   if (!reviewedAt) {
-    return { status: 'hard', reasons: ['You have not reviewed ranges yet.'] };
+    return { status: 'clean', reasons: [] };
   }
 
   const hard: string[] = [];

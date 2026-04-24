@@ -543,6 +543,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   // step 5 calls this before handleContinue so the draft lands in
   // parent state (and backend) via the same onAccept path.
   const mcRangesCommitRef = useRef<(() => void) | null>(null);
+  // Companion ref for the Cancel button — reverts the step's draft to
+  // the last-committed ranges.
+  const mcRangesCancelRef = useRef<(() => void) | null>(null);
   // Hydrate mcRangesReviewedAt from backend when syncDealsFromBackend
   // updates the store after mount. Only overwrites if we're still null
   // (i.e., the cached initialDeal lacked the field) so we don't clobber
@@ -1926,6 +1929,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
             ranges={mcRanges}
             reviewedAt={mcRangesReviewedAt}
             commitRef={mcRangesCommitRef}
+            cancelRef={mcRangesCancelRef}
             onAccept={(nextRanges) => {
               const reviewedAt = new Date().toISOString();
               setMcRanges(nextRanges);
@@ -2290,7 +2294,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                                 {sub}
                               </p>
                             )}
-                            {step.id === 5 && showMcRebasedNotice && (
+                            {step.id === 5 && showMcRebasedNotice && !isExpanded && (
                               <div
                                 className="mt-2 flex items-start gap-1.5 p-1.5 rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50"
                                 onClick={(e) => e.stopPropagation()}
@@ -2362,7 +2366,10 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                           {/* Action buttons */}
                           {isEditing ? (
                             <div className="flex gap-3 pt-2">
-                              <Button variant="secondary" fullWidth onClick={() => { setEditingStep(null); setPausedActiveStep(null); setErrors([]); setErrorStep(null); }}>
+                              <Button variant="secondary" fullWidth onClick={() => {
+                                if (step.id === 5) mcRangesCancelRef.current?.();
+                                setEditingStep(null); setPausedActiveStep(null); setErrors([]); setErrorStep(null);
+                              }}>
                                 Cancel
                               </Button>
                               <Button variant="primary" fullWidth onClick={() => handleContinue(step.id)}>

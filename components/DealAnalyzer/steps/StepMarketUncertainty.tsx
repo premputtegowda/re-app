@@ -21,6 +21,10 @@ interface StepMarketUncertaintyProps {
   /** Ref filled with a commit function that the parent wizard's standard
    *  Done button calls to persist the step's in-flight draft. */
   commitRef?: React.MutableRefObject<(() => void) | null>;
+  /** Ref filled with a revert function the parent wizard's standard
+   *  Cancel button calls — rolls the draft back to the last-committed
+   *  ranges (the `ranges` prop). */
+  cancelRef?: React.MutableRefObject<(() => void) | null>;
 }
 
 /**
@@ -34,7 +38,7 @@ interface StepMarketUncertaintyProps {
  * changes.
  */
 export function StepMarketUncertainty({
-  acquisition, proForma, refinance, ranges, reviewedAt, onAccept, commitRef,
+  acquisition, proForma, refinance, ranges, reviewedAt, onAccept, commitRef, cancelRef,
 }: StepMarketUncertaintyProps) {
   const { mcRangeDefaults } = useDealSettingsStore();
 
@@ -68,6 +72,12 @@ export function StepMarketUncertainty({
   // save — the interest-rate range's mode updates, min/max shift by the
   // same delta, preserving the user's relative pessimism/optimism).
   // Also merges defaults for any optional keys missing from the saved set.
+  // Bump this whenever Cancel reverts — forces RangeEditor to unmount
+  // and remount, wiping its internal "in-progress typed text" state.
+  // Without this, a Cancel clicked while an input was still focused
+  // could leave a stale typed value in the editor's local draft map.
+  const [editorKey, setEditorKey] = useState(0);
+
   const [draftRanges, setDraftRanges] = useState<MCRanges>(() => {
     if (!ranges) return defaults;
     const next: MCRanges = { ...defaults, ...ranges };
@@ -160,6 +170,22 @@ export function StepMarketUncertainty({
     return () => { if (commitRef) commitRef.current = null; };
   }, [commitRef, draftRanges, defaults, onAccept]);
 
+  // Expose a cancel function so the standard wizard Cancel button rolls
+  // the draft back to the last-committed ranges. The step component
+  // doesn't unmount on Cancel (activeStep stays 5), so without this the
+  // draft would leak across edit sessions.
+  useEffect(() => {
+    if (!cancelRef) return;
+    cancelRef.current = () => {
+      const reverted = ranges ? { ...defaults, ...ranges } : defaults;
+      setDraftRanges(reverted);
+      setUserEdited(ranges !== null);
+      userEditedRef.current = ranges !== null;
+      setEditorKey(k => k + 1);
+    };
+    return () => { if (cancelRef) cancelRef.current = null; };
+  }, [cancelRef, ranges, defaults]);
+
   // Opening the step IS the review for a never-reviewed deal. Auto-persist
   // once on mount — parent gates step visibility behind "all earlier steps
   // green," so reaching here implies the user has moved past everything
@@ -204,6 +230,7 @@ export function StepMarketUncertainty({
       </div>
 
       <RangeEditor
+        key={editorKey}
         ranges={draftRanges}
         defaults={defaults}
         onChange={handleRangesChange}

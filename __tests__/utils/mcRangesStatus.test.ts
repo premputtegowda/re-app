@@ -70,15 +70,20 @@ function makeRanges(overrides: Partial<MCRanges> = {}): MCRanges {
 }
 
 describe('computeMcRangesStatus — never reviewed', () => {
-  it('returns hard when reviewedAt is null', () => {
+  it('returns clean when reviewedAt is null (user just hasn\'t formalized yet)', () => {
+    // Prior to this change, null reviewedAt returned hard and drove an amber
+    // "incomplete" marker on the step card for every brand-new deal. That
+    // confused users who hadn't yet reached the step. Clean is safer: the
+    // step's auto-review path and the drift banner will surface genuine
+    // issues once they exist.
     const s = computeMcRangesStatus({
       acquisition: makeAcquisition(),
       refinance: makeRefinance(),
       ranges: null,
       reviewedAt: null,
     });
-    expect(s.status).toBe('hard');
-    expect(s.reasons[0]).toMatch(/not reviewed/i);
+    expect(s.status).toBe('clean');
+    expect(s.reasons).toEqual([]);
   });
 });
 
@@ -242,15 +247,16 @@ describe('getRebasedFieldLabels', () => {
 });
 
 describe('computeMcRangesStatus — precedence', () => {
-  it('never-reviewed beats soft drift', () => {
-    // reviewedAt null is the only hard trigger now. Even with clean ranges
-    // and no drift, never-reviewed should come through as hard.
+  it('null reviewedAt short-circuits before drift checks (returns clean)', () => {
+    // null reviewedAt gates out early; even if drift would otherwise fire
+    // soft, nothing to compare against so we report clean. Matches the
+    // semantics of the current implementation.
     const s = computeMcRangesStatus({
       acquisition: makeAcquisition({ interestRate: 8.5 }),
       refinance: makeRefinance(),
       ranges: null,
       reviewedAt: null,
     });
-    expect(s.status).toBe('hard');
+    expect(s.status).toBe('clean');
   });
 });
