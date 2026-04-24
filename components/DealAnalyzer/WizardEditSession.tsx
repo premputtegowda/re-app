@@ -29,21 +29,26 @@ export interface WizardEditSessionDraft {
   refinance:   CoCRefinance;
   operations:  CoCOperations;
   isValueAdd:  boolean | null;
-  calcState:   CalcPersistedState | null;
+  calcState:   CalcPersistedState | undefined;
 }
 
 export interface WizardEditSessionSetters {
-  setAcquisition: (updater: (prev: CoCAcquisition) => CoCAcquisition) => void;
-  setProForma:    (updater: (prev: ProFormaData)    => ProFormaData)    => void;
-  setRefinance:   (updater: (prev: CoCRefinance)    => CoCRefinance)    => void;
-  setOperations:  (updater: (prev: CoCOperations)   => CoCOperations)   => void;
-  setIsValueAdd:  (value: boolean | null) => void;
-  setCalcState:   (value: CalcPersistedState | null) => void;
+  setAcquisition: React.Dispatch<React.SetStateAction<CoCAcquisition>>;
+  setProForma:    React.Dispatch<React.SetStateAction<ProFormaData>>;
+  setRefinance:   React.Dispatch<React.SetStateAction<CoCRefinance>>;
+  setOperations:  React.Dispatch<React.SetStateAction<CoCOperations>>;
+  setIsValueAdd:  React.Dispatch<React.SetStateAction<boolean | null>>;
+  setCalcState:   React.Dispatch<React.SetStateAction<CalcPersistedState | undefined>>;
   /** Commit the current draft upward. Parent is expected to call its Zustand
    *  persistence path; session will not unmount on commit (parent controls). */
   commit: () => void;
   /** Discard the draft. Parent is expected to unmount the session. */
   cancel: () => void;
+}
+
+// Helper to unwrap a SetStateAction<T> against a current value.
+function applySet<T>(prev: T, value: React.SetStateAction<T>): T {
+  return typeof value === 'function' ? (value as (p: T) => T)(prev) : value;
 }
 
 export interface WizardEditSessionDefaults {
@@ -80,28 +85,28 @@ export function WizardEditSession({ initial, onCommit, onCancel, preStabMethod, 
   const [, setTick] = useState(0);
   const rerender = useCallback(() => setTick(t => t + 1), []);
 
-  const setAcquisition = useCallback((updater: (prev: CoCAcquisition) => CoCAcquisition) => {
-    draftRef.current = { ...draftRef.current, acquisition: updater(draftRef.current.acquisition) };
+  const setAcquisition: React.Dispatch<React.SetStateAction<CoCAcquisition>> = useCallback(value => {
+    draftRef.current = { ...draftRef.current, acquisition: applySet(draftRef.current.acquisition, value) };
     rerender();
   }, [rerender]);
-  const setProForma = useCallback((updater: (prev: ProFormaData) => ProFormaData) => {
-    draftRef.current = { ...draftRef.current, proForma: updater(draftRef.current.proForma) };
+  const setProForma: React.Dispatch<React.SetStateAction<ProFormaData>> = useCallback(value => {
+    draftRef.current = { ...draftRef.current, proForma: applySet(draftRef.current.proForma, value) };
     rerender();
   }, [rerender]);
-  const setRefinance = useCallback((updater: (prev: CoCRefinance) => CoCRefinance) => {
-    draftRef.current = { ...draftRef.current, refinance: updater(draftRef.current.refinance) };
+  const setRefinance: React.Dispatch<React.SetStateAction<CoCRefinance>> = useCallback(value => {
+    draftRef.current = { ...draftRef.current, refinance: applySet(draftRef.current.refinance, value) };
     rerender();
   }, [rerender]);
-  const setOperations = useCallback((updater: (prev: CoCOperations) => CoCOperations) => {
-    draftRef.current = { ...draftRef.current, operations: updater(draftRef.current.operations) };
+  const setOperations: React.Dispatch<React.SetStateAction<CoCOperations>> = useCallback(value => {
+    draftRef.current = { ...draftRef.current, operations: applySet(draftRef.current.operations, value) };
     rerender();
   }, [rerender]);
-  const setIsValueAdd = useCallback((value: boolean | null) => {
-    draftRef.current = { ...draftRef.current, isValueAdd: value };
+  const setIsValueAdd: React.Dispatch<React.SetStateAction<boolean | null>> = useCallback(value => {
+    draftRef.current = { ...draftRef.current, isValueAdd: applySet(draftRef.current.isValueAdd, value) };
     rerender();
   }, [rerender]);
-  const setCalcState = useCallback((value: CalcPersistedState | null) => {
-    draftRef.current = { ...draftRef.current, calcState: value };
+  const setCalcState: React.Dispatch<React.SetStateAction<CalcPersistedState | undefined>> = useCallback(value => {
+    draftRef.current = { ...draftRef.current, calcState: applySet(draftRef.current.calcState, value) };
     rerender();
   }, [rerender]);
 
@@ -216,7 +221,7 @@ export function WizardEditSession({ initial, onCommit, onCancel, preStabMethod, 
     if (acquisition.propertyType === prevPropertyType.current) return;
     prevPropertyType.current = acquisition.propertyType;
     const units = acquisition.propertyType === 'mfr' ? Math.max(1, totalMFRUnits) : 1;
-    setProForma(() => defaultProForma(acquisition.propertyType, {
+    setProForma(defaultProForma(acquisition.propertyType, {
       propertyMgmtPct: defaults.propertyMgmtPct,
       capExPerUnit:    defaults.capExPerUnit,
       maintenancePct:  defaults.maintenancePct,

@@ -73,7 +73,7 @@ function makeDraft(overrides: Partial<WizardEditSessionDraft> = {}): WizardEditS
     refinance:   makeRefinance(),
     operations:  makeOps(),
     isValueAdd:  null,
-    calcState:   null,
+    calcState:   undefined,
     ...overrides,
   };
 }
