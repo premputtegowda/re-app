@@ -16,6 +16,7 @@ import { computeMcRangesStatus, getRebasedFieldLabels } from '@/utils/mcRangesSt
 import { ResultsPanel } from './ResultsPanel';
 import { ProFormaGrid, defaultProForma } from './ProFormaGrid';
 import { RehabRentCalculator, simulateFromSchedule } from './RehabRentCalculator';
+import { WizardEditSession, type WizardEditSessionDraft } from './WizardEditSession';
 import type { CalcPersistedState } from '@/types';
 import { projectScenario, formatCurrencyCompact } from '@/utils/dealAnalyzerCalc';
 import { useDealAnalyzerStore, type DealAnalyzerDraft } from '@/lib/dealAnalyzerStore';
@@ -1043,6 +1044,70 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     scheduleCalculate();
   };
 
+  // Done from a WizardEditSession — the session's draft is the source of truth.
+  // We can't call setAcquisition/etc and then read from parent state in the same
+  // tick (setState is async), so anything that needs the post-commit values
+  // (validation, auto-save) reads from `draft` directly.
+  const handleCommitFromSession = (stepId: number, draft: WizardEditSessionDraft) => {
+    const errs = validateStep(stepId, draft.acquisition);
+    if (errs.length > 0) {
+      setErrors(errs);
+      setErrorStep(stepId);
+      return;
+    }
+    setErrors([]);
+    setErrorStep(null);
+
+    // Apply draft to parent state.
+    setAcquisition(draft.acquisition);
+    setProForma(draft.proForma);
+    setRefinance(draft.refinance);
+    setOperations(draft.operations);
+    setIsValueAdd(draft.isValueAdd);
+    setCalcState(draft.calcState);
+
+    setCompletedSteps(prev => new Set(Array.from(prev).concat(stepId)));
+    setEditingStep(null);
+    setPausedActiveStep(null);
+
+    // Mark scenario results stale if any exist — inputs changed, prior calc no
+    // longer reflects current state.
+    if (Object.keys(scenarioResults).length > 0) setResultsStale(true);
+
+    // Auto-save using draft (parent setters above haven't reconciled yet).
+    const name = saveName || defaultSaveName(draft.acquisition);
+    const stepNotesObj: Record<number, string> = {};
+    if (opsNotes.trim()) stepNotesObj[3] = opsNotes.trim();
+    const dealDraft: DealAnalyzerDraft = {
+      acquisition: draft.acquisition,
+      operations: draft.operations,
+      proForma: draft.proForma,
+      refinance: draft.refinance,
+      currentStep: activeStep,
+      visitedSteps: Array.from(new Set([...Array.from(completedSteps), stepId])),
+      activeType,
+      ...(draft.calcState ? { calcState: draft.calcState } : {}),
+      ...(Object.keys(stepNotesObj).length > 0 ? { stepNotes: stepNotesObj } : {}),
+    };
+    const snapshot = JSON.stringify({
+      acquisition: draft.acquisition, operations: draft.operations,
+      proForma: draft.proForma, refinance: draft.refinance,
+    });
+    if (savedDealId) {
+      updateSavedDeal(savedDealId, name, scenarioResults, dealDraft, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined, mcRangesReviewedAt);
+      savedSnapshot.current = snapshot;
+      isDirtyRef.current = false;
+      flashSaved();
+    } else if (draft.acquisition.propertyAddress.trim()) {
+      const newId = saveDeal(name, dealDraft, scenarioResults, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined, mcRangesReviewedAt);
+      setSavedDealId(newId);
+      setSaveName(name);
+      savedSnapshot.current = snapshot;
+      isDirtyRef.current = false;
+      flashSaved();
+    }
+  };
+
   // ── Save ──
 
   const handleSave = () => {
@@ -1102,7 +1167,35 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
   // ── Step content ──
 
-  const renderStepContent = (stepId: number, isVisited: boolean) => {
+  // ──────────────────────────────────────────────────────────────────
+  // Step content view: the slices and setters renderStepContent needs.
+  // In the non-edit (forward-flow) path we pass parent state directly.
+  // In edit mode, we pass the WizardEditSession's draft + scoped setters
+  // so that any user input writes to the session draft, not parent state.
+  // The destructure at the top of renderStepContent shadows the outer
+  // closure vars so the function body is unchanged.
+  // ──────────────────────────────────────────────────────────────────
+  type StepViewState = {
+    acquisition: CoCAcquisition;
+    proForma: ProFormaData;
+    refinance: CoCRefinance;
+    operations: CoCOperations;
+    isValueAdd: boolean | null;
+    calcState: CalcPersistedState | undefined;
+    updateAcquisition: (field: keyof CoCAcquisition, value: unknown) => void;
+    setProForma: React.Dispatch<React.SetStateAction<ProFormaData>>;
+    updateRefinance: (field: keyof CoCRefinance, value: number | boolean) => void;
+    updateOperations: (field: keyof CoCOperations, value: number) => void;
+    setIsValueAdd: React.Dispatch<React.SetStateAction<boolean | null>>;
+    setCalcState: React.Dispatch<React.SetStateAction<CalcPersistedState | undefined>>;
+  };
+
+  const renderStepContent = (stepId: number, isVisited: boolean, view: StepViewState) => {
+    const {
+      acquisition, proForma, refinance, operations, isValueAdd, calcState,
+      updateAcquisition, setProForma, updateRefinance, updateOperations,
+      setIsValueAdd, setCalcState,
+    } = view;
     switch (stepId) {
       case 0:
         return <StepProperty data={acquisition} onChange={updateAcquisition} showWarnings={isVisited} />;
@@ -2361,30 +2454,98 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                             </div>
                           )}
 
-                          {renderStepContent(step.id, completedSteps.has(step.id))}
-
-                          {/* Action buttons */}
-                          {isEditing ? (
-                            <div className="flex gap-3 pt-2">
-                              <Button variant="secondary" fullWidth onClick={() => {
-                                if (step.id === 5) mcRangesCancelRef.current?.();
+                          {isEditing && step.id !== 5 ? (
+                            // Steps 0-4 in edit mode: render through a transactional
+                            // WizardEditSession. All form inputs write to the session
+                            // draft. Done commits to parent state via handleCommitFromSession;
+                            // Cancel unmounts the session and the draft (and its prev*
+                            // refs) evaporate — no leak to parent.
+                            <WizardEditSession
+                              initial={{ acquisition, proForma, refinance, operations, isValueAdd, calcState }}
+                              onCommit={(draft) => handleCommitFromSession(step.id, draft)}
+                              onCancel={() => {
                                 setEditingStep(null); setPausedActiveStep(null); setErrors([]); setErrorStep(null);
-                              }}>
-                                Cancel
-                              </Button>
-                              <Button variant="primary" fullWidth onClick={() => handleContinue(step.id)}>
-                                Done
-                              </Button>
-                            </div>
-                          ) : (
-                            <Button
-                              variant="primary"
-                              fullWidth
-                              onClick={() => handleContinue(step.id)}
-                              data-testid="header-next-btn"
+                              }}
+                              preStabMethod={preStabMethod}
+                              defaults={{
+                                propertyMgmtPct: defaultPropertyMgmtPct,
+                                capExPerUnit:    defaultCapExPerUnit,
+                                maintenancePct:  defaultMaintenancePct,
+                              }}
                             >
-                              {step.id === 4 || step.id === 5 ? 'Done' : 'Next'}
-                            </Button>
+                              {(draft, setters) => {
+                                const sessionView: StepViewState = {
+                                  acquisition: draft.acquisition,
+                                  proForma:    draft.proForma,
+                                  refinance:   draft.refinance,
+                                  operations:  draft.operations,
+                                  isValueAdd:  draft.isValueAdd,
+                                  calcState:   draft.calcState,
+                                  updateAcquisition: (field, value) =>
+                                    setters.setAcquisition(a => ({ ...a, [field]: value })),
+                                  setProForma: setters.setProForma,
+                                  updateRefinance: (field, value) =>
+                                    setters.setRefinance(r => ({ ...r, [field]: value })),
+                                  updateOperations: (field, value) => {
+                                    setters.setOperations(o => ({ ...o, [field]: value }));
+                                    if (field === 'annualRentGrowthPct') {
+                                      setters.setProForma(p => ({ ...p, grossRent: { ...p.grossRent, growthPct: value } }));
+                                    }
+                                  },
+                                  setIsValueAdd: setters.setIsValueAdd,
+                                  setCalcState:  setters.setCalcState,
+                                };
+                                return (
+                                  <>
+                                    {renderStepContent(step.id, completedSteps.has(step.id), sessionView)}
+                                    <div className="flex gap-3 pt-2">
+                                      <Button variant="secondary" fullWidth onClick={() => setters.cancel()}>
+                                        Cancel
+                                      </Button>
+                                      <Button variant="primary" fullWidth onClick={() => setters.commit()}>
+                                        Done
+                                      </Button>
+                                    </div>
+                                  </>
+                                );
+                              }}
+                            </WizardEditSession>
+                          ) : (
+                            <>
+                              {renderStepContent(step.id, completedSteps.has(step.id), {
+                                acquisition, proForma, refinance, operations, isValueAdd, calcState,
+                                updateAcquisition, setProForma, updateRefinance, updateOperations,
+                                setIsValueAdd, setCalcState,
+                              })}
+
+                              {/* Action buttons */}
+                              {isEditing ? (
+                                // Step 5 (Market Uncertainty) keeps its own draft-ranges /
+                                // mcRangesCommitRef / mcRangesCancelRef flow — its UI is
+                                // entirely about MC ranges, none of acquisition/proForma/
+                                // refinance/operations is mutated here.
+                                <div className="flex gap-3 pt-2">
+                                  <Button variant="secondary" fullWidth onClick={() => {
+                                    mcRangesCancelRef.current?.();
+                                    setEditingStep(null); setPausedActiveStep(null); setErrors([]); setErrorStep(null);
+                                  }}>
+                                    Cancel
+                                  </Button>
+                                  <Button variant="primary" fullWidth onClick={() => handleContinue(step.id)}>
+                                    Done
+                                  </Button>
+                                </div>
+                              ) : (
+                                <Button
+                                  variant="primary"
+                                  fullWidth
+                                  onClick={() => handleContinue(step.id)}
+                                  data-testid="header-next-btn"
+                                >
+                                  {step.id === 4 || step.id === 5 ? 'Done' : 'Next'}
+                                </Button>
+                              )}
+                            </>
                           )}
                         </div>
                       </Card>
