@@ -334,8 +334,16 @@ export function RehabRentCalculator({
   const [leaseUpScheduleByType, setLeaseUpScheduleByType] = useState<number[][]>(() => initialState?.leaseUpScheduleByType ?? unitTypes.map(() => []));
   type DistributionMethod = 'weighted' | 'custom';
   const [distributionMethod, setDistributionMethod] = useState<DistributionMethod>(() => {
+    // Trust an explicit distributionMethod from initialState — the calculator's
+    // own onStateChange persists this value into calcState, so a saved weighted
+    // deal that happens to have a leftover non-zero leaseUp schedule should
+    // still mount in 'weighted' mode. Without this, restoring a snapshotted
+    // 'weighted' calcState would silently flip back to 'custom' via the
+    // hasManualSchedule heuristic below.
     if (initialState?.distributionMethod === 'custom') return 'custom';
-    // Backward compat: if a saved manual schedule exists, default to custom
+    if (initialState?.distributionMethod === 'weighted') return 'weighted';
+    // Backward compat for legacy deals saved before the distributionMethod
+    // field existed: infer 'custom' from any non-zero schedule data.
     const hasManualSchedule =
       initialState?.scheduleByType?.some(s => s.some(n => n > 0)) ||
       initialState?.leaseUpScheduleByType?.some(s => s.some(n => n > 0));

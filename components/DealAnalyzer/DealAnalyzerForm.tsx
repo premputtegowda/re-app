@@ -547,6 +547,24 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   // Companion ref for the Cancel button — reverts the step's draft to
   // the last-committed ranges.
   const mcRangesCancelRef = useRef<(() => void) | null>(null);
+
+  // ── Operations sub-section snapshots ──
+  // Each Operations sub-section (Rent / Value-Add / Stab) has an inner
+  // Cancel button. Clicking it should revert ONLY that sub-section's
+  // owned fields, preserving edits in the other two. We snapshot the
+  // session draft + the parent-scope ops state when a section opens,
+  // and selectively restore on inner Cancel.
+  type OpsSectionSnapshot = {
+    section: OpsSection;
+    acquisition: CoCAcquisition;
+    proForma: ProFormaData;
+    isValueAdd: boolean | null;
+    calcState: CalcPersistedState | undefined;
+    stabDuration: number;
+    offlinePerUnit: number;
+    preStabMethod: 'calculator' | 'manual' | null;
+  };
+  const opsSectionSnapshotRef = useRef<OpsSectionSnapshot | null>(null);
   // Hydrate mcRangesReviewedAt from backend when syncDealsFromBackend
   // updates the store after mount. Only overwrites if we're still null
   // (i.e., the cached initialDeal lacked the field) so we don't clobber
@@ -1070,9 +1088,14 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     setEditingStep(null);
     setPausedActiveStep(null);
 
-    // Mark scenario results stale if any exist — inputs changed, prior calc no
-    // longer reflects current state.
-    if (Object.keys(scenarioResults).length > 0) setResultsStale(true);
+    // Mark scenario results stale only if the draft actually differs from the
+    // current parent state — a no-op Done shouldn't invalidate calculated
+    // returns the user already has on screen.
+    const inputsChanged = JSON.stringify({
+      acquisition: draft.acquisition, operations: draft.operations,
+      proForma: draft.proForma, refinance: draft.refinance,
+    }) !== JSON.stringify({ acquisition, operations, proForma, refinance });
+    if (inputsChanged && Object.keys(scenarioResults).length > 0) setResultsStale(true);
 
     // Auto-save using draft (parent setters above haven't reconciled yet).
     const name = saveName || defaultSaveName(draft.acquisition);
@@ -1182,20 +1205,26 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     operations: CoCOperations;
     isValueAdd: boolean | null;
     calcState: CalcPersistedState | undefined;
-    updateAcquisition: (field: keyof CoCAcquisition, value: unknown) => void;
+    setAcquisition: React.Dispatch<React.SetStateAction<CoCAcquisition>>;
     setProForma: React.Dispatch<React.SetStateAction<ProFormaData>>;
-    updateRefinance: (field: keyof CoCRefinance, value: number | boolean) => void;
-    updateOperations: (field: keyof CoCOperations, value: number) => void;
+    setRefinance: React.Dispatch<React.SetStateAction<CoCRefinance>>;
+    setOperations: React.Dispatch<React.SetStateAction<CoCOperations>>;
     setIsValueAdd: React.Dispatch<React.SetStateAction<boolean | null>>;
     setCalcState: React.Dispatch<React.SetStateAction<CalcPersistedState | undefined>>;
+    updateAcquisition: (field: keyof CoCAcquisition, value: unknown) => void;
+    updateRefinance: (field: keyof CoCRefinance, value: number | boolean) => void;
+    updateOperations: (field: keyof CoCOperations, value: number) => void;
   };
 
   const renderStepContent = (stepId: number, isVisited: boolean, view: StepViewState) => {
     const {
       acquisition, proForma, refinance, operations, isValueAdd, calcState,
-      updateAcquisition, setProForma, updateRefinance, updateOperations,
+      setAcquisition, setProForma, setRefinance, setOperations,
       setIsValueAdd, setCalcState,
+      updateAcquisition, updateRefinance, updateOperations,
     } = view;
+    // Suppress unused-locals warnings for setters not consumed in every step.
+    void setRefinance; void setOperations;
     switch (stepId) {
       case 0:
         return <StepProperty data={acquisition} onChange={updateAcquisition} showWarnings={isVisited} />;
@@ -1210,6 +1239,67 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       case 2:
         return <StepRenovation data={acquisition} onChange={updateAcquisition} showWarnings={isVisited} />;
       case 3: {
+        // Sub-section transactional helpers — see opsSectionSnapshotRef
+        // declaration. Capture on enter, selectively restore on inner Cancel.
+        const openOpsSection = (section: OpsSection) => {
+          opsSectionSnapshotRef.current = {
+            section,
+            acquisition, proForma, isValueAdd, calcState,
+            stabDuration, offlinePerUnit, preStabMethod,
+          };
+          setActiveOpsSection(section);
+        };
+        const cancelOpsSection = () => {
+          const snap = opsSectionSnapshotRef.current;
+          if (!snap) { setActiveOpsSection(null); return; }
+          switch (snap.section) {
+            case 'rent':
+              setAcquisition(prev => ({
+                ...prev,
+                unitMix: prev.unitMix.map(u => {
+                  const s = snap.acquisition.unitMix.find(x => x.id === u.id);
+                  return s ? { ...u, rentMonthly: s.rentMonthly, inPlaceRent: s.inPlaceRent } : u;
+                }),
+                sfrTargetRent:  snap.acquisition.sfrTargetRent,
+                sfrInPlaceRent: snap.acquisition.sfrInPlaceRent,
+              }));
+              break;
+            case 'valueAdd':
+              setIsValueAdd(snap.isValueAdd);
+              setAcquisition(prev => ({
+                ...prev,
+                unitMix: prev.unitMix.map(u => {
+                  const s = snap.acquisition.unitMix.find(x => x.id === u.id);
+                  return s ? { ...u, unitsToRenovate: s.unitsToRenovate, leaseUpUnits: s.leaseUpUnits } : u;
+                }),
+              }));
+              setCalcState(snap.calcState);
+              break;
+            case 'stab':
+              setStabDuration(snap.stabDuration);
+              setOfflinePerUnit(snap.offlinePerUnit);
+              setPreStabMethod(snap.preStabMethod);
+              setAcquisition(prev => ({
+                ...prev,
+                unitMix: prev.unitMix.map(u => {
+                  const s = snap.acquisition.unitMix.find(x => x.id === u.id);
+                  return s ? { ...u, preStabRent: s.preStabRent } : u;
+                }),
+                sfrPreStabRent: snap.acquisition.sfrPreStabRent,
+              }));
+              setProForma(prev => ({ ...prev, yearOverrides: snap.proForma.yearOverrides }));
+              setCalcState(snap.calcState);
+              // RehabRentCalculator owns local useState for distributionMethod /
+              // schedule mode that initializes from initialState only on mount.
+              // Bump calcKey so it remounts with the restored calcState as its
+              // fresh initial — otherwise the calculator's internal mode (e.g.
+              // weighted vs custom) sticks to whatever the user just chose.
+              setCalcKey(k => k + 1);
+              break;
+          }
+          opsSectionSnapshotRef.current = null;
+          setActiveOpsSection(null);
+        };
         const hasMfr = _mfrOps;
 
         const hasTargetRent = hasMfr
@@ -1339,7 +1429,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
             {/* ── Section 1: Rent ── */}
             {completedOpsSections.has('rent') && activeOpsSection !== 'rent' ? (
-              <OpsCard num={1} title="Rent" summary={rentSummary} onEdit={() => setActiveOpsSection('rent')} warning={rentIncomplete} />
+              <OpsCard num={1} title="Rent" summary={rentSummary} onEdit={() => openOpsSection('rent')} warning={rentIncomplete} />
             ) : (
             <div className={card}>
               <OpsSectionHeader num={1} title="Rent" isComplete={hasTargetRent} warning={rentIncomplete} />
@@ -1484,12 +1574,14 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 </div>
               <div className="flex gap-3 px-4 pb-4 pt-2 border-t border-slate-100 dark:border-slate-700/60 mt-2">
                 {completedOpsSections.has('rent') && (
-                  <Button variant="secondary" onClick={() => setActiveOpsSection(null)}>Cancel</Button>
+                  <Button variant="secondary" onClick={() => cancelOpsSection()}>Cancel</Button>
                 )}
                 <Button variant="primary" fullWidth={!completedOpsSections.has('rent')} onClick={() => {
                   const vaDone = completedOpsSections.has('valueAdd');
                   setCompletedOpsSections(prev => { const s = new Set(prev); s.add('rent'); return s; });
-                  setActiveOpsSection(hasTargetRent && !vaDone ? 'valueAdd' : null);
+                  opsSectionSnapshotRef.current = null;
+                  if (hasTargetRent && !vaDone) openOpsSection('valueAdd');
+                  else setActiveOpsSection(null);
                   scheduleCalculate();
                 }}>Done</Button>
               </div>
@@ -1506,7 +1598,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.25, ease: 'easeOut' }}
               >
-                <OpsCard num={2} title="Value-Add Plan" summary={valueAddSummary} onEdit={() => setActiveOpsSection('valueAdd')} warning={valueAddIncomplete} />
+                <OpsCard num={2} title="Value-Add Plan" summary={valueAddSummary} onEdit={() => openOpsSection('valueAdd')} warning={valueAddIncomplete} />
               </motion.div>
             )}
             {completedOpsSections.has('rent') && activeOpsSection === 'valueAdd' && (
@@ -1663,13 +1755,14 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                   </div>
                 <div className="flex gap-3 px-4 pb-4 pt-2 border-t border-slate-100 dark:border-slate-700/60 mt-2">
                   {completedOpsSections.has('valueAdd') && (
-                    <Button variant="secondary" onClick={() => setActiveOpsSection(null)}>Cancel</Button>
+                    <Button variant="secondary" onClick={() => cancelOpsSection()}>Cancel</Button>
                   )}
                   <Button variant="primary" fullWidth={!completedOpsSections.has('valueAdd')} onClick={() => {
                     const stabDone = completedOpsSections.has('stab');
                     setCompletedOpsSections(prev => { const s = new Set(prev); s.add('valueAdd'); return s; });
+                    opsSectionSnapshotRef.current = null;
                     if (isValueAdd === true && !stabDone) {
-                      setActiveOpsSection('stab');
+                      openOpsSection('stab');
                       setCalcCollapsed(false);
                     } else {
                       setActiveOpsSection(null);
@@ -1691,7 +1784,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.25, ease: 'easeOut' }}
               >
-                <OpsCard num={3} title="Stabilization" summary={stabSummary} onEdit={() => { setActiveOpsSection('stab'); setCalcCollapsed(false); }} warning={stabIncomplete} />
+                <OpsCard num={3} title="Stabilization" summary={stabSummary} onEdit={() => { openOpsSection('stab'); setCalcCollapsed(false); }} warning={stabIncomplete} />
               </motion.div>
             )}
             {completedOpsSections.has('valueAdd') && isValueAdd === true && activeOpsSection === 'stab' && (
@@ -1923,10 +2016,11 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
             {completedOpsSections.has('valueAdd') && isValueAdd === true && activeOpsSection === 'stab' && (
               <div className="flex gap-3 px-4 pb-4 pt-2 border-t border-slate-100 dark:border-slate-700/60 mt-2 rounded-b-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 -mt-px">
                 {completedOpsSections.has('stab') && (
-                  <Button variant="secondary" onClick={() => setActiveOpsSection(null)}>Cancel</Button>
+                  <Button variant="secondary" onClick={() => cancelOpsSection()}>Cancel</Button>
                 )}
                 <Button variant="primary" fullWidth={!completedOpsSections.has('stab')} onClick={() => {
                   setCompletedOpsSections(prev => { const s = new Set(prev); s.add('stab'); return s; });
+                  opsSectionSnapshotRef.current = null;
                   setActiveOpsSection(null);
                   scheduleCalculate();
                 }}>Done</Button>
@@ -2481,9 +2575,14 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                                   operations:  draft.operations,
                                   isValueAdd:  draft.isValueAdd,
                                   calcState:   draft.calcState,
+                                  setAcquisition: setters.setAcquisition,
+                                  setProForma:    setters.setProForma,
+                                  setRefinance:   setters.setRefinance,
+                                  setOperations:  setters.setOperations,
+                                  setIsValueAdd:  setters.setIsValueAdd,
+                                  setCalcState:   setters.setCalcState,
                                   updateAcquisition: (field, value) =>
                                     setters.setAcquisition(a => ({ ...a, [field]: value })),
-                                  setProForma: setters.setProForma,
                                   updateRefinance: (field, value) =>
                                     setters.setRefinance(r => ({ ...r, [field]: value })),
                                   updateOperations: (field, value) => {
@@ -2492,8 +2591,6 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                                       setters.setProForma(p => ({ ...p, grossRent: { ...p.grossRent, growthPct: value } }));
                                     }
                                   },
-                                  setIsValueAdd: setters.setIsValueAdd,
-                                  setCalcState:  setters.setCalcState,
                                 };
                                 return (
                                   <>
@@ -2514,8 +2611,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                             <>
                               {renderStepContent(step.id, completedSteps.has(step.id), {
                                 acquisition, proForma, refinance, operations, isValueAdd, calcState,
-                                updateAcquisition, setProForma, updateRefinance, updateOperations,
+                                setAcquisition, setProForma, setRefinance, setOperations,
                                 setIsValueAdd, setCalcState,
+                                updateAcquisition, updateRefinance, updateOperations,
                               })}
 
                               {/* Action buttons */}
