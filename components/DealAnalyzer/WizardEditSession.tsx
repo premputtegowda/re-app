@@ -44,6 +44,12 @@ export interface WizardEditSessionSetters {
   commit: () => void;
   /** Discard the draft. Parent is expected to unmount the session. */
   cancel: () => void;
+  /** Persist the current draft to the parent / backend WITHOUT closing the
+   *  session. Used by sub-section Done buttons (e.g. step 3's Rent / Value-Add
+   *  / Stabilization) so that an inner Done saves the typed values even though
+   *  parent form state hasn't been written yet. Falls back to a no-op if the
+   *  parent didn't wire `onSaveDraft`. */
+  saveDraft: () => void;
 }
 
 // Helper to unwrap a SetStateAction<T> against a current value.
@@ -65,6 +71,10 @@ export interface WizardEditSessionProps {
   onCommit: (draft: WizardEditSessionDraft) => void;
   /** Called when the user cancels. Parent should unmount this session. */
   onCancel: () => void;
+  /** Optional: called when a sub-section "Done" wants to persist mid-session
+   *  without closing the editor. Parent should apply the draft to its own
+   *  state and PUT to backend, but leave the session mounted. */
+  onSaveDraft?: (draft: WizardEditSessionDraft) => void;
   /** Rent-sync effect respects `preStabMethod === 'calculator'` to avoid
    *  stomping on calculator-driven year overrides. */
   preStabMethod: 'calculator' | 'manual' | null;
@@ -77,7 +87,7 @@ export interface WizardEditSessionProps {
   ) => React.ReactNode;
 }
 
-export function WizardEditSession({ initial, onCommit, onCancel, preStabMethod, defaults, children }: WizardEditSessionProps) {
+export function WizardEditSession({ initial, onCommit, onCancel, onSaveDraft, preStabMethod, defaults, children }: WizardEditSessionProps) {
   // Draft lives in a ref so `commit()` sees the freshest value even when
   // invoked synchronously after a setter. useState is used only to trigger
   // re-renders — its value is not the source of truth.
@@ -112,6 +122,7 @@ export function WizardEditSession({ initial, onCommit, onCancel, preStabMethod, 
 
   const commit = useCallback(() => { onCommit(draftRef.current); }, [onCommit]);
   const cancel = useCallback(() => { onCancel(); }, [onCancel]);
+  const saveDraft = useCallback(() => { onSaveDraft?.(draftRef.current); }, [onSaveDraft]);
 
   // Snapshot the latest draft once per render so useEffect deps see stable
   // (by-value) primitives and React's change-detection works normally.
@@ -252,7 +263,7 @@ export function WizardEditSession({ initial, onCommit, onCancel, preStabMethod, 
 
   const setters: WizardEditSessionSetters = {
     setAcquisition, setProForma, setRefinance, setOperations,
-    setIsValueAdd, setCalcState, commit, cancel,
+    setIsValueAdd, setCalcState, commit, cancel, saveDraft,
   };
 
   return <>{children(draft, setters)}</>;

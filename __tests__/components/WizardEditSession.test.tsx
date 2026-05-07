@@ -90,6 +90,7 @@ function Harness(props: {
   initial: WizardEditSessionDraft;
   onCommit: (d: WizardEditSessionDraft) => void;
   onCancel: () => void;
+  onSaveDraft?: (d: WizardEditSessionDraft) => void;
   captureSetters: (s: WizardEditSessionSetters) => void;
   captureDraft?: (d: WizardEditSessionDraft) => void;
   preStabMethod?: 'calculator' | 'manual' | null;
@@ -100,6 +101,7 @@ function Harness(props: {
       initial={props.initial}
       onCommit={props.onCommit}
       onCancel={props.onCancel}
+      onSaveDraft={props.onSaveDraft}
       preStabMethod={props.preStabMethod ?? 'manual'}
       defaults={props.defaults ?? DEFAULT_DEFAULTS}
     >
@@ -620,6 +622,147 @@ describe('WizardEditSession — derived-state effects', () => {
     // Rent-sync effect should have run: stabilized = 3000 * 12 = 36000
     expect(emitted.proForma.grossRent.stabilized).toBe(36_000);
     expect(emitted.operations.grossRentMonthly).toBe(3_000);
+  });
+});
+
+// ── saveDraft — regression tests for the "inner sub-section Done doesn't
+//    persist" bug ────────────────────────────────────────────────────────────
+//
+// In edit mode, step 3's sub-section (Rent / Value-Add / Stab) Done buttons
+// must persist the typed values without closing the session. Pre-fix they
+// called the parent's `scheduleCalculate()` which read stale parent state and
+// short-circuited via its snapshot guard — typed rent values stayed in the
+// session draft and never reached the backend. saveDraft is the mid-session
+// persist hook those buttons now call.
+describe('WizardEditSession — saveDraft', () => {
+  it('emits the current draft to onSaveDraft when invoked', () => {
+    const onSaveDraft = vi.fn();
+    let setters!: WizardEditSessionSetters;
+
+    render(
+      <Harness
+        initial={makeDraft()}
+        onCommit={vi.fn()}
+        onCancel={vi.fn()}
+        onSaveDraft={onSaveDraft}
+        captureSetters={s => { setters = s; }}
+      />,
+    );
+
+    act(() => { setters.saveDraft(); });
+
+    expect(onSaveDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it('saveDraft sees mutations made in the same act() batch (the actual bug)', () => {
+    // The bug: user types rent, clicks inner Rent Done. Setter and saveDraft
+    // run in the same React-event batch. saveDraft must read the latest draft,
+    // not the pre-mutation snapshot.
+    const onSaveDraft = vi.fn();
+    let setters!: WizardEditSessionSetters;
+
+    render(
+      <Harness
+        initial={makeDraft({
+          acquisition: makeAcquisition({
+            propertyType: 'mfr',
+            unitMix: [{ id: 'a', beds: 1, baths: 1, count: 4, inPlaceRent: 0, preStabRent: 0, rentMonthly: 0, unitsToRenovate: 0, leaseUpUnits: 0 }],
+          }),
+        })}
+        onCommit={vi.fn()}
+        onCancel={vi.fn()}
+        onSaveDraft={onSaveDraft}
+        captureSetters={s => { setters = s; }}
+      />,
+    );
+
+    act(() => {
+      setters.setAcquisition(a => ({
+        ...a,
+        unitMix: a.unitMix.map(u => ({ ...u, rentMonthly: 1_500 })),
+      }));
+      setters.saveDraft();
+    });
+
+    expect(onSaveDraft).toHaveBeenCalledTimes(1);
+    const emittedDraft = onSaveDraft.mock.calls[0][0];
+    expect(emittedDraft.acquisition.unitMix[0].rentMonthly).toBe(1_500);
+  });
+
+  it('saveDraft does NOT call onCommit (session stays open)', () => {
+    const onCommit = vi.fn();
+    const onSaveDraft = vi.fn();
+    let setters!: WizardEditSessionSetters;
+
+    render(
+      <Harness
+        initial={makeDraft()}
+        onCommit={onCommit}
+        onCancel={vi.fn()}
+        onSaveDraft={onSaveDraft}
+        captureSetters={s => { setters = s; }}
+      />,
+    );
+
+    act(() => { setters.saveDraft(); });
+
+    expect(onSaveDraft).toHaveBeenCalledTimes(1);
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it('saveDraft is a no-op when onSaveDraft prop is omitted (non-edit mode safety)', () => {
+    let setters!: WizardEditSessionSetters;
+
+    render(
+      <Harness
+        initial={makeDraft()}
+        onCommit={vi.fn()}
+        onCancel={vi.fn()}
+        captureSetters={s => { setters = s; }}
+      />,
+    );
+
+    expect(() => { act(() => { setters.saveDraft(); }); }).not.toThrow();
+  });
+
+  it('saveDraft can be invoked multiple times across a session, each emitting the latest draft', () => {
+    const onSaveDraft = vi.fn();
+    let setters!: WizardEditSessionSetters;
+
+    render(
+      <Harness
+        initial={makeDraft({
+          acquisition: makeAcquisition({
+            propertyType: 'mfr',
+            unitMix: [{ id: 'a', beds: 1, baths: 1, count: 4, inPlaceRent: 0, preStabRent: 0, rentMonthly: 0, unitsToRenovate: 0, leaseUpUnits: 0 }],
+          }),
+        })}
+        onCommit={vi.fn()}
+        onCancel={vi.fn()}
+        onSaveDraft={onSaveDraft}
+        captureSetters={s => { setters = s; }}
+      />,
+    );
+
+    // First inner Done — rent set
+    act(() => {
+      setters.setAcquisition(a => ({
+        ...a,
+        unitMix: a.unitMix.map(u => ({ ...u, rentMonthly: 1_500 })),
+      }));
+      setters.saveDraft();
+    });
+    // Second inner Done — value-add toggled
+    act(() => {
+      setters.setIsValueAdd(true);
+      setters.saveDraft();
+    });
+
+    expect(onSaveDraft).toHaveBeenCalledTimes(2);
+    expect(onSaveDraft.mock.calls[0][0].acquisition.unitMix[0].rentMonthly).toBe(1_500);
+    expect(onSaveDraft.mock.calls[1][0].isValueAdd).toBe(true);
+    // The second emission must also still carry the rent set in the first call
+    expect(onSaveDraft.mock.calls[1][0].acquisition.unitMix[0].rentMonthly).toBe(1_500);
   });
 });
 
