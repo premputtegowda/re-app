@@ -24,7 +24,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
     {
       icon: Calculator,
       title: 'Deal Analyzer',
-      description: 'Analyze deals with data-driven price guidance — model cash flows, returns, and refinance scenarios, assess uncertainty, and know the right price before you buy.',
+      description: 'Analyze deals with data-driven price guidance — model cash flows, returns, and refinance scenarios, analyze risk, and know the right price before you buy.',
       available: true,
     },
     {

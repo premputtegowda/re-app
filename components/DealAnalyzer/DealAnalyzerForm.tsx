@@ -43,7 +43,7 @@ const FORM_STEPS = [
   { id: 2, label: 'Renovation' },
   { id: 3, label: 'Operations' },
   { id: 4, label: 'Exit & Refi' },
-  { id: 5, label: 'Market Uncertainty' },
+  { id: 5, label: 'Risk Analysis' },
 ] as const;
 
 const STEP_ICONS: Record<number, React.ReactNode> = {
@@ -127,7 +127,7 @@ function getStepCardData(
       return { primary: exitVal, primaryExtra: null, sub: subParts.join(' · ') };
     }
     case 5: {
-      return { primary: 'Uncertainty ranges', primaryExtra: null, sub: 'Drives Ideal Entry / Recommended Max prices' };
+      return { primary: 'Risk analysis', primaryExtra: null, sub: 'Drives Ideal Entry / Recommended Max prices' };
     }
     default: return { primary: '—', primaryExtra: null, sub: '' };
   }
@@ -2178,6 +2178,12 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                   reviewedAt,
                 );
               }
+              // Re-run the MC simulation with the new ranges. Deferred so the
+              // setMcRanges commit propagates through the panel's range memo
+              // before run() reads from rangesRef. No-op if the results panel
+              // isn't mounted yet (mcSimRunRef.current === null) — that path
+              // is the initial Calculate click flow.
+              setTimeout(() => { mcSimRunRef.current?.(); }, 0);
             }}
           />
         );
@@ -2844,7 +2850,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
                   </svg>
                   <p className="text-xs font-medium text-primary-600 dark:text-primary-400">
-                    {calcPhase === 'returns' ? 'Calculating returns…' : 'Analyzing market uncertainty…'}
+                    {calcPhase === 'returns' ? 'Calculating returns…' : 'Running risk analysis…'}
                   </p>
                 </div>
               ) : (
@@ -2913,7 +2919,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
               </div>
 
               {hasML && (
-                <p className="text-[7px] text-slate-400 dark:text-slate-500 mt-0.5">( ) = most likely accounting for market uncertainty</p>
+                <p className="text-[7px] text-slate-400 dark:text-slate-500 mt-0.5">( ) = most likely accounting for market risk</p>
               )}
               </>
               )}

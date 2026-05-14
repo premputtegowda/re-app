@@ -171,7 +171,7 @@ export function DealCharts({ projections, mcResults }: DealChartsProps) {
                         </defs>
                         <rect width="20" height="12" rx="2" fill="url(#legend-diag)" stroke="#1E293B" strokeWidth="0.5" strokeOpacity="0.4" />
                       </svg>
-                      Most Likely (Accounts for market uncertainty)
+                      Most Likely (Accounts for market risk)
                     </span>
                   )}
                 </div>
