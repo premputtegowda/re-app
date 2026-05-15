@@ -366,7 +366,7 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
               </svg>
               <div>
                 <p className="text-sm font-semibold text-primary-700 dark:text-primary-300">
-                  {calcPhase === 'returns' ? 'Calculating returns…' : 'Analyzing market uncertainty…'}
+                  {calcPhase === 'returns' ? 'Calculating returns…' : 'Running risk analysis…'}
                 </p>
                 <p className="text-xs text-primary-500 dark:text-primary-400 mt-0.5">
                   {calcPhase === 'returns'
@@ -438,7 +438,7 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
               onClick={() => { setActiveTab('montecarlo'); openEditorRef.current?.(); }}
               className="text-[10px] text-primary-500 hover:text-primary-600 dark:text-primary-400 dark:hover:text-primary-300 font-medium transition-colors"
             >
-              Refine market uncertainty ranges →
+              Refine risk analysis ranges →
             </button>
           </div>
         )}
@@ -496,7 +496,12 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
         </Card>
       )}
 
-      {activeTab === 'montecarlo' && (
+      {/* MonteCarloPanel is always mounted (hidden when not on its tab) so the
+          parent can trigger sim re-runs via `stressRunRef` even from other tabs
+          — e.g. when the user commits new uncertainty ranges from step 5
+          (DealAnalyzerForm.onAccept). Without this, the ref is null and the
+          re-run setTimeout no-ops. */}
+      <div hidden={activeTab !== 'montecarlo'}>
         <MonteCarloPanel
           acquisition={acquisition}
           operations={operations}
@@ -513,7 +518,7 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
           openEditorRef={openEditorRef}
           onCalcPhaseChange={onCalcPhaseChange}
         />
-      )}
+      </div>
       </>)}
     </div>
   );

@@ -231,7 +231,7 @@ function PriceGuidanceCard({ recommendedMaxPrice, conservativeMaxPrice, targetIR
         })}
       </div>
       <p className="px-4 pt-2 pb-0.5 text-[10px] text-slate-400 dark:text-slate-500 leading-snug">
-        Both prices are driven by the uncertainty ranges — wider ranges or ranges skewed toward the downside will pull these prices down. Recommended Max: balanced case. Ideal Entry: each variable toward the worse end.
+        Both prices are driven by the risk ranges — wider ranges or ranges skewed toward the downside will pull these prices down. Recommended Max: balanced case. Ideal Entry: each variable toward the worse end.
       </p>
       {inverted && (
         <div className="px-4 py-2 bg-red-50 dark:bg-red-900/20 border-t border-red-200 dark:border-red-800/50 flex items-center justify-between gap-2">
@@ -821,7 +821,7 @@ export function MonteCarloPanel({
         <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Deal Stress Test</p>
         <p className="text-xs text-slate-400 mt-0.5">
           Simulates thousands of market conditions to pressure-test your deal.
-          Not a prediction — results are statistical inferences based on the market uncertainty ranges you define.
+          Not a prediction — results are statistical inferences based on the risk ranges you define.
         </p>
       </div>
 
@@ -838,7 +838,7 @@ export function MonteCarloPanel({
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
                 </svg>
                 <div>
-                  <p className="text-sm font-semibold text-primary-700 dark:text-primary-300">Analyzing market uncertainty…</p>
+                  <p className="text-sm font-semibold text-primary-700 dark:text-primary-300">Running risk analysis…</p>
                   <p className="text-xs text-primary-500 dark:text-primary-400 mt-0.5">Ranges updated — recalculating stress test</p>
                 </div>
               </div>
@@ -867,10 +867,10 @@ export function MonteCarloPanel({
         </div>
       )}
 
-      {/* Market Uncertainty Ranges */}
+      {/* Risk Analysis ranges */}
       <div ref={editorRef}>
         <div className="flex items-center justify-between gap-2">
-          <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">Market Uncertainty Ranges</p>
+          <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">Risk Analysis Ranges</p>
 
           {showEditor ? (
             /* Done / Cancel always visible at top when editor is open */
@@ -914,7 +914,7 @@ export function MonteCarloPanel({
               type="button"
               onClick={() => { setDraftRanges(ranges); setShowEditor(true); }}
               className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
-              aria-label="Edit market uncertainty ranges"
+              aria-label="Edit risk analysis ranges"
             >
               <Pencil size={12} />
             </button>
