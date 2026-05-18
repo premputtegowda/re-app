@@ -13,6 +13,7 @@ import { StepRenovation } from './steps/StepRenovation';
 import { StepExit } from './steps/StepExit';
 import { StepMarketUncertainty } from './steps/StepMarketUncertainty';
 import { computeMcRangesStatus, getRebasedFieldLabels } from '@/utils/mcRangesStatus';
+import { buildStep3Issues, hasBlockingIssue, sectionHasError, blockingSections, findIssue, formatSectionList, type Step3IssueSection } from '@/utils/step3Issues';
 import { ResultsPanel } from './ResultsPanel';
 import { ProFormaGrid, defaultProForma } from './ProFormaGrid';
 import { RehabRentCalculator, simulateFromSchedule } from './RehabRentCalculator';
@@ -1343,12 +1344,11 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
           opsSectionSnapshotRef.current = null;
           setActiveOpsSection(null);
         };
-        const hasMfr = _mfrOps;
+        const hasMfr = acquisition.propertyType === 'mfr' && acquisition.unitMix.length > 0;
 
         const hasTargetRent = hasMfr
           ? acquisition.unitMix.some(e => (e.rentMonthly || 0) > 0)
           : (acquisition.sfrTargetRent || 0) > 0;
-        const rentIncomplete = opsRentIncomplete;
 
         const hasPreStab = hasMfr
           ? acquisition.unitMix.some(e => (e.preStabRent || 0) > 0)
@@ -1356,14 +1356,15 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
         const calcApplied = Object.values(proForma.yearOverrides ?? {}).some(ov => ov?.grossRentSystem);
 
+        // Per-unit-type arrays — kept as locals because the section's summary
+        // table renders per-type totals (e.g. "1BR 2/3 reno"). The schedule
+        // validation itself lives in step3Issues.
         const unitsToRenovate = hasMfr
           ? acquisition.unitMix.map(e => e.unitsToRenovate ?? 0)
           : [1];
-
         const leaseUpUnitsArr = hasMfr
           ? acquisition.unitMix.map(e => e.leaseUpUnits ?? 0)
           : [0];
-
         const renoScheduleTotals = unitsToRenovate.map((_, t) =>
           (calcState?.scheduleByType?.[t] ?? []).reduce((s: number, n: number) => s + n, 0)
         );
@@ -1372,30 +1373,18 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         );
         const someReno = unitsToRenovate.some(u => u > 0);
         const someLU = leaseUpUnitsArr.some(u => u > 0);
-        // Schedule mismatch: any unit type's schedule total doesn't equal its assigned
-        // count. Fires regardless of calcApplied — if the user changed value-add units
-        // AFTER applying the calculator (or chose Custom and under-filled cells), the
-        // saved schedule is now stale.
-        const scheduleHasMismatch =
-          unitsToRenovate.some((u, t) => u > 0 && renoScheduleTotals[t] !== u) ||
-          leaseUpUnitsArr.some((u, t) => u > 0 && luScheduleTotals[t] !== u);
-        // SFR hardcodes unitsToRenovate to [1], so someReno is always true
-        // for SFR — gate on isValueAdd so "No" mode doesn't trigger a
-        // bogus "clear warnings in Stabilization" banner. Mirrors the
-        // isValueAdd === true gate on opsStabIncomplete above.
-        const calcScheduleIncomplete = isValueAdd === true
-          && preStabMethod === 'calculator'
-          && (someReno || someLU)
-          && ((!calcApplied && stabDuration === 0) || scheduleHasMismatch);
-
         const hasAnyUnits = someReno || someLU;
-        const valueAddIncomplete = opsValueAddIncomplete;
-        // Stabilization warning: uses the component-level flag + calcScheduleIncomplete
-        // (which needs calcState schedule data only available in this render scope).
-        const stabIncomplete = opsStabIncomplete || calcScheduleIncomplete;
+
+        // Section-level rollups derived from the unified issues list (see
+        // utils/step3Issues.ts). Adding a new validation rule = one push in
+        // buildStep3Issues; it shows up here automatically.
+        const rentIncomplete       = sectionHasError(step3Issues, 'rent');
+        const valueAddIncomplete   = sectionHasError(step3Issues, 'valueAdd');
+        const stabIncomplete       = sectionHasError(step3Issues, 'stab');
+        const scheduleMismatchIssue = findIssue(step3Issues, 'stab.schedule_mismatch');
         const stepComplete =
           isValueAdd === false ||
-          (isValueAdd === true && !calcScheduleIncomplete);
+          (isValueAdd === true && !scheduleMismatchIssue);
 
         const unitTypes = hasMfr
           ? acquisition.unitMix.map(e => ({
@@ -1923,14 +1912,14 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                         {/* Status + edit link */}
                         <div className="flex items-center justify-between gap-3">
                           <div className="flex items-center gap-1.5 min-w-0">
-                            <Zap size={12} className={`shrink-0 ${calcApplied ? 'text-blue-500' : calcScheduleIncomplete ? 'text-amber-500' : 'text-slate-300 dark:text-slate-600'}`} />
+                            <Zap size={12} className={`shrink-0 ${calcApplied ? 'text-blue-500' : scheduleMismatchIssue ? 'text-amber-500' : 'text-slate-300 dark:text-slate-600'}`} />
                             {calcApplied ? (
                               <span className="text-xs text-slate-500 dark:text-slate-400 truncate">
                                 {[totalReno > 0 && `${totalReno} reno`, totalLU > 0 && `${totalLU} lease-up`].filter(Boolean).join(' · ')}
                                 {' · '}{stabDuration} mo
                                 <span className="text-emerald-600 dark:text-emerald-400 font-medium"> · Pro Forma updated</span>
                               </span>
-                            ) : calcScheduleIncomplete ? (
+                            ) : scheduleMismatchIssue ? (
                               <span className="text-xs text-amber-600 dark:text-amber-400">Some unit types need schedule update — edit to fix</span>
                             ) : stabDuration > 0 ? (
                               <span className="text-xs text-slate-400 dark:text-slate-500">Schedule auto-filled</span>
@@ -1956,7 +1945,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                         so its auto-fill effects fire on input changes even when the stab section is collapsed. */}
 
                     {/* Schedule incomplete notice */}
-                    {isVisited && calcScheduleIncomplete && (
+                    {isVisited && scheduleMismatchIssue && (
                       <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40">
                         <AlertTriangle size={13} className="text-amber-500 mt-0.5 shrink-0" />
                         <p className="text-xs text-amber-700 dark:text-amber-400">
@@ -2075,30 +2064,27 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 isVisited so a fresh deal doesn't yell before the user has had a
                 chance to fill anything in. The currently-active section is also
                 excluded so the banner doesn't yell about a section the user is
-                already editing right now. */}
+                already editing right now. Stab is suppressed when value-add is
+                also incomplete — the stab issues compound on the same root cause. */}
             {isVisited && (() => {
-              const incompleteSections: string[] = [];
-              if (rentIncomplete && activeOpsSection !== 'rent') incompleteSections.push('Rent');
-              if (valueAddIncomplete && activeOpsSection !== 'valueAdd') incompleteSections.push('Value-Add Plan');
-              if (stabIncomplete && !valueAddIncomplete && activeOpsSection !== 'stab') incompleteSections.push('Stabilization');
-              if (incompleteSections.length === 0) return null;
-              const sectionList = incompleteSections.length === 1
-                ? incompleteSections[0]
-                : incompleteSections.length === 2
-                ? `${incompleteSections[0]} and ${incompleteSections[1]}`
-                : `${incompleteSections.slice(0, -1).join(', ')}, and ${incompleteSections[incompleteSections.length - 1]}`;
+              const sections = blockingSections(step3Issues).filter(s => {
+                if (s === activeOpsSection) return false;
+                if (s === 'stab' && valueAddIncomplete) return false;
+                return true;
+              }) as Step3IssueSection[];
+              if (sections.length === 0) return null;
               return (
                 <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40">
                   <AlertTriangle size={13} className="text-amber-500 mt-0.5 shrink-0" />
                   <p className="text-xs text-amber-700 dark:text-amber-400">
-                    Please clear the warnings in <span className="font-semibold">{sectionList}</span> above to populate the Pro Forma rent correctly.
+                    Please clear the warnings in <span className="font-semibold">{formatSectionList(sections)}</span> above to populate the Pro Forma rent correctly.
                   </p>
                 </div>
               );
             })()}
 
-            {/* ── Pro Forma — hidden entirely when any rent/VA/stab warning exists ── */}
-            {!(rentIncomplete || valueAddIncomplete || stabIncomplete) && (
+            {/* ── Pro Forma — hidden entirely while any step-3 issue is blocking ── */}
+            {!hasBlockingIssue(step3Issues) && (
               <ProFormaGrid
                 data={proForma}
                 onChange={setProForma}
@@ -2241,38 +2227,16 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   }, [mcResults]);
   const showMcRebasedNotice = mcRebasedLabels.length > 0 && !mcRebasedDismissed;
 
-  // ── Operations sub-section warning flags (used by getStepWarning AND renderStepContent) ──
-  // Lifted to component level so both share the same source of truth.
-  const _mfrOps = acquisition.propertyType === 'mfr' && acquisition.unitMix.length > 0;
-  const opsRentIncomplete = _mfrOps
-    ? acquisition.unitMix.length === 0 || acquisition.unitMix.some(e => (e.rentMonthly || 0) === 0)
-    : (acquisition.sfrTargetRent || 0) === 0 && proForma.grossRent.stabilized === 0;
-
-  const _someRenoOps = _mfrOps && acquisition.unitMix.some(e => (e.unitsToRenovate ?? 0) > 0);
-  const _someLUOps = _mfrOps && acquisition.unitMix.some(e => (e.leaseUpUnits ?? 0) > 0);
-  const _hasAnyUnitsOps = _someRenoOps || _someLUOps;
-  const opsValueAddIncomplete = isValueAdd === true && !_hasAnyUnitsOps;
-  // Schedule mismatch: assigned units in value-add don't match the calculator's saved schedule.
-  // Only check when calcState HAS schedule data — if null/empty, the always-mounted calculator
-  // will populate it momentarily (not a real mismatch, just a loading race).
-  const _hasScheduleData = calcState?.scheduleByType?.some(s => s.length > 0) ||
-    calcState?.leaseUpScheduleByType?.some(s => s.length > 0);
-  const _renoArr = _mfrOps ? acquisition.unitMix.map(e => e.unitsToRenovate ?? 0) : [1];
-  const _luArr = _mfrOps ? acquisition.unitMix.map(e => e.leaseUpUnits ?? 0) : [0];
-  const _renoTotals = _renoArr.map((_, t) =>
-    (calcState?.scheduleByType?.[t] ?? []).reduce((s: number, n: number) => s + n, 0));
-  const _luTotals = _luArr.map((_, t) =>
-    (calcState?.leaseUpScheduleByType?.[t] ?? []).reduce((s: number, n: number) => s + n, 0));
-  const _scheduleHasMismatch = _hasScheduleData && (
-    _renoArr.some((u, t) => u > 0 && _renoTotals[t] !== u) ||
-    _luArr.some((u, t) => u > 0 && _luTotals[t] !== u)
-  );
-  const _calcScheduleIncomplete = preStabMethod === 'calculator' && (_someRenoOps || _someLUOps) && _scheduleHasMismatch;
-  const opsStabIncomplete = isValueAdd === true && (
-    !_hasAnyUnitsOps ||
-    stabDuration === 0 ||
-    (_someRenoOps && offlinePerUnit === 0) ||
-    _calcScheduleIncomplete
+  // ── Operations step (step 3) issues ─────────────────────────────────────
+  // Single source of truth — see utils/step3Issues.ts. Every consumer below
+  // (badges, banner, Pro Forma gate, inline notices, getStepWarning) derives
+  // what it needs from this list. Adding a new rule = one push in
+  // buildStep3Issues; the rule then shows up everywhere automatically.
+  const step3Issues = React.useMemo(
+    () => buildStep3Issues({
+      acquisition, proForma, calcState, isValueAdd, preStabMethod, stabDuration, offlinePerUnit,
+    }),
+    [acquisition, proForma, calcState, isValueAdd, preStabMethod, stabDuration, offlinePerUnit],
   );
 
   // ── Step warnings (soft — non-blocking) ──
@@ -2305,8 +2269,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         return null;
       }
       case 3:
-        // Operations warning fires when ANY sub-section (rent, value-add, stabilization) is incomplete.
-        if (proForma.grossRent.stabilized === 0 || opsRentIncomplete || opsValueAddIncomplete || opsStabIncomplete)
+        // Operations warning fires when ANY sub-section (rent, value-add, stabilization) has a blocking issue.
+        if (proForma.grossRent.stabilized === 0 || hasBlockingIssue(step3Issues))
           return 'incomplete';
         return null;
       case 4: {
