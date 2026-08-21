@@ -353,7 +353,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     else navigateBack();
   };
   const isDirtyRef = useRef(false);
-  const { addScenario, saveDeal, updateSavedDeal, updateMCData, updateCurrentStep } = useDealAnalyzerStore();
+  const { addScenario, saveDeal, updateSavedDeal, updateMCData, updateCurrentStep, retrySave } = useDealAnalyzerStore();
   // Subscribe to the store's copy of this deal so fields added in newer
   // feature versions (e.g. mcRangesReviewedAt) can hydrate into local
   // state after the backend sync completes — the locally-persisted
@@ -588,14 +588,69 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const titleBeforeEdit = useRef('');
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showExitWarning, setShowExitWarning] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
   const [calcPhase, setCalcPhase] = useState<'idle' | 'returns' | 'uncertainty' | 'done'>('idle');
-  const saveStatusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const flashSaved = () => {
-    setSaveStatus('saved');
-    if (saveStatusTimer.current) clearTimeout(saveStatusTimer.current);
-    saveStatusTimer.current = setTimeout(() => setSaveStatus('idle'), 3000);
-  };
+
+  // Save status is derived from the store's sync tracking. The store
+  // increments pendingCount on every save/update/delete, sets lastSuccessAt
+  // on success, and records failed ids in failedDealIds. See
+  // lib/dealAnalyzerStore.ts. The `?? {}` guard handles component tests
+  // that mock useDealAnalyzerStore with a minimal object (no syncState).
+  const { syncState } = useDealAnalyzerStore();
+  const {
+    pendingCount: syncPendingCount = 0,
+    lastError: syncLastError = null,
+    lastSuccessAt: syncLastSuccessAt = null,
+    failedDealIds: syncFailedDealIds = [],
+  } = syncState ?? {};
+
+  // Flash "Saved" for 3s after each successful sync.
+  const [showSavedFlash, setShowSavedFlash] = useState(false);
+  const savedFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!syncLastSuccessAt) return;
+    setShowSavedFlash(true);
+    if (savedFlashTimer.current) clearTimeout(savedFlashTimer.current);
+    savedFlashTimer.current = setTimeout(() => setShowSavedFlash(false), 3000);
+    return () => { if (savedFlashTimer.current) clearTimeout(savedFlashTimer.current); };
+  }, [syncLastSuccessAt]);
+
+  const currentDealSaveFailed = savedDealId ? syncFailedDealIds.includes(savedDealId) : false;
+  type SaveStatusView = 'idle' | 'saving' | 'saved' | 'error';
+  const saveStatus: SaveStatusView =
+    syncPendingCount > 0 ? 'saving' :
+    currentDealSaveFailed ? 'error' :
+    showSavedFlash ? 'saved' : 'idle';
+
+  // Shim for existing call sites — the store now tracks success/failure
+  // automatically so the manual flash is unnecessary. Retained as a no-op
+  // to avoid churning every save handler in this file.
+  const flashSaved = () => { /* store now tracks success automatically */ };
+
+  // Warn the user before leaving the page if a save is in flight or has
+  // failed — otherwise they could close the tab thinking their work is
+  // saved when it never actually reached the server (the Neil Ave case).
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      const s = useDealAnalyzerStore.getState().syncState;
+      if (s.pendingCount > 0 || s.failedDealIds.length > 0) {
+        e.preventDefault();
+        e.returnValue = '';
+        return '';
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, []);
+
+  // Resolves once no backend save is in flight. Used before navigating away
+  // so the user isn't left wondering whether their work was persisted.
+  const waitForSyncSettled = () => new Promise<void>((resolve) => {
+    const isSettled = () => useDealAnalyzerStore.getState().syncState.pendingCount === 0;
+    if (isSettled()) { resolve(); return; }
+    const unsub = useDealAnalyzerStore.subscribe(() => {
+      if (isSettled()) { unsub(); resolve(); }
+    });
+  });
 
   // Auto-save MC data immediately after a simulation run, if the deal is already saved
   useEffect(() => {
@@ -1172,7 +1227,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
   // ── Save ──
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!acquisition.propertyAddress.trim()) {
       setSaveError('Please enter a property address before saving.');
       setTimeout(() => setSaveError(null), 4000);
@@ -1192,24 +1247,38 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       ...(Object.keys(stepNotes).length > 0 ? { stepNotes } : {}),
     };
 
+    // Track which id this save is targeting so we can check post-hoc whether
+    // it landed on the server (savedDealId state won't reflect a new id yet
+    // — setSavedDealId is async).
+    let dealIdForCheck: string | null = savedDealId;
     if (savedDealId) {
       updateSavedDeal(savedDealId, name, scenarioResults, currentDraft, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined, mcRangesReviewedAt);
     } else {
       const newId = saveDeal(name, currentDraft, scenarioResults, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined, mcRangesReviewedAt);
       setSavedDealId(newId);
+      dealIdForCheck = newId;
     }
 
     setSaveName(name);
     savedSnapshot.current = JSON.stringify({ acquisition, operations, proForma, refinance });
     isDirtyRef.current = false; // just saved — clear the dirty flag so navigateBack doesn't re-warn
+
+    // Wait for the backend save to settle before navigating. If it fails,
+    // stay on the page so the user can see the error and retry rather than
+    // leaving with an unsynced deal.
+    await waitForSyncSettled();
+    const failed = useDealAnalyzerStore.getState().syncState.failedDealIds;
+    if (dealIdForCheck && failed.includes(dealIdForCheck)) {
+      return;
+    }
     navigateBack();
   };
 
-  const handleSaveAndExit = () => {
+  const handleSaveAndExit = async () => {
     if (!acquisition.propertyAddress.trim()) { navigateBack(); return; }
-    handleSave();
     setShowExitWarning(false);
-    navigateBack();
+    // handleSave awaits sync-settle and only navigates on success.
+    await handleSave();
   };
 
   // ── Financing missing fields (for inline warning icons) ──
@@ -2763,10 +2832,24 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         <div className="fixed bottom-[60px] lg:bottom-0 left-0 right-0 z-50 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 shadow-[0_-4px_16px_rgba(0,0,0,0.06)]">
           <div className="max-w-4xl mx-auto px-3 py-3 flex items-center justify-between" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
             <div className="flex items-center gap-2 min-w-0">
-              {saveStatus === 'saved' ? (
+              {saveStatus === 'saving' ? (
+                <span className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 font-medium">
+                  <span className="inline-block w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
+                  Saving…
+                </span>
+              ) : saveStatus === 'saved' ? (
                 <span className="flex items-center gap-1 text-xs text-secondary-600 dark:text-secondary-400 font-medium animate-fade-in">
                   <Check size={12} /> Saved
                 </span>
+              ) : saveStatus === 'error' ? (
+                <button
+                  type="button"
+                  onClick={() => { if (savedDealId) retrySave?.(savedDealId); }}
+                  className="flex items-center gap-1 text-xs text-red-600 dark:text-red-400 font-medium hover:underline"
+                  title={syncLastError ?? 'Save failed'}
+                >
+                  <AlertTriangle size={12} /> Save failed — retry
+                </button>
               ) : (
                 <p className="text-xs text-slate-400 dark:text-slate-500">
                   Click <span className="font-semibold text-slate-500 dark:text-slate-400">Next</span> on each step to save your progress
