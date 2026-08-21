@@ -627,6 +627,18 @@ export const api = {
     return response.json();
   },
 
+  // ── Market data ───────────────────────────────────────────────────────
+
+  async getMortgageRate(): Promise<{ rate: number; asOf: string; series: string } | null> {
+    try {
+      const response = await authFetch('/api/market/mortgage-rate');
+      if (!response.ok) return null;
+      return response.json();
+    } catch {
+      return null;
+    }
+  },
+
   // ── Feedback ──────────────────────────────────────────────────────────
 
   async submitFeedback(module: string, message: string) {

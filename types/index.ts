@@ -261,6 +261,16 @@ export interface CoCAcquisition {
   exitCapRate: number;  // % — used when exitMethod = 'capRate'
   exitClosingCostPct: number;  // % of sale price; default 3
   exitMethod?: 'value' | 'capRate';  // 'value' = ARV or Market Value direct entry
+  // Snapshot of the market mortgage rate at deal-creation time. Populated once
+  // when the deal is created and never overwritten on subsequent edits.
+  marketRateAtCreation?: MarketRateSnapshot;
+}
+
+export interface MarketRateSnapshot {
+  rate: number;      // percent, e.g. 7.05 (raw FRED value, before any investment premium)
+  asOf: string;      // ISO date of the FRED observation
+  series: string;    // FRED series id, e.g. "MORTGAGE30US"
+  capturedAt: string; // ISO timestamp when we captured this on the client
 }
 
 export interface CoCOperations {

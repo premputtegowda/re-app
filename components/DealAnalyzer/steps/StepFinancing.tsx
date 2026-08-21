@@ -15,7 +15,17 @@ type FinancingFields = Pick<
   | 'loanTermYears'
   | 'ioPeriodMonths'
   | 'projectionYears'
+  | 'marketRateAtCreation'
 >;
+
+function formatAsOf(iso: string): string {
+  // FRED returns YYYY-MM-DD; parse as local calendar date, not UTC, so the
+  // date doesn't slip a day for viewers west of UTC.
+  const [y, m, d] = iso.split('-').map(Number);
+  if (!y || !m || !d) return iso;
+  const date = new Date(y, m - 1, d);
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
 
 const newItem = (): CoCCostItem => ({
   id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
@@ -54,7 +64,7 @@ export function StepFinancing({ data, onChange, missingFields }: StepFinancingPr
         max={100}
         step={0.5}
         placeholder="e.g. 20"
-        value={data.downPaymentPct || ''}
+        value={data.downPaymentPct ?? ''}
         onChange={(e) => onChange('downPaymentPct', Number(e.target.value))}
         helperText={data.purchasePrice > 0 && data.downPaymentPct > 0
           ? `= $${Math.round(data.purchasePrice * data.downPaymentPct / 100).toLocaleString()}${isCash ? ' — Cash purchase' : ''}`
@@ -73,7 +83,7 @@ export function StepFinancing({ data, onChange, missingFields }: StepFinancingPr
               max={10}
               step={0.1}
               placeholder="e.g. 2"
-              value={data.closingCostsPct || ''}
+              value={data.closingCostsPct ?? ''}
               onChange={(e) => onChange('closingCostsPct', Number(e.target.value))}
               helperText={data.purchasePrice > 0 && data.closingCostsPct > 0
                 ? `= $${Math.round(data.purchasePrice * data.closingCostsPct / 100).toLocaleString()}`
@@ -88,7 +98,7 @@ export function StepFinancing({ data, onChange, missingFields }: StepFinancingPr
               max={10}
               step={0.25}
               placeholder="e.g. 1"
-              value={data.points || ''}
+              value={data.points ?? ''}
               onChange={(e) => onChange('points', Number(e.target.value))}
               helperText={data.purchasePrice > 0 && data.downPaymentPct > 0 && data.points > 0
                 ? `= $${Math.round(data.purchasePrice * (1 - data.downPaymentPct / 100) * data.points / 100).toLocaleString()}`
@@ -120,18 +130,29 @@ export function StepFinancing({ data, onChange, missingFields }: StepFinancingPr
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Input
-              label="Interest Rate (%)"
-              type="number"
-              fullWidth
-              min={0}
-              max={30}
-              step={0.125}
-              placeholder="e.g. 7.0"
-              value={data.interestRate || ''}
-              onChange={(e) => onChange('interestRate', Number(e.target.value))}
-              warning={warn('interestRate')}
-            />
+            <div>
+              {data.marketRateAtCreation && (
+                <p className="mb-1 text-xs text-slate-500 dark:text-slate-400">
+                  Today&apos;s 30-yr fixed rate (FRED, as of {formatAsOf(data.marketRateAtCreation.asOf)}):{' '}
+                  <span className="font-semibold text-slate-700 dark:text-slate-200">
+                    {data.marketRateAtCreation.rate.toFixed(2)}%
+                  </span>{' '}
+                  — auto-filled with +0.5% investment premium
+                </p>
+              )}
+              <Input
+                label="Interest Rate (%)"
+                type="number"
+                fullWidth
+                min={0}
+                max={30}
+                step={0.125}
+                placeholder="e.g. 7.0"
+                value={data.interestRate || ''}
+                onChange={(e) => onChange('interestRate', Number(e.target.value))}
+                warning={warn('interestRate')}
+              />
+            </div>
             <Input
               label="Loan Term (years)"
               type="number"
@@ -151,7 +172,7 @@ export function StepFinancing({ data, onChange, missingFields }: StepFinancingPr
             fullWidth
             min={0}
             placeholder="0"
-            value={data.ioPeriodMonths || ''}
+            value={data.ioPeriodMonths ?? ''}
             onChange={(e) => onChange('ioPeriodMonths', Number(e.target.value))}
             helperText="Leave blank for a fully amortizing loan"
           />
