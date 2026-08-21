@@ -9,6 +9,7 @@ import type {
   CalcPersistedState,
 } from '@/types';
 import { defaultProForma } from './ProFormaGrid';
+import { useDebouncedAutoSave, type AutoSaveStatus } from '@/hooks/useDebouncedAutoSave';
 
 // Transactional edit-session for the wizard. While a step is being edited,
 // all mutations to the four deal slices (plus isValueAdd/calcState, which
@@ -69,12 +70,25 @@ export interface WizardEditSessionProps {
   /** Called when the user (or step logic) commits the draft. Parent merges
    *  the draft into its committed state and handles Zustand persistence. */
   onCommit: (draft: WizardEditSessionDraft) => void;
-  /** Called when the user cancels. Parent should unmount this session. */
-  onCancel: () => void;
+  /** Called when the user cancels. Parent should unmount this session.
+   *  Receives `hasAutoSaved`: true if at least one debounced autosave fired
+   *  during this session. Parent uses this to decide whether to PUT the
+   *  pre-session snapshot back to the server (rollback) so Cancel still
+   *  means "discard my changes" from the user's POV. */
+  onCancel: (context: { hasAutoSaved: boolean }) => void;
   /** Optional: called when a sub-section "Done" wants to persist mid-session
    *  without closing the editor. Parent should apply the draft to its own
    *  state and PUT to backend, but leave the session mounted. */
   onSaveDraft?: (draft: WizardEditSessionDraft) => void;
+  /** Optional: called by the debounced autosave to persist the in-flight
+   *  draft to the backend. Fires ~1.5s after the user stops typing. When
+   *  omitted, autosave is disabled (backwards compatible). */
+  onAutoSave?: (draft: WizardEditSessionDraft) => Promise<void>;
+  /** Autosave debounce delay in ms. Default 1500. */
+  autoSaveDelayMs?: number;
+  /** Fired whenever the autosave status changes. Lets the parent surface
+   *  a "saving / saved / error" indicator without prop-drilling. */
+  onAutoSaveStateChange?: (status: AutoSaveStatus) => void;
   /** Rent-sync effect respects `preStabMethod === 'calculator'` to avoid
    *  stomping on calculator-driven year overrides. */
   preStabMethod: 'calculator' | 'manual' | null;
@@ -87,13 +101,35 @@ export interface WizardEditSessionProps {
   ) => React.ReactNode;
 }
 
-export function WizardEditSession({ initial, onCommit, onCancel, onSaveDraft, preStabMethod, defaults, children }: WizardEditSessionProps) {
+export function WizardEditSession({
+  initial,
+  onCommit,
+  onCancel,
+  onSaveDraft,
+  onAutoSave,
+  autoSaveDelayMs = 1500,
+  onAutoSaveStateChange,
+  preStabMethod,
+  defaults,
+  children,
+}: WizardEditSessionProps) {
   // Draft lives in a ref so `commit()` sees the freshest value even when
   // invoked synchronously after a setter. useState is used only to trigger
   // re-renders — its value is not the source of truth.
   const draftRef = useRef<WizardEditSessionDraft>(initial);
   const [, setTick] = useState(0);
   const rerender = useCallback(() => setTick(t => t + 1), []);
+
+  // Autosave tracking. hasAutoSavedRef flips true after the first save
+  // completes so `onCancel` can decide whether the parent needs to rollback
+  // (i.e., PUT the pre-session snapshot back to the server).
+  const hasAutoSavedRef = useRef(false);
+  const autoSaveEnabled = Boolean(onAutoSave);
+  const autoSaveHandler = useCallback(async (draft: WizardEditSessionDraft) => {
+    if (!onAutoSave) return;
+    await onAutoSave(draft);
+    hasAutoSavedRef.current = true;
+  }, [onAutoSave]);
 
   const setAcquisition: React.Dispatch<React.SetStateAction<CoCAcquisition>> = useCallback(value => {
     draftRef.current = { ...draftRef.current, acquisition: applySet(draftRef.current.acquisition, value) };
@@ -120,13 +156,45 @@ export function WizardEditSession({ initial, onCommit, onCancel, onSaveDraft, pr
     rerender();
   }, [rerender]);
 
-  const commit = useCallback(() => { onCommit(draftRef.current); }, [onCommit]);
-  const cancel = useCallback(() => { onCancel(); }, [onCancel]);
-  const saveDraft = useCallback(() => { onSaveDraft?.(draftRef.current); }, [onSaveDraft]);
-
   // Snapshot the latest draft once per render so useEffect deps see stable
   // (by-value) primitives and React's change-detection works normally.
   const draft = draftRef.current;
+
+  // Debounced background persistence. Fires ~1.5s after the user stops
+  // typing so a browser crash / tab close mid-edit doesn't lose typed
+  // input between explicit Done clicks. Disabled if no onAutoSave prop.
+  const autoSave = useDebouncedAutoSave({
+    value: draft,
+    saveFn: autoSaveHandler,
+    delayMs: autoSaveDelayMs,
+    enabled: autoSaveEnabled,
+    onStatusChange: onAutoSaveStateChange,
+  });
+
+  const commit = useCallback(() => {
+    // Commit supersedes any pending autosave; the parent's onCommit will
+    // do its own PUT. Clear hasAutoSaved so onCancel-after-commit (which
+    // shouldn't happen but just in case) doesn't trigger a spurious
+    // rollback.
+    autoSave.cancel();
+    hasAutoSavedRef.current = false;
+    onCommit(draftRef.current);
+  }, [onCommit, autoSave]);
+
+  const cancel = useCallback(() => {
+    autoSave.cancel();
+    onCancel({ hasAutoSaved: hasAutoSavedRef.current });
+  }, [onCancel, autoSave]);
+
+  const saveDraft = useCallback(() => {
+    // Inner-section Done: parent will persist the draft explicitly, so
+    // cancel any pending autosave timer to avoid a redundant PUT. Mark
+    // hasAutoSaved so a subsequent Cancel triggers rollback (parent has
+    // written state to the server that Cancel wants to discard).
+    autoSave.cancel();
+    hasAutoSavedRef.current = true;
+    onSaveDraft?.(draftRef.current);
+  }, [onSaveDraft, autoSave]);
   const { acquisition, proForma } = draft;
   const totalMFRUnits = acquisition.unitMix.reduce((sum, e) => sum + e.count, 0);
 
