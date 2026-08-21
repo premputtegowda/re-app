@@ -21,6 +21,7 @@ import { WizardEditSession, type WizardEditSessionDraft } from './WizardEditSess
 import type { AutoSaveStatus } from '@/hooks/useDebouncedAutoSave';
 import type { CalcPersistedState } from '@/types';
 import { projectScenario, formatCurrencyCompact } from '@/utils/dealAnalyzerCalc';
+import { api } from '@/lib/api';
 import { useDealAnalyzerStore, type DealAnalyzerDraft } from '@/lib/dealAnalyzerStore';
 import { useDealSettingsStore } from '@/lib/dealSettingsStore';
 import type {
@@ -228,8 +229,8 @@ const DEFAULT_ACQUISITION: CoCAcquisition = {
   unitMix: [],
   purchasePrice: 0,
   arv: 0,
-  downPaymentPct: 0,
-  closingCostsPct: 0,
+  downPaymentPct: 25,
+  closingCostsPct: 2,
   points: 0,
   additionalFeeItems: [],
   hardCostItems: [],
@@ -237,7 +238,7 @@ const DEFAULT_ACQUISITION: CoCAcquisition = {
   opportunityCostItems: [],
   renovationMonths: 0,
   interestRate: 0,
-  loanTermYears: 0,
+  loanTermYears: 30,
   ioPeriodMonths: 0,
   stabilizedMonth: 1,
   projectionYears: 5,
@@ -581,6 +582,32 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     initialDeal?.mcResults ? (initialDeal.mcResults as SavedMCResults) : null
   );
 
+  // Auto-populate the interest rate from FRED on new deals only. Applies a
+  // +0.5% investment-property premium on top of the owner-occupied FRED rate
+  // and captures the raw snapshot into acquisition.marketRateAtCreation so
+  // the UI can show provenance and the value is preserved with the deal.
+  useEffect(() => {
+    if (initialDeal) return;
+    let cancelled = false;
+    api.getMortgageRate().then((snap) => {
+      if (cancelled || !snap) return;
+      setAcquisition((prev) => {
+        if (prev.marketRateAtCreation || prev.interestRate > 0) return prev;
+        return {
+          ...prev,
+          interestRate: Number((snap.rate + 0.5).toFixed(3)),
+          marketRateAtCreation: {
+            rate: snap.rate,
+            asOf: snap.asOf,
+            series: snap.series,
+            capturedAt: new Date().toISOString(),
+          },
+        };
+      });
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Save state
   const [savedDealId, setSavedDealId] = useState<string | null>(initialDeal?.id ?? null);

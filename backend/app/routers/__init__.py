@@ -11,6 +11,7 @@ from app.routers.export import router as export_router
 from app.routers.deals import router as deals_router
 from app.routers.feedback import router as feedback_router
 from app.routers.shared import router as shared_router
+from app.routers.market import router as market_router
 
 __all__ = [
     "auth_router",
@@ -26,4 +27,5 @@ __all__ = [
     "deals_router",
     "feedback_router",
     "shared_router",
+    "market_router",
 ]
