@@ -40,6 +40,7 @@ beforeEach(() => {
     draft: null,
     scenarios: [],
     activeScenarioId: null,
+    syncState: { pendingCount: 0, lastError: null, lastSuccessAt: null, failedDealIds: [] },
   });
   localStorage.clear();
 });
@@ -204,7 +205,10 @@ describe('deleteSavedDeal', () => {
     expect(vi.mocked(api.deleteDeal).mock.calls[0][0]).toBe(id);
   });
 
-  it('does not block UI when api.deleteDeal rejects', async () => {
+  it('restores the deal locally when api.deleteDeal rejects', async () => {
+    // Behavior change (2026-08): a failed delete now rolls back the local
+    // removal so users don't see a fake success. See dealAnalyzerStore.ts
+    // deleteSavedDeal for the rollback path.
     vi.mocked(api.deleteDeal).mockRejectedValueOnce(new Error('gone'));
     const { saveDeal, deleteSavedDeal } = useDealAnalyzerStore.getState();
     const id = saveDeal('Deal', makeDraft(), SAMPLE_RESULTS);
@@ -213,8 +217,8 @@ describe('deleteSavedDeal', () => {
     deleteSavedDeal(id);
     await flushPromises();
 
-    // Still removed locally
-    expect(useDealAnalyzerStore.getState().savedDeals).toHaveLength(0);
+    // Rolled back — deal reappears so the UI reflects reality
+    expect(useDealAnalyzerStore.getState().savedDeals.find((d) => d.id === id)).toBeDefined();
   });
 });
 
@@ -265,10 +269,11 @@ describe('updateMCData', () => {
 // ── syncDealsFromBackend ───────────────────────────────────────────────────────
 
 describe('syncDealsFromBackend', () => {
-  it('replaces local savedDeals with data from backend', async () => {
-    // Seed a local deal that should be replaced
+  it('merges backend deals with local-only deals (non-destructive)', async () => {
+    // Seed a local deal that never synced to backend (e.g., original save failed)
     const { saveDeal } = useDealAnalyzerStore.getState();
-    saveDeal('Stale Local Deal', makeDraft(), SAMPLE_RESULTS);
+    vi.mocked(api.saveDeal).mockRejectedValueOnce(new Error('offline'));
+    saveDeal('Unsynced Local Deal', makeDraft(), SAMPLE_RESULTS);
     await flushPromises();
 
     const backendDeals = [
@@ -288,13 +293,19 @@ describe('syncDealsFromBackend', () => {
       },
     ];
     vi.mocked(api.listDeals).mockResolvedValueOnce(backendDeals);
+    // The automatic retry that syncDealsFromBackend fires also fails, so the
+    // deal remains local-only. This lets us assert the failed-flag stays set.
+    vi.mocked(api.saveDeal).mockRejectedValueOnce(new Error('still offline'));
 
     await useDealAnalyzerStore.getState().syncDealsFromBackend();
+    await flushPromises();
 
     const { savedDeals } = useDealAnalyzerStore.getState();
-    expect(savedDeals).toHaveLength(1);
-    expect(savedDeals[0].id).toBe('11111111-1111-1111-1111-111111111111');
-    expect(savedDeals[0].name).toBe('Backend Deal');
+    // Both the backend deal AND the previously-unsynced local deal survive
+    // — the destructive-replace bug that ate Neil Ave would have wiped the
+    // local one.
+    expect(savedDeals.map((d) => d.name)).toContain('Backend Deal');
+    expect(savedDeals.map((d) => d.name)).toContain('Unsynced Local Deal');
   });
 
   it('maps backend fields correctly to SavedDeal shape', async () => {
@@ -354,14 +365,133 @@ describe('syncDealsFromBackend', () => {
     expect(useDealAnalyzerStore.getState().savedDeals[0].name).toBe('Local Deal');
   });
 
-  it('syncs an empty list when the user has no backend deals', async () => {
+  it('preserves local-only deals and auto-retries when server returns empty', async () => {
+    // First save succeeds (deal is on server). Second save fails (local-only).
     const { saveDeal } = useDealAnalyzerStore.getState();
-    saveDeal('Orphan', makeDraft(), SAMPLE_RESULTS);
+    saveDeal('Synced Deal', makeDraft(), SAMPLE_RESULTS);
+    await flushPromises();
+    vi.mocked(api.saveDeal).mockRejectedValueOnce(new Error('network'));
+    const orphanId = saveDeal('Orphan', makeDraft(), SAMPLE_RESULTS);
     await flushPromises();
 
+    // Server only knows about the first deal.
     vi.mocked(api.listDeals).mockResolvedValueOnce([]);
+    // Retry for the orphan will succeed this time.
+    vi.mocked(api.saveDeal).mockResolvedValueOnce({});
     await useDealAnalyzerStore.getState().syncDealsFromBackend();
+    await flushPromises();
 
+    // Both deals preserved locally — the buggy destructive-replace would
+    // have wiped Orphan (this is the Neil Ave failure mode).
+    const names = useDealAnalyzerStore.getState().savedDeals.map((d) => d.name);
+    expect(names).toContain('Orphan');
+    // After successful retry, the orphan is no longer flagged as failed.
+    expect(useDealAnalyzerStore.getState().syncState.failedDealIds).not.toContain(orphanId);
+  });
+});
+
+// ── Sync state tracking (pendingCount, lastError, failedDealIds) ──────────────
+
+describe('syncState tracking', () => {
+  it('marks a deal as failed when its save rejects', async () => {
+    vi.mocked(api.saveDeal).mockRejectedValueOnce(new Error('boom'));
+    const { saveDeal } = useDealAnalyzerStore.getState();
+    const id = saveDeal('Doomed', makeDraft(), SAMPLE_RESULTS);
+    await flushPromises();
+
+    const { syncState } = useDealAnalyzerStore.getState();
+    expect(syncState.failedDealIds).toContain(id);
+    expect(syncState.lastError).toBe('boom');
+    expect(syncState.pendingCount).toBe(0);
+  });
+
+  it('clears the failed-id flag when a subsequent update succeeds', async () => {
+    vi.mocked(api.saveDeal).mockRejectedValueOnce(new Error('offline'));
+    const { saveDeal, updateSavedDeal } = useDealAnalyzerStore.getState();
+    const id = saveDeal('First fail', makeDraft(), SAMPLE_RESULTS);
+    await flushPromises();
+    expect(useDealAnalyzerStore.getState().syncState.failedDealIds).toContain(id);
+
+    // Subsequent update succeeds — id is cleared from failed set.
+    updateSavedDeal(id, 'Now good', SAMPLE_RESULTS);
+    await flushPromises();
+
+    expect(useDealAnalyzerStore.getState().syncState.failedDealIds).not.toContain(id);
+    expect(useDealAnalyzerStore.getState().syncState.lastError).toBeNull();
+  });
+
+  it('increments pendingCount while a save is in flight', async () => {
+    let resolveApi: (() => void) | null = null;
+    vi.mocked(api.saveDeal).mockImplementationOnce(
+      () => new Promise((resolve) => { resolveApi = () => resolve({}); })
+    );
+    const { saveDeal } = useDealAnalyzerStore.getState();
+    saveDeal('Slow save', makeDraft(), SAMPLE_RESULTS);
+
+    // Before resolving, pendingCount should be 1
+    expect(useDealAnalyzerStore.getState().syncState.pendingCount).toBe(1);
+
+    resolveApi!();
+    await flushPromises();
+    expect(useDealAnalyzerStore.getState().syncState.pendingCount).toBe(0);
+  });
+
+  it('records lastSuccessAt on successful save', async () => {
+    const before = useDealAnalyzerStore.getState().syncState.lastSuccessAt;
+    const { saveDeal } = useDealAnalyzerStore.getState();
+    saveDeal('Yay', makeDraft(), SAMPLE_RESULTS);
+    await flushPromises();
+
+    const after = useDealAnalyzerStore.getState().syncState.lastSuccessAt;
+    expect(after).not.toBe(before);
+    expect(after).not.toBeNull();
+  });
+
+  it('rolls back local delete when api.deleteDeal fails', async () => {
+    const { saveDeal, deleteSavedDeal } = useDealAnalyzerStore.getState();
+    const id = saveDeal('Keeper', makeDraft(), SAMPLE_RESULTS);
+    await flushPromises();
+    expect(useDealAnalyzerStore.getState().savedDeals).toHaveLength(1);
+
+    vi.mocked(api.deleteDeal).mockRejectedValueOnce(new Error('server down'));
+    deleteSavedDeal(id);
+    // Optimistic remove
     expect(useDealAnalyzerStore.getState().savedDeals).toHaveLength(0);
+
+    await flushPromises();
+    // Rolled back after failure — the deal reappears
+    expect(useDealAnalyzerStore.getState().savedDeals.find((d) => d.id === id)).toBeDefined();
+  });
+});
+
+describe('retrySave', () => {
+  it('re-attempts a failed save and clears the failed flag on success', async () => {
+    vi.mocked(api.saveDeal).mockRejectedValueOnce(new Error('first fail'));
+    const { saveDeal, retrySave } = useDealAnalyzerStore.getState();
+    const id = saveDeal('Retry me', makeDraft(), SAMPLE_RESULTS);
+    await flushPromises();
+    expect(useDealAnalyzerStore.getState().syncState.failedDealIds).toContain(id);
+
+    vi.mocked(api.saveDeal).mockResolvedValueOnce({});
+    await retrySave(id);
+    await flushPromises();
+
+    expect(useDealAnalyzerStore.getState().syncState.failedDealIds).not.toContain(id);
+  });
+
+  it('falls back to PUT when POST rejects (deal already exists on server)', async () => {
+    // Set up a scenario where POST fails but PUT succeeds
+    vi.mocked(api.saveDeal).mockRejectedValueOnce(new Error('initial fail'));
+    const { saveDeal, retrySave } = useDealAnalyzerStore.getState();
+    const id = saveDeal('Exists on server', makeDraft(), SAMPLE_RESULTS);
+    await flushPromises();
+
+    vi.mocked(api.saveDeal).mockRejectedValueOnce(new Error('409 conflict'));
+    vi.mocked(api.updateDeal).mockResolvedValueOnce({});
+    await retrySave(id);
+    await flushPromises();
+
+    expect(api.updateDeal).toHaveBeenCalled();
+    expect(useDealAnalyzerStore.getState().syncState.failedDealIds).not.toContain(id);
   });
 });
