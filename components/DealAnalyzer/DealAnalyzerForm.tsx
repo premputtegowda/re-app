@@ -18,6 +18,7 @@ import { ResultsPanel } from './ResultsPanel';
 import { ProFormaGrid, defaultProForma } from './ProFormaGrid';
 import { RehabRentCalculator, simulateFromSchedule } from './RehabRentCalculator';
 import { WizardEditSession, type WizardEditSessionDraft } from './WizardEditSession';
+import type { AutoSaveStatus } from '@/hooks/useDebouncedAutoSave';
 import type { CalcPersistedState } from '@/types';
 import { projectScenario, formatCurrencyCompact } from '@/utils/dealAnalyzerCalc';
 import { useDealAnalyzerStore, type DealAnalyzerDraft } from '@/lib/dealAnalyzerStore';
@@ -626,13 +627,35 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   // to avoid churning every save handler in this file.
   const flashSaved = () => { /* store now tracks success automatically */ };
 
-  // Warn the user before leaving the page if a save is in flight or has
-  // failed — otherwise they could close the tab thinking their work is
-  // saved when it never actually reached the server (the Neil Ave case).
+  // Autosave-within-WizardEditSession status. `pending` = user has typed
+  // and a debounce timer is running; `saving` = save request in flight.
+  // Tracked in a ref so the beforeunload closure sees the latest value
+  // without needing to re-register on every status change.
+  const [autoSaveStatus, setAutoSaveStatus] = useState<AutoSaveStatus>('idle');
+  const autoSaveStatusRef = useRef<AutoSaveStatus>('idle');
+  useEffect(() => { autoSaveStatusRef.current = autoSaveStatus; }, [autoSaveStatus]);
+
+  // Pre-edit snapshot captured when the user enters edit mode. Used by the
+  // Cancel handler to roll back autosaved changes so Cancel still means
+  // "discard my edits" from the user's POV.
+  const preEditSnapshotRef = useRef<{
+    acquisition: CoCAcquisition;
+    operations: CoCOperations;
+    proForma: ProFormaData;
+    refinance: CoCRefinance;
+    isValueAdd: boolean | null;
+    calcState?: CalcPersistedState;
+  } | null>(null);
+
+  // Warn the user before leaving the page if a save is in flight, has
+  // failed, or the wizard has typed-but-not-yet-flushed changes. Without
+  // this, closing the tab during the 1.5s debounce window would lose
+  // typing — same class of bug as the original Neil Ave case.
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
       const s = useDealAnalyzerStore.getState().syncState;
-      if (s.pendingCount > 0 || s.failedDealIds.length > 0) {
+      const autosavePending = autoSaveStatusRef.current === 'pending' || autoSaveStatusRef.current === 'saving';
+      if (s.pendingCount > 0 || s.failedDealIds.length > 0 || autosavePending) {
         e.preventDefault();
         e.returnValue = '';
         return '';
@@ -1223,6 +1246,83 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     savedSnapshot.current = snapshot;
     isDirtyRef.current = false;
     flashSaved();
+  };
+
+  // Snapshot the current committed state and enter edit mode for the given
+  // step. The snapshot lets Cancel roll back any autosaved changes so the
+  // "Cancel = discard" contract still holds even though the wizard now
+  // persists in the background.
+  const enterEditMode = (stepId: number) => {
+    preEditSnapshotRef.current = {
+      acquisition, operations, proForma, refinance, isValueAdd, calcState,
+    };
+    setPausedActiveStep(activeStep);
+    setEditingStep(stepId);
+  };
+
+  // Debounced autosave callback for the active WizardEditSession. Fires
+  // ~1.5s after the user stops typing. Only meaningful when the deal has
+  // already been saved (WizardEditSession only mounts on completed steps,
+  // which implies savedDealId exists). If somehow no deal exists yet, we
+  // no-op — the create path stays on explicit Continue/Save clicks.
+  const handleAutoSaveFromSession = async (draft: WizardEditSessionDraft) => {
+    if (!savedDealId) return;
+    const name = saveName || defaultSaveName(draft.acquisition);
+    const stepNotesObj: Record<number, string> = {};
+    if (opsNotes.trim()) stepNotesObj[3] = opsNotes.trim();
+    const dealDraft: DealAnalyzerDraft = {
+      acquisition: draft.acquisition,
+      operations: draft.operations,
+      proForma: draft.proForma,
+      refinance: draft.refinance,
+      currentStep: activeStep,
+      visitedSteps: Array.from(completedSteps),
+      activeType,
+      ...(draft.calcState ? { calcState: draft.calcState } : {}),
+      ...(Object.keys(stepNotesObj).length > 0 ? { stepNotes: stepNotesObj } : {}),
+    };
+    updateSavedDeal(savedDealId, name, scenarioResults, dealDraft, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined, mcRangesReviewedAt);
+    // Wait for the store's fire-and-forget PUT to settle. If it fails,
+    // throw so the hook status flips to 'error' — the store's syncState
+    // will independently track the failure for the retry indicator.
+    await waitForSyncSettled();
+    const failed = useDealAnalyzerStore.getState().syncState.failedDealIds;
+    if (failed.includes(savedDealId)) {
+      throw new Error('Autosave to backend failed');
+    }
+  };
+
+  // Cancel handler for the WizardEditSession. If any autosave fired during
+  // the session, restore the pre-edit snapshot so Cancel discards those
+  // server-side changes (matching the pre-autosave UX contract).
+  const handleCancelFromSession = (ctx: { hasAutoSaved: boolean }) => {
+    setEditingStep(null);
+    setPausedActiveStep(null);
+    setErrors([]);
+    setErrorStep(null);
+    const snap = preEditSnapshotRef.current;
+    if (ctx.hasAutoSaved && snap && savedDealId) {
+      const restoreDraft: DealAnalyzerDraft = {
+        acquisition: snap.acquisition,
+        operations: snap.operations,
+        proForma: snap.proForma,
+        refinance: snap.refinance,
+        currentStep: activeStep,
+        visitedSteps: Array.from(completedSteps),
+        activeType,
+        ...(snap.calcState ? { calcState: snap.calcState } : {}),
+      };
+      updateSavedDeal(
+        savedDealId,
+        saveName || defaultSaveName(snap.acquisition),
+        scenarioResults,
+        restoreDraft,
+        mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined,
+        mcResults ?? undefined,
+        mcRangesReviewedAt,
+      );
+    }
+    preEditSnapshotRef.current = null;
   };
 
   // ── Save ──
@@ -2531,7 +2631,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                         <button
                           type="button"
                           data-testid={`step-summary-${step.id}`}
-                          onClick={() => { setPausedActiveStep(activeStep); setEditingStep(step.id); }}
+                          onClick={() => enterEditMode(step.id)}
                           className={`w-full flex items-stretch rounded-xl overflow-hidden border transition-all text-left group ${
                             warning
                               ? 'border-amber-300 dark:border-amber-700 hover:border-amber-400'
@@ -2644,10 +2744,10 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                             <WizardEditSession
                               initial={{ acquisition, proForma, refinance, operations, isValueAdd, calcState }}
                               onCommit={(draft) => handleCommitFromSession(step.id, draft)}
-                              onCancel={() => {
-                                setEditingStep(null); setPausedActiveStep(null); setErrors([]); setErrorStep(null);
-                              }}
+                              onCancel={(ctx) => handleCancelFromSession(ctx)}
                               onSaveDraft={(draft) => handleSaveDraftFromSession(draft)}
+                              onAutoSave={handleAutoSaveFromSession}
+                              onAutoSaveStateChange={setAutoSaveStatus}
                               preStabMethod={preStabMethod}
                               defaults={{
                                 propertyMgmtPct: defaultPropertyMgmtPct,
