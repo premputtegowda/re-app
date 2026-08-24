@@ -8,11 +8,19 @@ interface ShareButtonProps {
   dealId: string;
 }
 
+type ShareRole = 'partner' | 'agent';
+
 interface ActiveLink {
   shareToken: string;
   shareUrl: string;
+  role: ShareRole;
   expiresAt: string;
 }
+
+const ROLE_LABEL: Record<ShareRole, string> = {
+  partner: 'Partner',
+  agent: 'Agent',
+};
 
 function timeRemaining(expiresAt: string): string {
   const ms = new Date(expiresAt).getTime() - Date.now();
@@ -26,6 +34,7 @@ function timeRemaining(expiresAt: string): string {
 export function ShareButton({ dealId }: ShareButtonProps) {
   const [open, setOpen] = useState(false);
   const [activeLink, setActiveLink] = useState<ActiveLink | null>(null);
+  const [selectedRole, setSelectedRole] = useState<ShareRole>('partner');
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,8 +65,13 @@ export function ShareButton({ dealId }: ShareButtonProps) {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.generateShareLink(dealId);
-      setActiveLink({ shareToken: data.shareToken, shareUrl: data.shareUrl, expiresAt: data.expiresAt });
+      const data = await api.generateShareLink(dealId, selectedRole);
+      setActiveLink({
+        shareToken: data.shareToken,
+        shareUrl: data.shareUrl,
+        role: (data.role as ShareRole) ?? selectedRole,
+        expiresAt: data.expiresAt,
+      });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to generate link');
     } finally {
@@ -123,19 +137,53 @@ export function ShareButton({ dealId }: ShareButtonProps) {
               </p>
 
               <div className="space-y-2 mb-4">
-                {/* Partner — active */}
-                <div className="flex items-center gap-3 p-3 rounded-lg border-2 border-primary-500 bg-primary-50 dark:bg-primary-900/20">
+                {/* Partner */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedRole('partner')}
+                  className={`w-full flex items-center gap-3 p-3 rounded-lg border-2 transition-colors ${
+                    selectedRole === 'partner'
+                      ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
+                      : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+                  }`}
+                >
                   <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-800 flex items-center justify-center">
                     <Users size={16} className="text-primary-600 dark:text-primary-400" />
                   </div>
-                  <div className="flex-1 min-w-0">
+                  <div className="flex-1 min-w-0 text-left">
                     <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Partner</p>
                     <p className="text-xs text-slate-500 dark:text-slate-400">Full view + run simulations</p>
                   </div>
-                  <div className="w-4 h-4 rounded-full bg-primary-500 flex items-center justify-center flex-shrink-0">
-                    <Check size={10} className="text-white" />
+                  {selectedRole === 'partner' && (
+                    <div className="w-4 h-4 rounded-full bg-primary-500 flex items-center justify-center flex-shrink-0">
+                      <Check size={10} className="text-white" />
+                    </div>
+                  )}
+                </button>
+
+                {/* Agent */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedRole('agent')}
+                  className={`w-full flex items-center gap-3 p-3 rounded-lg border-2 transition-colors ${
+                    selectedRole === 'agent'
+                      ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
+                      : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+                  }`}
+                >
+                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-800 flex items-center justify-center">
+                    <UserCheck size={16} className="text-primary-600 dark:text-primary-400" />
                   </div>
-                </div>
+                  <div className="flex-1 min-w-0 text-left">
+                    <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Agent</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Read-only underwriting summary + PDF download</p>
+                  </div>
+                  {selectedRole === 'agent' && (
+                    <div className="w-4 h-4 rounded-full bg-primary-500 flex items-center justify-center flex-shrink-0">
+                      <Check size={10} className="text-white" />
+                    </div>
+                  )}
+                </button>
 
                 {/* Lender — coming soon */}
                 <div className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-700 opacity-50 cursor-not-allowed">
@@ -150,20 +198,6 @@ export function ShareButton({ dealId }: ShareButtonProps) {
                     Soon
                   </span>
                 </div>
-
-                {/* Buyer's Agent — coming soon */}
-                <div className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-700 opacity-50 cursor-not-allowed">
-                  <div className="flex-shrink-0 w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center">
-                    <UserCheck size={16} className="text-slate-400" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Buyer&apos;s Agent</p>
-                    <p className="text-xs text-slate-400">Market comp highlights</p>
-                  </div>
-                  <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded">
-                    Soon
-                  </span>
-                </div>
               </div>
 
               <button
@@ -172,14 +206,16 @@ export function ShareButton({ dealId }: ShareButtonProps) {
                 disabled={loading}
                 className="w-full py-2 rounded-lg bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium transition-colors disabled:opacity-60"
               >
-                {loading ? 'Generating…' : 'Generate Partner Link'}
+                {loading ? 'Generating…' : `Generate ${ROLE_LABEL[selectedRole]} Link`}
               </button>
             </>
           ) : (
             <>
               <div className="flex items-center gap-2 mb-1">
                 <div className="w-2 h-2 rounded-full bg-green-500" />
-                <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">Partner link active</p>
+                <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  {ROLE_LABEL[activeLink.role]} link active
+                </p>
               </div>
               <div className="flex items-center gap-1 mb-3 text-xs text-slate-400 dark:text-slate-500">
                 <Clock size={11} />
@@ -204,7 +240,9 @@ export function ShareButton({ dealId }: ShareButtonProps) {
               </div>
 
               <p className="text-[11px] text-amber-600 dark:text-amber-400 mb-3">
-                Recipients who add this to their dashboard get a full copy of all inputs.
+                {activeLink.role === 'partner'
+                  ? 'Recipients who add this to their dashboard get a full copy of all inputs.'
+                  : 'Recipients see a read-only underwriting summary and can download it as a PDF.'}
               </p>
 
               <button

@@ -12,6 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@react-pdf/renderer": "^4.7.0",
     "@types/jszip": "^3.4.0",
     "framer-motion": "^12.31.0",
     "jszip": "^3.10.1",

@@ -588,10 +588,10 @@ export const api = {
     }
   },
 
-  async generateShareLink(dealId: string): Promise<{ shareToken: string; shareUrl: string; role: string; expiresAt: string }> {
+  async generateShareLink(dealId: string, role: 'partner' | 'agent' = 'partner'): Promise<{ shareToken: string; shareUrl: string; role: string; expiresAt: string }> {
     const response = await authFetch(`/api/deals/${dealId}/share`, {
       method: 'POST',
-      body: JSON.stringify({ role: 'partner' }),
+      body: JSON.stringify({ role }),
     });
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));

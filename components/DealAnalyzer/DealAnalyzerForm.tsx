@@ -2938,6 +2938,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     operations={operations}
                     proForma={proForma}
                     refinance={refinance}
+                    dealName={saveName || defaultSaveName(acquisition)}
                     mcRanges={mcRanges}
                     onMcRangesChange={setMcRanges}
                     mcResults={mcResults}
