@@ -1,14 +1,24 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Clock, Home, ArrowRight, LogIn, CheckCircle2 } from 'lucide-react';
 import { ResultsPanel } from './ResultsPanel';
+import { UnderwritingSummary } from './UnderwritingSummary';
 import { projectScenario } from '@/utils/dealAnalyzerCalc';
 import { useAuthStore } from '@/lib/authStore';
 import { api, ApiError } from '@/lib/api';
 import type { SavedDeal, CoCResult, CoCScenarioType, CoCScenario } from '@/types';
 import type { MCRanges, SavedMCResults } from '@/utils/monteCarlo';
+
+// Same lazy pattern as ResultsPanel — react-pdf is heavy, load on demand.
+const DownloadPDFButton = dynamic(() => import('./pdf/DownloadPDFButton'), {
+  ssr: false,
+  loading: () => (
+    <span className="inline-flex items-center px-3 py-1.5 text-xs text-slate-400">Loading…</span>
+  ),
+});
 
 interface SharedDealViewProps {
   deal: SavedDeal & { shareRole: string; expiresAt: string };
@@ -158,7 +168,29 @@ export function SharedDealView({ deal, token }: SharedDealViewProps) {
         </div>
       </div>
 
-      {/* Results */}
+      {/* Results — agents see the underwriting summary; partners see the full ResultsPanel */}
+      {deal.shareRole === 'agent' ? (
+        <div className="px-4 pt-6 pb-4">
+          <div className="max-w-4xl mx-auto mb-4 flex justify-end">
+            <DownloadPDFButton
+              dealName={deal.name || deal.acquisition.propertyAddress || 'Untitled Deal'}
+              acquisition={deal.acquisition}
+              operations={deal.operations}
+              proForma={deal.proForma}
+              refinance={deal.refinance}
+              result={result}
+            />
+          </div>
+          <UnderwritingSummary
+            dealName={deal.name || deal.acquisition.propertyAddress || 'Untitled Deal'}
+            acquisition={deal.acquisition}
+            operations={deal.operations}
+            proForma={deal.proForma}
+            refinance={deal.refinance}
+            result={result}
+          />
+        </div>
+      ) : (
       <div className="max-w-2xl mx-auto px-4 pt-6 space-y-5">
         <ResultsPanel
           result={result}
@@ -205,6 +237,7 @@ export function SharedDealView({ deal, token }: SharedDealViewProps) {
           </div>
         </div>
       </div>
+      )}
 
       {/* Confirmation modal */}
       {showConfirm && (

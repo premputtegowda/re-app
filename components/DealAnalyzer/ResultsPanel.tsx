@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { ChevronDown, ChevronRight, Check } from 'lucide-react';
 import { Card } from '@/components/UI/Card';
 import type { CoCResult, CoCAcquisition, CoCOperations, CoCRefinance, ProFormaData } from '@/types';
@@ -9,6 +10,15 @@ import { DealCharts } from './DealAnalyzerCharts';
 import { WhatIfPanel } from './WhatIfPanel';
 import { MonteCarloPanel } from './MonteCarloPanel';
 import type { MCRanges, SavedMCResults } from '@/utils/monteCarlo';
+
+// react-pdf is heavy and browser-only — lazy-load it so the results screen
+// doesn't pay the bundle cost until the user actually needs a PDF.
+const DownloadPDFButton = dynamic(() => import('./pdf/DownloadPDFButton'), {
+  ssr: false,
+  loading: () => (
+    <span className="inline-flex items-center px-3 py-1.5 text-xs text-slate-400">Loading…</span>
+  ),
+});
 
 // ── Verdict badge ───────────────────────────────────────────────────────────────
 
@@ -314,6 +324,8 @@ interface ResultsPanelProps {
   operations: CoCOperations;
   proForma: ProFormaData;
   refinance: CoCRefinance;
+  /** Deal name — used as the PDF filename base and header title */
+  dealName?: string;
   mcRanges?: MCRanges | null;
   onMcRangesChange?: (r: MCRanges) => void;
   mcResults?: SavedMCResults | null;
@@ -341,7 +353,7 @@ function computeAvgRents(acquisition: CoCAcquisition): { units: number; avgTarge
   return { units: acquisition.units || 1, avgTargetRent: 0, avgPreStabRent: 0 };
 }
 
-export function ResultsPanel({ result, acquisition, operations, proForma, refinance, mcRanges, onMcRangesChange, mcResults, onMcResultsChange, mcSimRunRef, calcPhase = 'idle', calcState, onCalcPhaseChange }: ResultsPanelProps) {
+export function ResultsPanel({ result, acquisition, operations, proForma, refinance, dealName, mcRanges, onMcRangesChange, mcResults, onMcResultsChange, mcSimRunRef, calcPhase = 'idle', calcState, onCalcPhaseChange }: ResultsPanelProps) {
   const [activeTab, setActiveTab] = useState<ResultTab>('summary');
   const { units, avgTargetRent, avgPreStabRent } = computeAvgRents(acquisition);
   const { totalInvested, avgCoCReturn, irr, equityMultiple, peakCoCReturn, totalCashFlow } = result;
@@ -387,7 +399,17 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
           <>
             {/* Verdict + invested */}
             <div className="flex items-center justify-between mb-4">
-              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${v.color}`}>{v.label}</span>
+              <div className="flex items-center gap-2">
+                <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${v.color}`}>{v.label}</span>
+                <DownloadPDFButton
+                  dealName={dealName || acquisition.propertyAddress || 'Untitled Deal'}
+                  acquisition={acquisition}
+                  operations={operations}
+                  proForma={proForma}
+                  refinance={refinance}
+                  result={result}
+                />
+              </div>
               <div className="text-right">
                 <p className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wide">Total Invested</p>
                 <p className="text-sm font-bold text-slate-700 dark:text-slate-300 tabular-nums">{formatCurrency(totalInvested)}</p>

@@ -228,8 +228,11 @@ async def delete_deal(
 
 # ── Sharing ────────────────────────────────────────────────────────────────────
 
+ALLOWED_SHARE_ROLES = {"partner", "agent"}
+
+
 class ShareRequest(BaseModel):
-    role: str  # 'partner' only in v1
+    role: str  # 'partner' or 'agent'
 
 
 class ShareResponse(BaseModel):
@@ -247,11 +250,11 @@ async def generate_share_link(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Generate or refresh a share link for a deal. Only 'partner' role is supported in v1."""
-    if payload.role != "partner":
+    """Generate or refresh a share link for a deal. Supported roles: partner, agent."""
+    if payload.role not in ALLOWED_SHARE_ROLES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only 'partner' role is supported.",
+            detail=f"Role must be one of: {', '.join(sorted(ALLOWED_SHARE_ROLES))}",
         )
 
     result = await db.execute(
