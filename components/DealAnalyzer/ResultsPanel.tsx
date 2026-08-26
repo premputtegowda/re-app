@@ -6,6 +6,7 @@ import { ChevronDown, ChevronRight, Check } from 'lucide-react';
 import { Card } from '@/components/UI/Card';
 import type { CoCResult, CoCAcquisition, CoCOperations, CoCRefinance, ProFormaData } from '@/types';
 import { formatCurrency, formatPct, formatMultiple } from '@/utils/dealAnalyzerCalc';
+import { buildProFormaMatrix, enrichProFormaForDisplay } from '@/utils/dealSummary';
 import { DealCharts } from './DealAnalyzerCharts';
 import { WhatIfPanel } from './WhatIfPanel';
 import { MonteCarloPanel } from './MonteCarloPanel';
@@ -334,6 +335,9 @@ interface ResultsPanelProps {
   mcSimRunRef?: React.MutableRefObject<(() => Promise<void>) | null>;
   calcPhase?: CalcPhase;
   calcState?: import('@/types').CalcPersistedState;
+  /** Persisted market assumptions — forwarded to PDF download for the Cap
+   *  Rate Assumptions section. Optional. */
+  aiAssumptions?: Record<string, unknown> | null;
   onCalcPhaseChange?: (phase: CalcPhase) => void;
 }
 
@@ -353,7 +357,71 @@ function computeAvgRents(acquisition: CoCAcquisition): { units: number; avgTarge
   return { units: acquisition.units || 1, avgTargetRent: 0, avgPreStabRent: 0 };
 }
 
-export function ResultsPanel({ result, acquisition, operations, proForma, refinance, dealName, mcRanges, onMcRangesChange, mcResults, onMcResultsChange, mcSimRunRef, calcPhase = 'idle', calcState, onCalcPhaseChange }: ResultsPanelProps) {
+// ── Pro Forma detail (read-only, collapsible) ──────────────────────────────
+// Shown inside the Projections tab. Hidden by default so the returns metrics
+// stay the primary focus; user opens the <details> when they want line detail.
+
+function ProFormaDetailReadOnly({ proForma, projectionYears, acquisition, aiAssumptions }: { proForma: ProFormaData; projectionYears: number; acquisition: CoCAcquisition; aiAssumptions?: Record<string, unknown> | null }) {
+  const enrichedPf = enrichProFormaForDisplay(proForma, acquisition, aiAssumptions);
+  const matrix = buildProFormaMatrix(enrichedPf, projectionYears);
+  const years = Array.from({ length: projectionYears }, (_, i) => i + 1);
+  return (
+    <Card>
+      <details className="group">
+        <summary className="cursor-pointer flex items-center justify-between py-1 select-none">
+          <div>
+            <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Pro Forma Detail</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Line-item × year matrix — T-12 through Yr {projectionYears}. Click to expand.
+            </p>
+          </div>
+          <ChevronRight size={16} className="text-slate-400 transition-transform group-open:rotate-90" />
+        </summary>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+                <th className="text-left py-2 px-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 sticky left-0 bg-slate-50 dark:bg-slate-800/50 z-10">Line Item</th>
+                <th className="text-right py-2 px-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">T-12</th>
+                {years.map((y) => (
+                  <th key={y} className="text-right py-2 px-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">Yr {y}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {matrix.map((row, i) => {
+                if (row.isHeader) {
+                  return (
+                    <tr key={i}>
+                      <td colSpan={years.length + 2} className="py-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/30">
+                        {row.label}
+                      </td>
+                    </tr>
+                  );
+                }
+                const rowClass = row.isBold
+                  ? 'font-semibold border-b border-slate-300 dark:border-slate-600'
+                  : 'border-b border-slate-100 dark:border-slate-800';
+                const cellClass = row.isPositive ? 'text-emerald-600' : '';
+                return (
+                  <tr key={i} className={rowClass}>
+                    <td className={`py-1.5 px-2 text-slate-700 dark:text-slate-300 sticky left-0 bg-white dark:bg-slate-900 z-10 ${cellClass}`}>{row.label}</td>
+                    <td className={`py-1.5 px-2 text-right tabular-nums ${cellClass}`}>{formatCurrency(row.t12)}</td>
+                    {row.years.map((v, j) => (
+                      <td key={j} className={`py-1.5 px-2 text-right tabular-nums ${cellClass}`}>{formatCurrency(v)}</td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </Card>
+  );
+}
+
+export function ResultsPanel({ result, acquisition, operations, proForma, refinance, dealName, mcRanges, onMcRangesChange, mcResults, onMcResultsChange, mcSimRunRef, calcPhase = 'idle', calcState, onCalcPhaseChange, aiAssumptions }: ResultsPanelProps) {
   const [activeTab, setActiveTab] = useState<ResultTab>('summary');
   const { units, avgTargetRent, avgPreStabRent } = computeAvgRents(acquisition);
   const { totalInvested, avgCoCReturn, irr, equityMultiple, peakCoCReturn, totalCashFlow } = result;
@@ -408,6 +476,7 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
                   proForma={proForma}
                   refinance={refinance}
                   result={result}
+                  aiAssumptions={aiAssumptions ?? null}
                 />
               </div>
               <div className="text-right">
@@ -499,6 +568,12 @@ export function ResultsPanel({ result, acquisition, operations, proForma, refina
         <div className="space-y-4">
           <DealCharts projections={result.yearlyProjections} mcResults={mcResults} />
           <ProjectionTable result={result} />
+          <ProFormaDetailReadOnly
+            proForma={proForma}
+            projectionYears={acquisition.projectionYears}
+            acquisition={acquisition}
+            aiAssumptions={aiAssumptions ?? null}
+          />
         </div>
       )}
 

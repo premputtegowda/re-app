@@ -1,6 +1,10 @@
 'use client';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+// Blank means "use current origin" — requests go to /api/... which the
+// Next.js rewrite proxies to the backend (same-origin, no CORS preflight).
+// Set NEXT_PUBLIC_API_URL to a full URL only if you need to override
+// (e.g. hitting a different backend from the frontend directly).
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 // Access token lives in memory only — never written to localStorage.
 // The refresh token is an HttpOnly cookie managed entirely by the browser.
@@ -540,6 +544,7 @@ export const api = {
     mcResults?: unknown;
     currentStep?: number;
     calcState?: unknown;
+    aiAssumptions?: unknown;
     stepNotes?: unknown;
     savedAt: string;
     updatedAt: string;
@@ -567,6 +572,7 @@ export const api = {
     mcResults?: unknown;
     currentStep?: number;
     calcState?: unknown;
+    aiAssumptions?: unknown;
     updatedAt: string;
   }) {
     const response = await authFetch(`/api/deals/${dealId}`, {
@@ -637,6 +643,50 @@ export const api = {
     } catch {
       return null;
     }
+  },
+
+  // ── AI Assumptions ────────────────────────────────────────────────────
+
+  async generateAssumptions(payload: {
+    address: string;
+    unit_mix: Array<{
+      beds: number;
+      baths: number;
+      count: number;
+      in_place_rent_monthly: number;
+      target_rent_monthly: number;
+      rental_type?: 'LTR' | 'MTR' | 'STR';
+    }>;
+    purchase_price: number;
+    nrsf?: number;
+  }): Promise<{
+    assumptions: Record<string, unknown>;
+    submarket: { census_tract: string; county_fips: string; matched_address: string } | null;
+    cost: {
+      serper_usd: number;
+      serper_search_count: number;
+      gemini_usd: number;
+      gemini_input_tokens: number;
+      gemini_output_tokens: number;
+      total_usd: number;
+      by_category: Array<{
+        category: string;
+        submarket_key: string | null;
+        cache_hit: boolean;
+        searches_run: number;
+        cost_usd: number;
+      }>;
+    };
+  }> {
+    const response = await authFetch('/api/assumptions/generate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new ApiError(response.status, error.detail || 'Failed to generate assumptions');
+    }
+    return response.json();
   },
 
   // ── Feedback ──────────────────────────────────────────────────────────

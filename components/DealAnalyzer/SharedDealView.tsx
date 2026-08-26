@@ -7,6 +7,7 @@ import { Clock, Home, ArrowRight, LogIn, CheckCircle2 } from 'lucide-react';
 import { ResultsPanel } from './ResultsPanel';
 import { UnderwritingSummary } from './UnderwritingSummary';
 import { projectScenario } from '@/utils/dealAnalyzerCalc';
+import { enrichProFormaForDisplay } from '@/utils/dealSummary';
 import { useAuthStore } from '@/lib/authStore';
 import { api, ApiError } from '@/lib/api';
 import type { SavedDeal, CoCResult, CoCScenarioType, CoCScenario } from '@/types';
@@ -74,7 +75,17 @@ export function SharedDealView({ deal, token }: SharedDealViewProps) {
     }
   }, [isAuthenticated, searchParams, hasDealAnalyzer, hasAnyAccess, user?.email]);
 
-  // Compute result client-side from deal inputs
+  // Enrich the persisted pf so downstream returns / projections / grid all
+  // use the same data — fills in AI-populated opex categories, derives
+  // strategyByType from unit mix, and normalizes legacy monthly stabilizedValue
+  // to annual. Without this, `projectScenario` runs on stale pf and produces
+  // returns that don't match the app view.
+  const enrichedProForma = enrichProFormaForDisplay(deal.proForma, deal.acquisition, deal.aiAssumptions ?? null);
+
+  // Compute result client-side from enriched inputs. We recompute (rather than
+  // trust `deal.results.base`) because the persisted result was calculated with
+  // stale pf; the enrichment changes opex + strategy split, so we need a fresh
+  // projection.
   const resultRef = useRef<CoCResult | null>(null);
   if (!resultRef.current) {
     const scenario: CoCScenario = {
@@ -83,13 +94,12 @@ export function SharedDealView({ deal, token }: SharedDealViewProps) {
       scenarioType: 'base' as CoCScenarioType,
       acquisition: deal.acquisition,
       operations: deal.operations,
-      proForma: deal.proForma,
+      proForma: enrichedProForma,
       refinance: deal.refinance,
       createdAt: deal.savedAt,
       updatedAt: deal.updatedAt,
     };
-    const savedResult = (deal.results as Partial<Record<CoCScenarioType, CoCResult>>)?.base;
-    resultRef.current = savedResult ?? projectScenario(scenario);
+    resultRef.current = projectScenario(scenario);
   }
   const result = resultRef.current;
 
@@ -176,18 +186,20 @@ export function SharedDealView({ deal, token }: SharedDealViewProps) {
               dealName={deal.name || deal.acquisition.propertyAddress || 'Untitled Deal'}
               acquisition={deal.acquisition}
               operations={deal.operations}
-              proForma={deal.proForma}
+              proForma={enrichedProForma}
               refinance={deal.refinance}
               result={result}
+              aiAssumptions={deal.aiAssumptions ?? null}
             />
           </div>
           <UnderwritingSummary
             dealName={deal.name || deal.acquisition.propertyAddress || 'Untitled Deal'}
             acquisition={deal.acquisition}
             operations={deal.operations}
-            proForma={deal.proForma}
+            proForma={enrichedProForma}
             refinance={deal.refinance}
             result={result}
+            aiAssumptions={deal.aiAssumptions ?? null}
           />
         </div>
       ) : (
@@ -196,13 +208,14 @@ export function SharedDealView({ deal, token }: SharedDealViewProps) {
           result={result}
           acquisition={deal.acquisition}
           operations={deal.operations}
-          proForma={deal.proForma}
+          proForma={enrichedProForma}
           refinance={deal.refinance}
           mcRanges={mcRanges}
           onMcRangesChange={setMcRanges}
           mcResults={mcResults}
           onMcResultsChange={setMcResults}
           calcState={deal.calcState}
+          aiAssumptions={deal.aiAssumptions ?? null}
         />
 
         {/* Add to dashboard CTA */}

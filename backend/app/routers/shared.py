@@ -29,6 +29,7 @@ class SharedDealResponse(BaseModel):
     mcResults: Any | None
     currentStep: int | None
     calcState: dict[str, Any] | None
+    aiAssumptions: dict[str, Any] | None
     savedAt: str
     updatedAt: str
     shareRole: str
@@ -78,6 +79,7 @@ async def get_shared_deal(
         mcResults=deal.mc_results_data,
         currentStep=deal.current_step,
         calcState=deal.calc_state_data,
+        aiAssumptions=deal.ai_assumptions_data,
         savedAt=deal.saved_at.isoformat(),
         updatedAt=deal.updated_at.isoformat(),
         shareRole=deal.share_role or "partner",

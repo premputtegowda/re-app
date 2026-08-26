@@ -8,5 +8,6 @@ from app.models.invitation import Invitation
 from app.models.access_request import AccessRequest
 from app.models.saved_deal import SavedDeal
 from app.models.feedback import Feedback
+from app.models.submarket_cache import SubmarketCache
 
-__all__ = ["User", "Category", "Property", "Entry", "RefreshToken", "Attachment", "Invitation", "AccessRequest", "SavedDeal", "Feedback"]
+__all__ = ["User", "Category", "Property", "Entry", "RefreshToken", "Attachment", "Invitation", "AccessRequest", "SavedDeal", "Feedback", "SubmarketCache"]

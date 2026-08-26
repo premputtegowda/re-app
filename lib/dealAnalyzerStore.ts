@@ -19,6 +19,7 @@ export interface DealAnalyzerDraft {
   visitedSteps: number[];
   activeType: CoCScenarioType;
   calcState?: CalcPersistedState;
+  aiAssumptions?: Record<string, unknown>;
   stepNotes?: Record<number, string>;
 }
 
@@ -207,6 +208,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
             ...(mcRangesReviewedAt !== undefined ? { mcRangesReviewedAt } : {}),
             ...(mcResults !== undefined ? { mcResults } : {}),
             ...(draft.calcState ? { calcState: draft.calcState } : {}),
+            ...(draft.aiAssumptions ? { aiAssumptions: draft.aiAssumptions } : {}),
             ...(draft.stepNotes && Object.keys(draft.stepNotes).length > 0 ? { stepNotes: draft.stepNotes } : {}),
             savedAt,
             updatedAt: savedAt,
@@ -229,6 +231,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
             mcRangesReviewedAt: mcRangesReviewedAt ?? null,
             mcResults,
             calcState: draft.calcState,
+            aiAssumptions: draft.aiAssumptions,
             stepNotes: draft.stepNotes,
             savedAt,
             updatedAt: savedAt,
@@ -250,6 +253,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
                   proForma: draft.proForma,
                   refinance: draft.refinance,
                   ...(draft.calcState !== undefined ? { calcState: draft.calcState } : {}),
+                  ...(draft.aiAssumptions !== undefined ? { aiAssumptions: draft.aiAssumptions } : {}),
                   ...(draft.stepNotes !== undefined ? { stepNotes: draft.stepNotes } : {}),
                 } : {}),
                 ...(mcRanges !== undefined ? { mcRanges } : {}),
@@ -273,6 +277,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
             mcResults: mcResults !== undefined ? mcResults : deal.mcResults,
             currentStep: deal.currentStep,
             calcState: draft?.calcState ?? deal.calcState,
+            aiAssumptions: draft?.aiAssumptions ?? deal.aiAssumptions,
             updatedAt,
           })).catch(() => { /* error already recorded */ });
         },
@@ -346,6 +351,7 @@ export const useDealAnalyzerStore = create<CoCStore>()(
               mcResults: d.mcResults ?? undefined,
               currentStep: d.currentStep ?? undefined,
               calcState: d.calcState ?? undefined,
+              aiAssumptions: d.aiAssumptions ?? undefined,
               savedAt: d.savedAt,
               updatedAt: d.updatedAt,
             }));

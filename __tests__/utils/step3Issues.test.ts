@@ -90,12 +90,25 @@ describe('buildStep3Issues — rent', () => {
     expect(issuesById(issues, 'rent.missing_target')).toBeUndefined();
   });
 
-  it('MFR with any unit missing target rent → rent.missing_target error', () => {
+  it('MFR with any unit missing both in-place AND target → rent.missing_target error', () => {
     const issues = buildStep3Issues(args({
-      acquisition: mfrAcq([mfrUnit({ rentMonthly: 1_500 }), mfrUnit({ id: 'b', rentMonthly: 0 })]),
+      acquisition: mfrAcq([
+        mfrUnit({ rentMonthly: 1_500, inPlaceRent: 1_000 }),
+        mfrUnit({ id: 'b', rentMonthly: 0, inPlaceRent: 0 }),
+      ]),
     }));
     expect(findIssue(issues, 'rent.missing_target')).toBeDefined();
     expect(findIssue(issues, 'rent.missing_target')?.severity).toBe('error');
+  });
+
+  it('MFR with unit missing target but has in-place → no issue (in-place satisfies)', () => {
+    const issues = buildStep3Issues(args({
+      acquisition: mfrAcq([
+        mfrUnit({ rentMonthly: 1_500, inPlaceRent: 1_000 }),
+        mfrUnit({ id: 'b', rentMonthly: 0, inPlaceRent: 1_200 }),
+      ]),
+    }));
+    expect(findIssue(issues, 'rent.missing_target')).toBeUndefined();
   });
 
   it('SFR with target rent → no issue', () => {
@@ -103,9 +116,14 @@ describe('buildStep3Issues — rent', () => {
     expect(findIssue(issues, 'rent.missing_target')).toBeUndefined();
   });
 
-  it('SFR with no target rent AND no proForma fallback → rent.missing_target', () => {
+  it('SFR with no target rent AND no in-place AND no proForma fallback → rent.missing_target', () => {
     const issues = buildStep3Issues(args({ acquisition: sfrAcq(0), proForma: pf(0) }));
     expect(findIssue(issues, 'rent.missing_target')).toBeDefined();
+  });
+
+  it('SFR with in-place rent only → no issue (in-place satisfies)', () => {
+    const issues = buildStep3Issues(args({ acquisition: sfrAcq(0, 1_500), proForma: pf(0) }));
+    expect(findIssue(issues, 'rent.missing_target')).toBeUndefined();
   });
 
   it('SFR with no target rent BUT proForma.grossRent.stabilized > 0 → no issue (fallback satisfies)', () => {
@@ -113,12 +131,12 @@ describe('buildStep3Issues — rent', () => {
     expect(findIssue(issues, 'rent.missing_target')).toBeUndefined();
   });
 
-  it('regression: the broken prod deal shape — MFR with all rentMonthly=0 → rent.missing_target', () => {
+  it('regression: the broken prod deal shape — MFR with all rentMonthly=0 AND all inPlaceRent=0 → rent.missing_target', () => {
     // Mirrors deal 51acb5e9-d272-4284-96a8-ad86dcb01dbd from the original
     // user-reported repro. Persistence was the real bug; the warning was
     // correct. Pin the warning so we don't accidentally silence it.
     const issues = buildStep3Issues(args({
-      acquisition: mfrAcq([mfrUnit({ count: 16, rentMonthly: 0 })]),
+      acquisition: mfrAcq([mfrUnit({ count: 16, rentMonthly: 0, inPlaceRent: 0 })]),
     }));
     expect(findIssue(issues, 'rent.missing_target')).toBeDefined();
   });
@@ -257,7 +275,7 @@ describe('buildStep3Issues — stabilization', () => {
 describe('selectors', () => {
   it('hasBlockingIssue returns true when any error exists', () => {
     const issues = buildStep3Issues(args({
-      acquisition: mfrAcq([mfrUnit({ rentMonthly: 0 })]),
+      acquisition: mfrAcq([mfrUnit({ rentMonthly: 0, inPlaceRent: 0 })]),
     }));
     expect(hasBlockingIssue(issues)).toBe(true);
   });
@@ -274,7 +292,7 @@ describe('selectors', () => {
   it('sectionHasError finds errors scoped to a section', () => {
     const issues = buildStep3Issues(args({
       isValueAdd: true,
-      acquisition: mfrAcq([mfrUnit({ rentMonthly: 0 })]),
+      acquisition: mfrAcq([mfrUnit({ rentMonthly: 0, inPlaceRent: 0 })]),
     }));
     expect(sectionHasError(issues, 'rent')).toBe(true);
     expect(sectionHasError(issues, 'valueAdd')).toBe(true); // no units = error
@@ -284,7 +302,7 @@ describe('selectors', () => {
   it('blockingSections returns unique sections in first-seen order', () => {
     const issues = buildStep3Issues(args({
       isValueAdd: true,
-      acquisition: mfrAcq([mfrUnit({ rentMonthly: 0, unitsToRenovate: 2 })]),
+      acquisition: mfrAcq([mfrUnit({ rentMonthly: 0, inPlaceRent: 0, unitsToRenovate: 2 })]),
       stabDuration: 0,
     }));
     // rent missing → rent; stab duration 0 → stab. value-add ok (has units).

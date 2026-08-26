@@ -2,7 +2,7 @@
 
 import type { CoCAcquisition, CoCCostItem, CoCOperations, CoCRefinance, CoCResult, ProFormaData, CoCYearlyProjection } from '@/types';
 import { formatCurrency, formatPct, formatMultiple } from '@/utils/dealAnalyzerCalc';
-import { buildUnitMixRentRows, buildProFormaMatrix } from '@/utils/dealSummary';
+import { buildUnitMixRentRows, buildProFormaMatrix, enrichProFormaForDisplay, computeOpexBreakdown, getDisplayVacancyCredit } from '@/utils/dealSummary';
 
 interface UnderwritingSummaryProps {
   dealName: string;
@@ -12,6 +12,8 @@ interface UnderwritingSummaryProps {
   refinance: CoCRefinance;
   result: CoCResult;
   generatedAt?: Date;
+  /** Persisted market assumptions block — used to render Cap Rate Assumptions. */
+  aiAssumptions?: Record<string, unknown> | null;
 }
 
 function sumItems(items: { amount: number }[] = []): number {
@@ -172,10 +174,24 @@ export function UnderwritingSummary({
   refinance,
   result,
   generatedAt = new Date(),
+  aiAssumptions,
 }: UnderwritingSummaryProps) {
   void operations;
 
   const address = acquisition.propertyAddress || '';
+  // Pull cap-rate market assumptions from persisted block, if present.
+  const capBlock = (aiAssumptions?.cap_rate_estimation ?? null) as {
+    current_market_cap_rate_pct?: number | null;
+    exit_cap_rate_pct?: number | null;
+    assumption?: string;
+    source?: string;
+  } | null;
+  const entryCap = capBlock?.current_market_cap_rate_pct ?? null;
+  const exitCapFromAi = capBlock?.exit_cap_rate_pct ?? null;
+  const capSpread = entryCap != null && exitCapFromAi != null ? exitCapFromAi - entryCap : null;
+  const impliedValueAtEntry = entryCap != null && entryCap > 0 && result.yearlyProjections[0]
+    ? (result.yearlyProjections[0].noi / (entryCap / 100))
+    : null;
   const totalUnits = acquisition.propertyType === 'mfr' && acquisition.unitMix?.length
     ? acquisition.unitMix.reduce((s, e) => s + e.count, 0)
     : 1;
@@ -237,17 +253,17 @@ export function UnderwritingSummary({
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <MetricCard
             label="Year 1 CoC"
-            value={formatPct((firstYear?.coCReturn ?? 0) * 100)}
+            value={formatPct(firstYear?.coCReturn ?? 0)}
             sub="Cash-on-cash return, year 1"
           />
           <MetricCard
             label="Avg CoC"
-            value={formatPct(result.avgCoCReturn * 100)}
+            value={formatPct(result.avgCoCReturn)}
             sub="Averaged over projection"
           />
           <MetricCard
             label="IRR"
-            value={result.irr === null ? '—' : formatPct(result.irr * 100)}
+            value={result.irr === null ? '—' : formatPct(result.irr)}
             sub="Internal rate of return"
           />
           <MetricCard
@@ -441,8 +457,15 @@ export function UnderwritingSummary({
             <KV label="Annual Rent Growth" value={formatPct(proForma.grossRent.growthPct)} />
           </div>
           <div>
-            <KV label="Vacancy" value={formatPct(proForma.vacancyPct.stabilized)} />
-            <KV label="Credit Loss" value={formatPct(proForma.creditLossPct.stabilized)} />
+            {(() => {
+              const vc = getDisplayVacancyCredit(proForma);
+              return (
+                <>
+                  <KV label="Vacancy" value={formatPct(vc.vacancyPct)} />
+                  <KV label="Credit Loss" value={formatPct(vc.creditLossPct)} />
+                </>
+              );
+            })()}
           </div>
         </div>
 
@@ -450,22 +473,32 @@ export function UnderwritingSummary({
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 dark:border-slate-700">
-                <th className="text-left py-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">Line Item</th>
-                <th className="text-right py-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">Stabilized</th>
-                <th className="text-right py-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">Growth</th>
+              <tr className="border-b border-slate-200 dark:border-slate-700 text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                <th className="text-left py-2">Line Item</th>
+                <th className="text-right py-2">Total $/yr</th>
+                <th className="text-right py-2">$/unit/yr</th>
+                <th className="text-right py-2">$/unit/mo</th>
+                <th className="text-right py-2">Growth</th>
               </tr>
             </thead>
             <tbody>
-              {proForma.expenses.map((exp) => (
-                <tr key={exp.id} className="border-b border-slate-100 dark:border-slate-800">
-                  <td className="py-1.5 text-slate-700 dark:text-slate-300">{exp.name}</td>
-                  <td className="py-1.5 text-right tabular-nums">
-                    {exp.isPercentOfEGI ? `${exp.stabilizedValue}% of EGI` : `${formatCurrency(exp.stabilizedValue)}/mo`}
-                  </td>
-                  <td className="py-1.5 text-right tabular-nums">{formatPct(exp.growthPct)}</td>
-                </tr>
-              ))}
+              {(() => {
+                // Hide zero-value rows — an empty line item is just noise.
+                return proForma.expenses.filter((exp) => (exp.stabilizedValue ?? 0) > 0).map((exp) => {
+                  const b = computeOpexBreakdown(exp.name, exp.stabilizedValue, exp.isPercentOfEGI, acquisition, proForma);
+                  return (
+                    <tr key={exp.id} className="border-b border-slate-100 dark:border-slate-800">
+                      <td className="py-1.5 text-slate-700 dark:text-slate-300">
+                        {exp.name}{exp.isPercentOfEGI ? ` (${exp.stabilizedValue}% EGI)` : ''}
+                      </td>
+                      <td className="py-1.5 text-right tabular-nums">{formatCurrency(b.annual)}</td>
+                      <td className="py-1.5 text-right tabular-nums">{formatCurrency(b.perUnitYr)}</td>
+                      <td className="py-1.5 text-right tabular-nums">{formatCurrency(b.perUnitMo)}</td>
+                      <td className="py-1.5 text-right tabular-nums">{formatPct(exp.growthPct)}</td>
+                    </tr>
+                  );
+                });
+              })()}
             </tbody>
           </table>
         </div>
@@ -485,6 +518,31 @@ export function UnderwritingSummary({
                 <KV label="Refi Closing Costs" value={formatPct(refinance.refiCostPct)} />
               </div>
             </div>
+          </>
+        )}
+
+        {capBlock && (entryCap != null || exitCapFromAi != null) && (
+          <>
+            <SectionTitle>Cap Rate Assumptions</SectionTitle>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8">
+              <div>
+                {entryCap != null && <KV label="Current Market Cap" value={formatPct(entryCap)} />}
+                {exitCapFromAi != null && <KV label="Exit Cap" value={formatPct(exitCapFromAi)} />}
+                {capSpread != null && (
+                  <KV label="Spread" value={`${capSpread >= 0 ? '+' : ''}${capSpread.toFixed(2)}%`} />
+                )}
+              </div>
+              <div>
+                {impliedValueAtEntry != null && (
+                  <KV label="Implied Value @ Entry" value={formatCurrency(impliedValueAtEntry)} />
+                )}
+              </div>
+            </div>
+            {capBlock.assumption && (
+              <p className="text-xs text-slate-500 dark:text-slate-400 italic mt-2">
+                {capBlock.assumption}
+              </p>
+            )}
           </>
         )}
 
@@ -532,7 +590,7 @@ export function UnderwritingSummary({
                   <td className={`py-1.5 text-right tabular-nums font-semibold ${p.cashFlow >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                     {formatCurrency(p.cashFlow)}
                   </td>
-                  <td className="py-1.5 text-right tabular-nums">{formatPct(p.coCReturn * 100)}</td>
+                  <td className="py-1.5 text-right tabular-nums">{formatPct(p.coCReturn)}</td>
                 </tr>
               ))}
             </tbody>
@@ -541,7 +599,8 @@ export function UnderwritingSummary({
 
         <SectionTitle>Operation Grid (Pro Forma Detail)</SectionTitle>
         {(() => {
-          const matrix = buildProFormaMatrix(proForma, acquisition.projectionYears);
+          const enrichedPf = enrichProFormaForDisplay(proForma, acquisition, aiAssumptions);
+          const matrix = buildProFormaMatrix(enrichedPf, acquisition.projectionYears);
           const years = Array.from({ length: acquisition.projectionYears }, (_, i) => i + 1);
           return (
             <div className="overflow-x-auto">
@@ -599,10 +658,10 @@ export function UnderwritingSummary({
             <KV label="Terminal Equity" value={formatCurrency(result.terminalEquity)} />
           </div>
           <div>
-            <KV label="Average CoC" value={formatPct(result.avgCoCReturn * 100)} />
-            <KV label="Peak CoC" value={formatPct(result.peakCoCReturn * 100)} />
+            <KV label="Average CoC" value={formatPct(result.avgCoCReturn)} />
+            <KV label="Peak CoC" value={formatPct(result.peakCoCReturn)} />
             <KV label="Equity Multiple" value={formatMultiple(result.equityMultiple)} />
-            <KV label="IRR" value={result.irr === null ? '—' : formatPct(result.irr * 100)} />
+            <KV label="IRR" value={result.irr === null ? '—' : formatPct(result.irr)} />
           </div>
         </div>
       </section>

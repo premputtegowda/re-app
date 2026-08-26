@@ -2,7 +2,13 @@
 
 import { Home, Building2, Plus, Trash2, AlertTriangle } from 'lucide-react';
 import { AddressAutocomplete } from '@/components/UI/AddressAutocomplete';
-import type { CoCAcquisition, CoCUnitMixEntry } from '@/types';
+import type { CoCAcquisition, CoCUnitMixEntry, RentalType } from '@/types';
+
+const RENTAL_TYPES: { value: RentalType; label: string; sub: string }[] = [
+  { value: 'LTR', label: 'LTR', sub: 'Long-term' },
+  { value: 'MTR', label: 'MTR', sub: 'Mid-term' },
+  { value: 'STR', label: 'STR', sub: 'Short-term' },
+];
 
 const newUnitEntry = (): CoCUnitMixEntry => ({
   id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
@@ -12,12 +18,38 @@ const newUnitEntry = (): CoCUnitMixEntry => ({
   inPlaceRent: 0,
   preStabRent: 0,
   rentMonthly: 0,
+  rentalType: 'LTR',
 });
 
 interface StepPropertyProps {
-  data: Pick<CoCAcquisition, 'propertyAddress' | 'propertyType' | 'units' | 'sfrBeds' | 'sfrBaths' | 'sfrInPlaceRent' | 'sfrPreStabRent' | 'sfrTargetRent' | 'unitMix'>;
+  data: Pick<CoCAcquisition, 'propertyAddress' | 'propertyType' | 'units' | 'sfrBeds' | 'sfrBaths' | 'sfrInPlaceRent' | 'sfrPreStabRent' | 'sfrTargetRent' | 'sfrRentalType' | 'unitMix' | 'purchasePrice'>;
   onChange: (field: keyof CoCAcquisition, value: unknown) => void;
   showWarnings?: boolean;
+}
+
+function RentalTypePicker({ value, onChange }: { value: RentalType; onChange: (v: RentalType) => void }) {
+  return (
+    <div className="inline-flex h-7 rounded border border-slate-200 dark:border-slate-700 overflow-hidden self-end mb-[3px]">
+      {RENTAL_TYPES.map((t) => {
+        const active = value === t.value;
+        return (
+          <button
+            key={t.value}
+            type="button"
+            onClick={() => onChange(t.value)}
+            className={`px-2.5 text-[11px] font-medium transition-colors border-l first:border-l-0 border-slate-200 dark:border-slate-700 ${
+              active
+                ? 'bg-primary-600 text-white'
+                : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700'
+            }`}
+            title={t.sub}
+          >
+            {t.label}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 export function StepProperty({ data, onChange, showWarnings = false }: StepPropertyProps) {
@@ -46,6 +78,12 @@ export function StepProperty({ data, onChange, showWarnings = false }: StepPrope
       })
     );
 
+  const updateUnitRentalType = (id: string, value: RentalType) =>
+    onChange(
+      'unitMix',
+      data.unitMix.map((e) => (e.id === id ? { ...e, rentalType: value } : e))
+    );
+
   const removeUnitEntry = (id: string) =>
     onChange('unitMix', data.unitMix.filter((e) => e.id !== id));
 
@@ -56,6 +94,24 @@ export function StepProperty({ data, onChange, showWarnings = false }: StepPrope
         value={data.propertyAddress}
         onChange={(val) => onChange('propertyAddress', val)}
       />
+
+      {/* Purchase Price */}
+      <div>
+        <label className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 flex items-center gap-1">
+          Purchase Price ($)
+          {showWarnings && !(data.purchasePrice > 0) && (
+            <AlertTriangle size={12} className="text-amber-500 shrink-0" />
+          )}
+        </label>
+        <input
+          type="number"
+          className={`input text-sm ${showWarnings && !(data.purchasePrice > 0) ? 'border-amber-300 focus:ring-amber-400' : ''}`}
+          min={0}
+          placeholder="e.g. 350,000"
+          value={data.purchasePrice || ''}
+          onChange={(e) => onChange('purchasePrice', Number(e.target.value))}
+        />
+      </div>
 
       {/* Property type — icon buttons */}
       <div>
@@ -133,6 +189,13 @@ export function StepProperty({ data, onChange, showWarnings = false }: StepPrope
               />
             </div>
           </div>
+          <div className="mt-3">
+            <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">Rental Strategy</p>
+            <RentalTypePicker
+              value={data.sfrRentalType ?? 'LTR'}
+              onChange={(v) => onChange('sfrRentalType', v)}
+            />
+          </div>
         </div>
       )}
 
@@ -158,10 +221,10 @@ export function StepProperty({ data, onChange, showWarnings = false }: StepPrope
               {data.unitMix.map((entry) => (
                 <div
                   key={entry.id}
-                  className="rounded-lg border border-slate-100 dark:border-slate-700 p-3 space-y-2"
+                  className="rounded-lg border border-slate-100 dark:border-slate-700 p-3"
                 >
-                  {/* Row 1: unit definition */}
-                  <div className="grid grid-cols-[1fr_1fr_1fr_32px] gap-2 items-center">
+                  {/* Beds / Baths / Count / Rental Strategy / Delete — all inline */}
+                  <div className="grid grid-cols-[1fr_1fr_1fr_auto_32px] gap-2 items-end">
                     <div>
                       <span className="text-xs font-medium text-slate-500 dark:text-slate-400 block mb-1 text-center">Beds</span>
                       <input
@@ -198,16 +261,22 @@ export function StepProperty({ data, onChange, showWarnings = false }: StepPrope
                         onChange={(e) => updateUnitEntry(entry.id, 'count', Number(e.target.value))}
                       />
                     </div>
+                    <div>
+                      <span className="text-xs font-medium text-slate-500 dark:text-slate-400 block mb-1 text-center">Rental Strategy</span>
+                      <RentalTypePicker
+                        value={entry.rentalType ?? 'LTR'}
+                        onChange={(v) => updateUnitRentalType(entry.id, v)}
+                      />
+                    </div>
                     <button
                       type="button"
                       onClick={() => removeUnitEntry(entry.id)}
-                      className="flex items-center justify-center w-8 h-8 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors mt-5"
+                      className="flex items-center justify-center w-8 h-8 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                       aria-label="Remove unit type"
                     >
                       <Trash2 size={14} />
                     </button>
                   </div>
-
                 </div>
               ))}
 

@@ -133,7 +133,15 @@ export function buildWhatIfResult(ov: WhatIfOverrides, deps: BuildDeps): CoCResu
     };
   });
 
-  const freshAnniversaryByType = simResult.anniversaryByType;
+  // Enrich per-type anniversary with each type's in-place rent (already
+  // computed in `unitTypes` above). The projector uses this to attribute
+  // Year-1 loss-to-lease per unit type.
+  const freshAnniversaryByType = simResult.anniversaryByType
+    ? simResult.anniversaryByType.map((t, i) => ({
+        ...t,
+        inPlaceRent: unitTypes[i]?.inPlaceRent ?? 0,
+      }))
+    : undefined;
   const freshAnniversaryDist = simResult.anniversaryDistribution;
 
   // Strip per-year overrides when what-if changes the corresponding variable

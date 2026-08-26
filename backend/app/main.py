@@ -21,6 +21,7 @@ from app.routers import (
     feedback_router,
     shared_router,
     market_router,
+    assumptions_router,
 )
 from app.services.scheduler import create_scheduler
 
@@ -79,6 +80,7 @@ app.include_router(deals_router, prefix="/api")
 app.include_router(feedback_router, prefix="/api")
 app.include_router(shared_router, prefix="/api")
 app.include_router(market_router, prefix="/api")
+app.include_router(assumptions_router, prefix="/api")
 
 
 @app.get("/")

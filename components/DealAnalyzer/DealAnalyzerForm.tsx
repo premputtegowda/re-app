@@ -8,8 +8,11 @@ import { ShareButton } from './ShareButton';
 import { Card } from '@/components/UI/Card';
 import { Button } from '@/components/UI/Button';
 import { StepProperty } from './steps/StepProperty';
+// StepFinancing kept as dormant import for safe rollback; wizard now uses StepAssumptions.
 import { StepFinancing } from './steps/StepFinancing';
+import { StepAssumptions } from './steps/StepAssumptions';
 import { StepRenovation } from './steps/StepRenovation';
+void StepFinancing;
 import { StepExit } from './steps/StepExit';
 import { StepMarketUncertainty } from './steps/StepMarketUncertainty';
 import { computeMcRangesStatus, getRebasedFieldLabels } from '@/utils/mcRangesStatus';
@@ -22,6 +25,7 @@ import type { AutoSaveStatus } from '@/hooks/useDebouncedAutoSave';
 import type { CalcPersistedState } from '@/types';
 import { projectScenario, formatCurrencyCompact } from '@/utils/dealAnalyzerCalc';
 import { api } from '@/lib/api';
+import { proFormaToAssumptions } from '@/utils/proFormaToAssumptions';
 import { useDealAnalyzerStore, type DealAnalyzerDraft } from '@/lib/dealAnalyzerStore';
 import { useDealSettingsStore } from '@/lib/dealSettingsStore';
 import type {
@@ -406,6 +410,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     // Defer auto-save so the calcState update commits first
     setTimeout(() => scheduleCalculate(), 0);
   }, [isValueAdd]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [preStabMethod, setPreStabMethod] = useState<'calculator' | 'manual' | null>(() => {
     // Prefer explicitly persisted value
     if (initialDeal?.calcState?.preStabMethod !== undefined) return initialDeal.calcState.preStabMethod ?? 'calculator';
@@ -432,37 +437,16 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   // ── Operations mini-step state ────────────────────────────────────────────────
   type OpsSection = 'rent' | 'valueAdd' | 'stab';
 
-  const [activeOpsSection, setActiveOpsSection] = useState<OpsSection | null>(() => {
-    if (!initialDeal) return 'rent';
-    const acq = initialDeal.acquisition;
-    const isMfr = acq.propertyType === 'mfr' && (acq.unitMix?.length ?? 0) > 0;
-    const rentDone = isMfr
-      ? (acq.unitMix ?? []).some(e => (e.rentMonthly || 0) > 0)
-      : (acq.sfrTargetRent || 0) > 0;
-    if (!rentDone) return 'rent';
-    const vaState = initialDeal.calcState?.isValueAdd;
-    const hasCalcOvs = Object.values(initialDeal.proForma?.yearOverrides ?? {}).some(ov => ov?.grossRentSystem);
-    const hasPreStab = isMfr
-      ? (acq.unitMix ?? []).some(e => (e.preStabRent || 0) > 0)
-      : (acq.sfrPreStabRent || 0) > 0;
-    const vaAnswered = vaState !== undefined && vaState !== null
-      ? true : (hasCalcOvs || hasPreStab);
-    if (!vaAnswered) return 'valueAdd';
-    const vaYes = vaState === true || (vaState === undefined && (hasCalcOvs || hasPreStab));
-    if (!vaYes) return null;
-    const stabDone = hasCalcOvs || hasPreStab;
-    return stabDone ? null : 'stab';
-  });
-
+  // Rent is now captured in Property + Assumptions steps, so Operations
+  // treats it as always-complete and jumps straight to Value-Add. Also, both
+  // Value-Add and Stabilization render inline expanded (not as collapsed
+  // OpsCards) — see JSX below.
+  const [activeOpsSection, setActiveOpsSection] = useState<OpsSection | null>('valueAdd');
   const [completedOpsSections, setCompletedOpsSections] = useState<Set<OpsSection>>(() => {
-    const s = new Set<OpsSection>();
+    const s = new Set<OpsSection>(['rent']);
     if (!initialDeal) return s;
     const acq = initialDeal.acquisition;
     const isMfr = acq.propertyType === 'mfr' && (acq.unitMix?.length ?? 0) > 0;
-    const rentDone = isMfr
-      ? (acq.unitMix ?? []).some(e => (e.rentMonthly || 0) > 0)
-      : (acq.sfrTargetRent || 0) > 0;
-    if (rentDone) s.add('rent');
     const vaState = initialDeal.calcState?.isValueAdd;
     const hasCalcOvs = Object.values(initialDeal.proForma?.yearOverrides ?? {}).some(ov => ov?.grossRentSystem);
     const hasPreStab = isMfr
@@ -492,6 +476,70 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     }
     return acq;
   });
+  // Populate proForma.strategyByType from acquisition.unitMix so the projector
+  // can apply strategy-aware vacancy + credit loss. Runs whenever unitMix
+  // changes; leaseAnniversaryByType (per-type array) parallels unitMix order,
+  // so the strategy indices line up directly.
+  //
+  // Also seeds sensible defaults into pf when a fresh deal is at initial-zero:
+  //   - LTR vacancy 5%, LTR credit loss 2%   (baseline underwriting defaults)
+  //   - MTR/STR vacancy 20%, MTR/STR credit loss 2%   (only when MTR units present)
+  //
+  // These defaults are only applied when the field is BOTH zero AND the deal
+  // is new / never edited (savedDealId absent OR pf still at initial zero).
+  // Otherwise an existing deal with a legitimately-set 0% rate stays at 0.
+  // The seed also ensures the projector's math + the PDF/shared view see the
+  // same rate the user sees on-screen (previously the app showed 2% via a
+  // local useState fallback while the projector calc used 0%).
+  useEffect(() => {
+    if (acquisition.propertyType !== 'mfr') return;
+    const strategies = (acquisition.unitMix ?? []).map((u) => u.rentalType ?? 'LTR');
+    const hasMtrOrStr = strategies.some((s) => s === 'MTR' || s === 'STR');
+    setProForma((prev) => {
+      const prevStrategies = prev.strategyByType ?? [];
+      const strategiesSame = prevStrategies.length === strategies.length && prevStrategies.every((s, i) => s === strategies[i]);
+      const needsMtrVac = hasMtrOrStr && prev.vacancyMtrPct?.stabilized === undefined;
+      const needsMtrCl  = hasMtrOrStr && prev.creditLossMtrPct?.stabilized === undefined;
+      // LTR seeds — treat "0 on a fresh deal" as uninitialized. Only seed if
+      // the deal hasn't been persisted yet OR was persisted at zero without
+      // any per-year override present. `initialDeal?.id` is the deal-load id;
+      // absent means brand-new deal.
+      const isFresh = !initialDeal?.id;
+      const needsLtrVac = isFresh && (prev.vacancyPct?.stabilized ?? 0) === 0;
+      const needsLtrCl  = isFresh && (prev.creditLossPct?.stabilized ?? 0) === 0;
+      if (strategiesSame && !needsMtrVac && !needsMtrCl && !needsLtrVac && !needsLtrCl) return prev;
+      return {
+        ...prev,
+        strategyByType: strategies,
+        ...(needsMtrVac ? { vacancyMtrPct: { stabilized: 20 } } : {}),
+        ...(needsMtrCl  ? { creditLossMtrPct: { stabilized: 2 } } : {}),
+        ...(needsLtrVac ? { vacancyPct: { ...prev.vacancyPct, stabilized: 5 } } : {}),
+        ...(needsLtrCl  ? { creditLossPct: { ...prev.creditLossPct, stabilized: 2 } } : {}),
+      };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [acquisition.propertyType, acquisition.unitMix]);
+
+  // Auto-default isValueAdd to true when in-place rent < market rent. A
+  // stabilized property already at market rents has no value-add opportunity;
+  // any rent gap (including in-place = 0 alongside a set target) implies room
+  // to raise rents through renovation or lease-up. Only fires while the user
+  // hasn't made a choice yet (isValueAdd === null); user can still toggle No.
+  useEffect(() => {
+    if (isValueAdd !== null) return;
+    const isMfr = acquisition.propertyType === 'mfr' && (acquisition.unitMix?.length ?? 0) > 0;
+    const hasRentGap = isMfr
+      ? acquisition.unitMix.some((u) => (u.inPlaceRent || 0) < (u.rentMonthly || 0))
+      : (acquisition.sfrInPlaceRent || 0) < (acquisition.sfrTargetRent || 0);
+    // Only fire once target rents are present — without them there's no signal.
+    const hasAnyTarget = isMfr
+      ? acquisition.unitMix.some((u) => (u.rentMonthly || 0) > 0)
+      : (acquisition.sfrTargetRent || 0) > 0;
+    if (hasAnyTarget && hasRentGap) {
+      setIsValueAdd(true);
+    }
+  }, [isValueAdd, acquisition.propertyType, acquisition.unitMix, acquisition.sfrInPlaceRent, acquisition.sfrTargetRent]);
+
   const [operations, setOperations] = useState<CoCOperations>(
     initialDeal?.operations ?? DEFAULT_OPERATIONS
   );
@@ -581,6 +629,46 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const [mcResults, setMcResults] = useState<SavedMCResults | null>(
     initialDeal?.mcResults ? (initialDeal.mcResults as SavedMCResults) : null
   );
+
+  // AI assumptions state — hoisted here so it survives step navigation.
+  // StepAssumptions unmounts/remounts when the user tabs between steps; if the
+  // state lived there, the auto-fire ref would reset and re-generate every time.
+  // For existing deals we backfill from pro forma so the tab isn't empty on open;
+  // for new deals we start null so the auto-fire useEffect in StepAssumptions
+  // knows to run once inputs are present.
+  const [aiAssumptions, setAiAssumptions] = useState<Record<string, unknown> | null>(() => {
+    if (!initialDeal) return null;
+    // Prefer the previously-persisted AI response (retains source URLs, confidence,
+    // cap rate metadata). Fall back to a proForma-backfill if none was saved.
+    if (initialDeal.aiAssumptions) return initialDeal.aiAssumptions;
+    return proFormaToAssumptions(initialDeal.acquisition, initialDeal.proForma);
+  });
+
+  // Sync AI cap rates → downstream fields.
+  //  - exit_cap_rate_pct → acquisition.exitCapRate (drives Exit step + exit-value calc)
+  //  - current_market_cap_rate_pct → refinance.refiCapRate (default for refi valuation)
+  // Only fills fields that are still at their defaults so we don't stomp on
+  // user edits made directly in the Exit / Refi steps.
+  useEffect(() => {
+    const cap = (aiAssumptions as { cap_rate_estimation?: { current_market_cap_rate_pct?: number; exit_cap_rate_pct?: number } } | null)?.cap_rate_estimation;
+    if (!cap) return;
+    const exitPct = cap.exit_cap_rate_pct;
+    if (typeof exitPct === 'number' && exitPct > 0) {
+      setAcquisition((prev) => (prev.exitCapRate > 0 ? prev : { ...prev, exitCapRate: exitPct }));
+    }
+    const entryPct = cap.current_market_cap_rate_pct;
+    if (typeof entryPct === 'number' && entryPct > 0) {
+      setRefinance((prev) => (prev.refiCapRate && prev.refiCapRate > 0 ? prev : { ...prev, refiCapRate: entryPct }));
+    }
+  }, [aiAssumptions]);
+  const [aiCost, setAiCost] = useState<{
+    serper_usd: number;
+    serper_search_count: number;
+    gemini_usd: number;
+    gemini_input_tokens: number;
+    gemini_output_tokens: number;
+    total_usd: number;
+  } | null>(null);
 
   // Auto-populate the interest rate from FRED on new deals only. Applies a
   // +0.5% investment-property premium on top of the owner-occupied FRED rate
@@ -714,13 +802,13 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
   const savedSnapshot = useRef(
     initialDeal
-      ? JSON.stringify({ acquisition: initialDeal.acquisition, operations: initialDeal.operations, proForma: initialDeal.proForma, refinance: initialDeal.refinance })
+      ? JSON.stringify({ acquisition: initialDeal.acquisition, operations: initialDeal.operations, proForma: initialDeal.proForma, refinance: initialDeal.refinance, aiAssumptions: initialDeal.aiAssumptions ?? null })
       : null
   );
   const isDirty =
     !!savedDealId &&
     savedSnapshot.current !== null &&
-    (savedSnapshot.current !== JSON.stringify({ acquisition, operations, proForma, refinance }) ||
+    (savedSnapshot.current !== JSON.stringify({ acquisition, operations, proForma, refinance, aiAssumptions }) ||
       saveName !== (initialDeal?.name ?? ''));
   // Sync isDirty into a ref so onBack (defined at the top of the component) can read the latest value
   isDirtyRef.current = isDirty;
@@ -729,7 +817,11 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const mcSimRunRef = useRef<(() => Promise<void>) | null>(null);
   const calcDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Recompute results when opening a saved deal
+  // Recompute results when opening a saved deal that has prior results. If the
+  // saved deal has an empty `results` object (never calculated, or previously
+  // wiped), auto-compute a fresh base result so the returns view is populated
+  // AND the value flows into scenarioResults — so the next autosave persists
+  // real returns to backend instead of the empty {} that keeps overwriting.
   useEffect(() => {
     if (!initialDeal) return;
     const scenario: CoCScenario = {
@@ -740,12 +832,21 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
+    const persistedKeys = Object.keys(initialDeal.results) as CoCScenarioType[];
     const freshResults: Partial<Record<CoCScenarioType, CoCResult>> = {};
-    for (const type of Object.keys(initialDeal.results) as CoCScenarioType[]) {
-      freshResults[type] = projectScenario({ ...scenario, scenarioType: type, name: CHIP_LABELS[type] });
+    if (persistedKeys.length > 0) {
+      // Deal has prior results — recompute each scenario type against the
+      // current inputs (which may have been enriched at load).
+      for (const type of persistedKeys) {
+        freshResults[type] = projectScenario({ ...scenario, scenarioType: type, name: CHIP_LABELS[type] });
+      }
+    } else {
+      // Empty results — compute the base scenario so the Results view has
+      // something to show and the next autosave persists real returns.
+      freshResults[activeType] = projectScenario(scenario);
     }
     setScenarioResults(freshResults);
-    lastCalcSnapshotRef.current = JSON.stringify({ acquisition, operations, proForma, refinance });
+    lastCalcSnapshotRef.current = JSON.stringify({ acquisition, operations, proForma, refinance, aiAssumptions });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -784,10 +885,19 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     };
 
     if (acquisition.propertyType === 'mfr' && acquisition.unitMix.length > 0) {
-      const totalTarget  = acquisition.unitMix.reduce((sum, e) => sum + e.count * (e.rentMonthly  || 0), 0);
+      // Per-unit "effective target": prefer explicit target rent, fall back to
+      // in-place. That way a unit with in-place set but no target still
+      // contributes to stabilized rent — matches the step3Issues.ts rule
+      // that only flags a unit as "rent missing" when BOTH are 0.
+      const totalTarget = acquisition.unitMix.reduce(
+        (sum, e) => sum + e.count * ((e.rentMonthly || e.inPlaceRent) || 0), 0
+      );
       const totalInPlace = acquisition.unitMix.reduce((sum, e) => sum + e.count * (e.inPlaceRent  || 0), 0);
       const totalPreStab = acquisition.unitMix.reduce((sum, e) => sum + e.count * (e.preStabRent  || 0), 0);
-      const allHaveTarget  = acquisition.unitMix.every((e) => (e.rentMonthly || 0) > 0);
+      // "All units have a workable rent" — target OR in-place per unit.
+      const allHaveEffectiveTarget = acquisition.unitMix.every(
+        (e) => (e.rentMonthly || 0) > 0 || (e.inPlaceRent || 0) > 0
+      );
       const allHaveInPlace = acquisition.unitMix.every((e) => (e.inPlaceRent || 0) > 0);
 
       setOperations((prev) => ({ ...prev, grossRentMonthly: totalTarget }));
@@ -795,15 +905,15 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         // When calculator method is active, never let manual preStabRent fields override
         // the ProForma — the calculator's onApplyRents owns those year overrides.
         const preStabAnnual = preStabMethod === 'calculator' ? 0 : totalPreStab * 12;
-        const targetAnnual = allHaveTarget ? totalTarget * 12 : 0;
+        const targetAnnual = allHaveEffectiveTarget ? totalTarget * 12 : 0;
         const preserveCalcOverrides = preStabAnnual === 0 &&
           Object.values(prev.yearOverrides ?? {}).some(ov => ov?.grossRentSystem === true);
         return {
           ...prev,
           grossRent: {
             ...prev.grossRent,
-            ...(allHaveTarget  ? { stabilized: totalTarget * 12 } : { stabilized: 0 }),
-            ...(allHaveInPlace ? { t12: totalInPlace * 12 }       : { t12: 0 }),
+            ...(allHaveEffectiveTarget ? { stabilized: totalTarget * 12 } : { stabilized: 0 }),
+            ...(allHaveInPlace         ? { t12: totalInPlace * 12 }       : { t12: 0 }),
           },
           yearOverrides: preserveCalcOverrides
             ? prev.yearOverrides
@@ -952,7 +1062,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   // ALSO auto-save current draft to backend if the deal is already saved — so any inner
   // "Done" button (value-add, stab, rent subsections) persists changes immediately.
   const scheduleCalculate = () => {
-    const currentSnapshot = JSON.stringify({ acquisition, operations, proForma, refinance });
+    const currentSnapshot = JSON.stringify({ acquisition, operations, proForma, refinance, aiAssumptions });
     const inputsChanged = lastCalcSnapshotRef.current !== currentSnapshot;
 
     // Mark results stale if they exist and inputs changed
@@ -972,6 +1082,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         visitedSteps: Array.from(completedSteps),
         activeType,
         ...(enriched ? { calcState: enriched } : {}),
+        ...(aiAssumptions ? { aiAssumptions } : {}),
         ...(Object.keys(stepNotesObj).length > 0 ? { stepNotes: stepNotesObj } : {}),
       };
       updateSavedDeal(savedDealId, name, scenarioResults, draft, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined, mcRangesReviewedAt);
@@ -981,9 +1092,20 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     }
   };
 
+  // Debounced auto-save on any acquisition / proForma / operations / refinance
+  // / aiAssumptions state change — so edits from the Assumptions step (rents,
+  // opex, growth, vacancy, cap rate, AI regenerate output) persist without
+  // needing a Done button click. `aiAssumptions` must be in the deps or
+  // AI-only edits (cap rate) never trigger a save.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const t = setTimeout(() => scheduleCalculate(), 800);
+    return () => clearTimeout(t);
+  }, [acquisition, proForma, operations, refinance, aiAssumptions]);
+
   const handleCalculate = () => {
     setResultsStale(false);
-    lastCalcSnapshotRef.current = JSON.stringify({ acquisition, operations, proForma, refinance });
+    lastCalcSnapshotRef.current = JSON.stringify({ acquisition, operations, proForma, refinance, aiAssumptions });
     setCalcPhase('returns');
     // Collapse all steps so the results area is prominent
     setActiveStep(FORM_STEPS.length); // past last step → no step matches → all collapsed
@@ -1063,7 +1185,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       const newId = saveDeal(name, draft, updatedResults, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined, mcRangesReviewedAt);
       setSavedDealId(newId);
       setSaveName(name);
-      savedSnapshot.current = JSON.stringify({ acquisition, operations, proForma, refinance });
+      savedSnapshot.current = JSON.stringify({ acquisition, operations, proForma, refinance, aiAssumptions });
     }
 
     // Run Monte Carlo simulation directly — no dependency on MC panel being mounted.
@@ -1151,14 +1273,14 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
       if (savedDealId) {
         updateSavedDeal(savedDealId, name, scenarioResults, draft, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined, mcRangesReviewedAt);
-        savedSnapshot.current = JSON.stringify({ acquisition, operations, proForma, refinance });
+        savedSnapshot.current = JSON.stringify({ acquisition, operations, proForma, refinance, aiAssumptions });
         isDirtyRef.current = false;
         flashSaved();
       } else if (acquisition.propertyAddress.trim()) {
         const newId = saveDeal(name, draft, scenarioResults, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined, mcRangesReviewedAt);
         setSavedDealId(newId);
         setSaveName(name);
-        savedSnapshot.current = JSON.stringify({ acquisition, operations, proForma, refinance });
+        savedSnapshot.current = JSON.stringify({ acquisition, operations, proForma, refinance, aiAssumptions });
         isDirtyRef.current = false;
         flashSaved();
       }
@@ -1197,6 +1319,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     // Mark scenario results stale only if the draft actually differs from the
     // current parent state — a no-op Done shouldn't invalidate calculated
     // returns the user already has on screen.
+    // Session draft doesn't own aiAssumptions (it lives at the parent), so we
+    // exclude it from this comparison — it's compared implicitly via the
+    // parent-level snapshots.
     const inputsChanged = JSON.stringify({
       acquisition: draft.acquisition, operations: draft.operations,
       proForma: draft.proForma, refinance: draft.refinance,
@@ -1387,7 +1512,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
     }
 
     setSaveName(name);
-    savedSnapshot.current = JSON.stringify({ acquisition, operations, proForma, refinance });
+    savedSnapshot.current = JSON.stringify({ acquisition, operations, proForma, refinance, aiAssumptions });
     isDirtyRef.current = false; // just saved — clear the dirty flag so navigateBack doesn't re-warn
 
     // Wait for the backend save to settle before navigating. If it fails,
@@ -1470,10 +1595,17 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         return <StepProperty data={acquisition} onChange={updateAcquisition} showWarnings={isVisited} />;
       case 1:
         return (
-          <StepFinancing
+          <StepAssumptions
             data={acquisition}
             onChange={updateAcquisition}
             missingFields={isVisited ? getFinancingMissingFields() : undefined}
+            isNewDeal={!initialDeal}
+            assumptions={aiAssumptions}
+            cost={aiCost}
+            onAssumptionsChange={setAiAssumptions}
+            onCostChange={setAiCost}
+            proForma={proForma}
+            onProFormaChange={setProForma}
           />
         );
       case 2:
@@ -1589,6 +1721,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
               inPlaceRent: e.inPlaceRent || 0,
               targetRent: e.rentMonthly || 0,
               preStabRent: e.preStabRent || 0,
+              rentalType: e.rentalType ?? 'LTR',
             }))
           : [{
               label: 'SFR',
@@ -1596,6 +1729,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
               inPlaceRent: acquisition.sfrInPlaceRent || 0,
               targetRent: acquisition.sfrTargetRent || 0,
               preStabRent: acquisition.sfrPreStabRent || 0,
+              rentalType: acquisition.sfrRentalType ?? 'LTR',
             }];
 
         const calcAppliedYears: Record<number, number> = {};
@@ -1655,10 +1789,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         return (
           <div className="space-y-3">
 
-            {/* ── Section 1: Rent ── */}
-            {completedOpsSections.has('rent') && activeOpsSection !== 'rent' ? (
-              <OpsCard num={1} title="Rent" summary={rentSummary} onEdit={() => openOpsSection('rent')} warning={rentIncomplete} />
-            ) : (
+            {/* ── Section 1: Rent — hidden. Rents now captured in Property + Assumptions steps. ── */}
+            {false && (
             <div className={card}>
               <OpsSectionHeader num={1} title="Rent" isComplete={hasTargetRent} warning={isVisited && rentIncomplete} />
                 <div className="border-t border-slate-100 dark:border-slate-700/60">
@@ -1816,20 +1948,9 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
             </div>
             )}
 
-            {/* ── Section 2: Value-Add Plan ── */}
+            {/* ── Section 2: Value-Add Plan — always expanded ── */}
             <AnimatePresence>
-            {completedOpsSections.has('rent') && completedOpsSections.has('valueAdd') && activeOpsSection !== 'valueAdd' && (
-              <motion.div
-                key="va-summary"
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.25, ease: 'easeOut' }}
-              >
-                <OpsCard num={2} title="Value-Add Plan" summary={valueAddSummary} onEdit={() => openOpsSection('valueAdd')} warning={valueAddIncomplete} />
-              </motion.div>
-            )}
-            {completedOpsSections.has('rent') && activeOpsSection === 'valueAdd' && (
+            {true && (
               <motion.div
                 key="va-active"
                 initial={{ opacity: 0, y: 14 }}
@@ -1840,6 +1961,29 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
               >
                 <OpsSectionHeader num={2} title="Value-Add Plan" isComplete={isValueAdd !== null} warning={isVisited && valueAddIncomplete} />
                   <div className="border-t border-slate-100 dark:border-slate-700/60 px-4 py-4 space-y-4">
+
+                    {/* Missing in-place rent warning — appears when all in-place
+                        rents are 0, since loss-to-lease can't be computed and
+                        the projections lean heavily on the reno/lease-up schedule. */}
+                    {(() => {
+                      const allInPlaceZero = hasMfr
+                        ? acquisition.unitMix.every((u) => (u.inPlaceRent || 0) === 0)
+                        : (acquisition.sfrInPlaceRent || 0) === 0;
+                      const hasSomeTarget = hasMfr
+                        ? acquisition.unitMix.some((u) => (u.rentMonthly || 0) > 0)
+                        : (acquisition.sfrTargetRent || 0) > 0;
+                      if (!allInPlaceZero || !hasSomeTarget) return null;
+                      return (
+                        <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40">
+                          <AlertTriangle size={13} className="text-amber-500 mt-0.5 shrink-0" />
+                          <p className="text-xs text-amber-800 dark:text-amber-300 leading-snug">
+                            In-place rent is $0 for every unit. Loss-to-lease can&apos;t be estimated accurately —
+                            carefully review the renovation and lease-up schedule below, since Year-1 rent projections
+                            will depend entirely on it.
+                          </p>
+                        </div>
+                      );
+                    })()}
 
                     {/* Yes / No */}
                     <div>
@@ -1981,41 +2125,16 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                       ) : null;
                     })()}
                   </div>
-                <div className="flex gap-3 px-4 pb-4 pt-2 border-t border-slate-100 dark:border-slate-700/60 mt-2">
-                  {completedOpsSections.has('valueAdd') && (
-                    <Button variant="secondary" onClick={() => cancelOpsSection()}>Cancel</Button>
-                  )}
-                  <Button variant="primary" fullWidth={!completedOpsSections.has('valueAdd')} onClick={() => {
-                    const stabDone = completedOpsSections.has('stab');
-                    setCompletedOpsSections(prev => { const s = new Set(prev); s.add('valueAdd'); return s; });
-                    opsSectionSnapshotRef.current = null;
-                    if (isValueAdd === true && !stabDone) {
-                      openOpsSection('stab');
-                      setCalcCollapsed(false);
-                    } else {
-                      setActiveOpsSection(null);
-                    }
-                    (saveDraft ?? scheduleCalculate)();
-                  }}>Done</Button>
-                </div>
+                {/* Sub-section Done button removed — sections are always
+                    expanded and the wizard's main Done button (below) handles
+                    step completion. */}
               </motion.div>
             )}
             </AnimatePresence>
 
-            {/* ── Section 3: Stabilization ── */}
+            {/* ── Section 3: Stabilization — always expanded when applicable ── */}
             <AnimatePresence>
-            {completedOpsSections.has('valueAdd') && isValueAdd === true && completedOpsSections.has('stab') && activeOpsSection !== 'stab' && (
-              <motion.div
-                key="stab-summary"
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.25, ease: 'easeOut' }}
-              >
-                <OpsCard num={3} title="Stabilization" summary={stabSummary} onEdit={() => { openOpsSection('stab'); setCalcCollapsed(false); }} warning={stabIncomplete} />
-              </motion.div>
-            )}
-            {completedOpsSections.has('valueAdd') && isValueAdd === true && activeOpsSection === 'stab' && (
+            {isValueAdd === true && (
               <motion.div
                 key="stab-active"
                 initial={{ opacity: 0, y: 14 }}
@@ -2163,8 +2282,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 simulation + auto-apply effects fire whenever inputs change (unit count,
                 lease-up units, target rents, growth rate), even when the stab section
                 isn't open. Visually hidden when not active or collapsed. */}
-            {completedOpsSections.has('valueAdd') && isValueAdd === true && (
-              <div className={(activeOpsSection === 'stab' && !calcCollapsed) ? 'rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden' : 'hidden'}>
+            {isValueAdd === true && (
+              <div className={!calcCollapsed ? 'rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden' : 'hidden'}>
                 <RehabRentCalculator
                   key={calcKey}
                   hideHeader={false}
@@ -2212,11 +2331,24 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                         if (ovs[y]?.grossRentSystem === false) return;
                         ovs[y] = { ...(ovs[y] ?? {}), grossRent: rent, grossRentSystem: true };
                       });
+                      // Enrich per-type anniversary with each type's in-place rent
+                      // (source of truth = acquisition.unitMix / SFR field). The
+                      // projector uses this to attribute Year-1 loss-to-lease
+                      // correctly per unit type. In-place of 0 means "no rent
+                      // being collected today" → LTL = full target rent.
+                      const enrichedByType = anniversaryByType
+                        ? anniversaryByType.map((t, i) => ({
+                            ...t,
+                            inPlaceRent: hasMfr
+                              ? (acquisition.unitMix[i]?.inPlaceRent ?? 0)
+                              : (acquisition.sfrInPlaceRent ?? 0),
+                          }))
+                        : undefined;
                       return {
                         ...prev,
                         yearOverrides: ovs,
                         ...(anniversaryDistribution ? { leaseAnniversaryDistribution: anniversaryDistribution } : {}),
-                        ...(anniversaryByType ? { leaseAnniversaryByType: anniversaryByType } : {}),
+                        ...(enrichedByType ? { leaseAnniversaryByType: enrichedByType } : {}),
                       };
                     });
                   }}
@@ -2238,22 +2370,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
               </div>
             )}
 
-            {/* Stabilization section Done/Cancel — render AFTER the always-mounted calc
-                so they appear at the bottom of the visible section content, where users
-                expect them after editing the schedule. */}
-            {completedOpsSections.has('valueAdd') && isValueAdd === true && activeOpsSection === 'stab' && (
-              <div className="flex gap-3 px-4 pb-4 pt-2 border-t border-slate-100 dark:border-slate-700/60 mt-2 rounded-b-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 -mt-px">
-                {completedOpsSections.has('stab') && (
-                  <Button variant="secondary" onClick={() => cancelOpsSection()}>Cancel</Button>
-                )}
-                <Button variant="primary" fullWidth={!completedOpsSections.has('stab')} onClick={() => {
-                  setCompletedOpsSections(prev => { const s = new Set(prev); s.add('stab'); return s; });
-                  opsSectionSnapshotRef.current = null;
-                  setActiveOpsSection(null);
-                  (saveDraft ?? scheduleCalculate)();
-                }}>Done</Button>
-              </div>
-            )}
+            {/* Stabilization sub-section Done/Cancel removed — always expanded.
+                The wizard's main Done button handles step completion. */}
 
             {/* Pre-ProForma warning banner — surfaces incomplete sections so the user
                 knows why the Pro Forma rent might be missing/incorrect. Gated on
@@ -2279,17 +2397,8 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
               );
             })()}
 
-            {/* ── Pro Forma — hidden entirely while any step-3 issue is blocking ── */}
-            {!hasBlockingIssue(step3Issues) && (
-              <ProFormaGrid
-                data={proForma}
-                onChange={setProForma}
-                projectionYears={acquisition.projectionYears}
-                showWarnings={isVisited}
-                units={acquisition.propertyType === 'mfr' ? (acquisition.unitMix.length > 0 ? acquisition.unitMix.reduce((s, e) => s + e.count, 0) : acquisition.units) : 1}
-                purchasePrice={acquisition.purchasePrice}
-              />
-            )}
+            {/* Pro Forma grid moved to Results panel (read-only, collapsible).
+                Operations tab now focuses solely on Value-Add + Stabilization. */}
 
             {/* ── Notes ── */}
             <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
@@ -2947,6 +3056,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                     calcPhase={calcPhase}
                     calcState={calcState}
                     onCalcPhaseChange={setCalcPhase}
+                    aiAssumptions={aiAssumptions}
                   />
                 </div>
               )
@@ -2982,6 +3092,34 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 <p className="text-xs text-slate-400 dark:text-slate-500">
                   Click <span className="font-semibold text-slate-500 dark:text-slate-400">Next</span> on each step to save your progress
                 </p>
+              )}
+              {savedDealId && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const name = saveName || defaultSaveName(acquisition);
+                    const enriched = buildCalcState();
+                    const stepNotesObj: Record<number, string> = {};
+                    if (opsNotes.trim()) stepNotesObj[3] = opsNotes.trim();
+                    const draft: DealAnalyzerDraft = {
+                      acquisition, operations, proForma, refinance,
+                      currentStep: activeStep,
+                      visitedSteps: Array.from(completedSteps),
+                      activeType,
+                      ...(enriched ? { calcState: enriched } : {}),
+                      ...(aiAssumptions ? { aiAssumptions } : {}),
+                      ...(Object.keys(stepNotesObj).length > 0 ? { stepNotes: stepNotesObj } : {}),
+                    };
+                    updateSavedDeal(savedDealId, name, scenarioResults, draft, mcRanges as unknown as SavedDeal['mcRanges'] ?? undefined, mcResults ?? undefined, mcRangesReviewedAt);
+                    // Reset the snapshot so scheduleCalculate won't re-fire redundantly right after.
+                    savedSnapshot.current = JSON.stringify({ acquisition, operations, proForma, refinance, aiAssumptions });
+                    isDirtyRef.current = false;
+                  }}
+                  className="ml-2 text-xs px-2 py-1 rounded-md border border-primary-300 dark:border-primary-700 text-primary-700 dark:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-900/20 font-medium"
+                  title="Force-save current state to backend (bypasses debounce)"
+                >
+                  Save now
+                </button>
               )}
             </div>
             <button

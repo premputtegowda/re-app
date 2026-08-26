@@ -52,17 +52,24 @@ export function buildStep3Issues(args: BuildStep3IssuesArgs): Step3Issue[] {
   const isMfr = acquisition.propertyType === 'mfr' && acquisition.unitMix.length > 0;
 
   // ── Rent ────────────────────────────────────────────────────────────────
+  // A unit type is "missing rent" only when BOTH target and in-place are 0.
+  // If either is set the projector has enough to compute Pro Forma rent
+  // (in-place drives Year-1 collection; target drives future years).
   const rentMissing = isMfr
-    ? acquisition.unitMix.length === 0 || acquisition.unitMix.some(e => (e.rentMonthly || 0) === 0)
-    : (acquisition.sfrTargetRent || 0) === 0 && proForma.grossRent.stabilized === 0;
+    ? acquisition.unitMix.length === 0 || acquisition.unitMix.some(
+        e => (e.rentMonthly || 0) === 0 && (e.inPlaceRent || 0) === 0
+      )
+    : (acquisition.sfrTargetRent || 0) === 0
+        && (acquisition.sfrInPlaceRent || 0) === 0
+        && proForma.grossRent.stabilized === 0;
   if (rentMissing) {
     issues.push({
       id: 'rent.missing_target',
       section: 'rent',
       severity: 'error',
       message: isMfr
-        ? 'Enter the target rent for every unit type.'
-        : 'Enter the target rent.',
+        ? 'Enter either the in-place rent or the target rent for every unit type.'
+        : 'Enter either the in-place rent or the target rent.',
     });
   }
 
@@ -107,13 +114,18 @@ export function buildStep3Issues(args: BuildStep3IssuesArgs): Step3Issue[] {
     });
   }
 
-  // Schedule mismatch — only check when calcState has actual schedule data.
-  // Empty arrays mean the always-mounted calculator hasn't populated yet
-  // (loading race), NOT a real mismatch. Without this gate the banner would
-  // flash on every fresh-Yes toggle before the auto-compute settled.
+  // Schedule mismatch — only check when calcState has ACTUAL non-zero
+  // schedule entries. The always-mounted calculator initializes its
+  // scheduleByType arrays to `[0]*totalDuration` on mount, so a fresh deal
+  // that briefly hits the calculator (without the user distributing yet)
+  // would trip the old `s.length > 0` gate and false-fire a "schedule
+  // mismatch" warning immediately after setting unitsToRenovate. Requiring
+  // at least one non-zero value means we only warn when the user has
+  // actually started distributing but hasn't finished.
   if (preStabMethod === 'calculator') {
-    const hasScheduleData = calcState?.scheduleByType?.some(s => s.length > 0) ||
-      calcState?.leaseUpScheduleByType?.some(s => s.length > 0);
+    const hasScheduleData =
+      (calcState?.scheduleByType ?? []).some((s) => s.some((n) => n > 0)) ||
+      (calcState?.leaseUpScheduleByType ?? []).some((s) => s.some((n) => n > 0));
     if (hasScheduleData) {
       const renoTotals = renoArr.map((_, t) =>
         (calcState?.scheduleByType?.[t] ?? []).reduce((s, n) => s + n, 0));

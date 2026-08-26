@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Zap, X, Check } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -15,6 +15,8 @@ export interface UnitTypeInput {
   inPlaceRent: number;
   targetRent: number;
   preStabRent?: number;
+  /** Rental strategy for the type — rendered as a badge in the schedule UI. */
+  rentalType?: 'LTR' | 'MTR' | 'STR';
 }
 
 export interface SimulationResult {
@@ -27,8 +29,13 @@ export interface SimulationResult {
    * Per-unit-type anniversary distribution. Each entry pairs the type's target
    * rent with its own 12-month renewal histogram. Enables accurate per-type
    * Year 2+ LTL when unit types have different rents.
+   *
+   * `yr1Gross` is the actual Year-1 collected rent for that type (annual $),
+   * summed from the simulator's monthly-per-type stream. The projector uses
+   * it to attribute Year-1 LTL correctly per strategy without proportional
+   * approximation.
    */
-  anniversaryByType: { targetRent: number; distribution: number[] }[];
+  anniversaryByType: { targetRent: number; distribution: number[]; yr1Gross: number }[];
 }
 
 // ── Simulation ─────────────────────────────────────────────────────────────────
@@ -149,9 +156,13 @@ export function simulateFromSchedule(
   // - Per-type histograms (anniversaryByType) so the projector can compute Year 2+ LTL
   //   without blending different unit types' rents.
   const anniversaryDist = new Array(12).fill(0);
-  const anniversaryByType: { targetRent: number; distribution: number[] }[] = unitTypes.map(ut => ({
+  const anniversaryByType: { targetRent: number; distribution: number[]; yr1Gross: number }[] = unitTypes.map((ut, t) => ({
     targetRent: ut.targetRent,
     distribution: new Array(12).fill(0),
+    // Year-1 gross rent per type — actual collection from months 0..11 of the
+    // simulator's per-type monthly rent. Captures pre-stab downtime + partial
+    // months so the projector doesn't have to reverse-engineer the split.
+    yr1Gross: (monthlyByType[t] ?? []).slice(0, 12).reduce((s, r) => s + r, 0),
   }));
 
   for (let t = 0; t < unitTypes.length; t++) {
@@ -534,34 +545,77 @@ export function RehabRentCalculator({
     [effectiveUnitTypes]
   );
 
-  // Actual collected rent for any year, applying the anniversary model for Year 2+.
-  // Year 1 comes from the monthly simulation (gradual lease-up rollover).
-  // Year 2+ uses the anniversary distribution: each unit renews on its month,
-  // earning prev rate before and new market rate after.
+  // Actual collected rent for any year — computed per unit type using each
+  // type's own targetRent + anniversary distribution, then summed. Previously
+  // used a blended distribution + average per-unit target, which produced
+  // slightly different totals than the per-type split (violating LTR + MTR =
+  // Total). Now: Year 1 sums per-type from simulator monthly stream; Year 2+
+  // sums per-type anniversary math.
   const computeYearRent = useCallback((year: number): number => {
     if (!result) return 0;
-    if (year === 1) return result.yearlyRents[0] ?? 0;
-    const dist = result.anniversaryDistribution;
-    const totalUnits = dist.reduce((s, n) => s + n, 0);
-    if (totalUnits === 0 || totalTargetAnnual === 0) return 0;
-    const perUnitTarget = totalTargetAnnual / totalUnits / 12;
     const growthRate = grossRentGrowthPct / 100;
-    const marketRate = perUnitTarget * Math.pow(1 + growthRate, year - 1);
-    const prevRate = perUnitTarget * Math.pow(1 + growthRate, year - 2);
-    let actualRent = 0;
-    for (let m = 0; m < 12; m++) {
-      const units = dist[m] ?? 0;
-      if (units === 0) continue;
-      if (m === 0) {
-        actualRent += units * marketRate * 12;
-      } else {
-        const oldMonths = m;
-        const newMonths = 12 - m;
-        actualRent += units * (prevRate * oldMonths + marketRate * newMonths);
+    let total = 0;
+    effectiveUnitTypes.forEach((_, t) => {
+      if (year === 1) {
+        total += (result.monthlyByType[t] ?? []).slice(0, 12).reduce((s, r) => s + r, 0);
+        return;
       }
-    }
-    return actualRent;
-  }, [result, totalTargetAnnual, grossRentGrowthPct]);
+      const anniv = result.anniversaryByType?.[t];
+      if (!anniv) return;
+      const perUnitMarket = anniv.targetRent * Math.pow(1 + growthRate, year - 1);
+      const perUnitPrev   = anniv.targetRent * Math.pow(1 + growthRate, year - 2);
+      for (let m = 0; m < 12; m++) {
+        const units = anniv.distribution[m] ?? 0;
+        if (units === 0) continue;
+        if (m === 0) total += units * perUnitMarket * 12;
+        else         total += units * (perUnitPrev * m + perUnitMarket * (12 - m));
+      }
+    });
+    return total;
+  }, [result, effectiveUnitTypes, grossRentGrowthPct]);
+
+  // Per-strategy split for the LTL walkthrough table. Iterates over unit types,
+  // classifies each by rentalType, and sums Market + Gross-Lease per strategy.
+  // Year 1 gross comes from the simulator's monthly-per-type rent; Year 2+ uses
+  // the per-type anniversary model.
+  const computeYearByStrategy = useCallback((year: number): { ltr: { market: number; gross: number }; mtr: { market: number; gross: number } } => {
+    if (!result) return { ltr: { market: 0, gross: 0 }, mtr: { market: 0, gross: 0 } };
+    const growthRate = grossRentGrowthPct / 100;
+    let ltrMarket = 0, mtrMarket = 0;
+    let ltrGross  = 0, mtrGross  = 0;
+    effectiveUnitTypes.forEach((ut, t) => {
+      const isMtr = ut.rentalType === 'MTR' || ut.rentalType === 'STR';
+      const typeMarket = ut.count * ut.targetRent * 12 * Math.pow(1 + growthRate, year - 1);
+      let typeGross = 0;
+      if (year === 1) {
+        // Sum months 0–11 of the simulator's per-type monthly rent
+        typeGross = (result.monthlyByType[t] ?? []).slice(0, 12).reduce((s, r) => s + r, 0);
+      } else {
+        // Per-type anniversary model
+        const anniv = result.anniversaryByType?.[t];
+        if (anniv) {
+          const perUnitMarket = anniv.targetRent * Math.pow(1 + growthRate, year - 1);
+          const perUnitPrev   = anniv.targetRent * Math.pow(1 + growthRate, year - 2);
+          for (let m = 0; m < 12; m++) {
+            const units = anniv.distribution[m] ?? 0;
+            if (units === 0) continue;
+            if (m === 0) typeGross += units * perUnitMarket * 12;
+            else         typeGross += units * (perUnitPrev * m + perUnitMarket * (12 - m));
+          }
+        } else {
+          typeGross = typeMarket; // fallback — no LTL
+        }
+      }
+      if (isMtr) { mtrMarket += typeMarket; mtrGross += typeGross; }
+      else       { ltrMarket += typeMarket; ltrGross += typeGross; }
+    });
+    return { ltr: { market: ltrMarket, gross: ltrGross }, mtr: { market: mtrMarket, gross: mtrGross } };
+  }, [result, effectiveUnitTypes, grossRentGrowthPct]);
+
+  const hasMtrOrStr = useMemo(
+    () => effectiveUnitTypes.some(t => t.rentalType === 'MTR' || t.rentalType === 'STR'),
+    [effectiveUnitTypes]
+  );
 
   const blendedMonthlyByType = useMemo(() => {
     if (!result || transitionYears.length === 0) return unitTypes.map(() => 0);
@@ -746,9 +800,12 @@ export function RehabRentCalculator({
                     const allOk  = renoOk && luOk;
                     return (
                       <div key={t} className="px-3 py-2 flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 min-w-0">
+                        <div className="flex items-center gap-2 min-w-0 flex-wrap">
                           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${allOk ? 'bg-emerald-400' : 'bg-amber-400'}`} />
                           <span className="text-xs font-medium text-slate-600 dark:text-slate-300">{ut.label}</span>
+                          <span className="text-[11px] text-slate-400 dark:text-slate-500 tabular-nums">
+                            ${(ut.inPlaceRent || 0).toLocaleString()} → ${(ut.targetRent || 0).toLocaleString()}
+                          </span>
                           <span className="text-[11px] text-slate-400 dark:text-slate-500">
                             {renoTarget > 0 && <span className={renoOk ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-500'}>R {scheduleTotals[t]}/{renoTarget}</span>}
                             {renoTarget > 0 && luTarget > 0 && ' · '}
@@ -818,6 +875,9 @@ export function RehabRentCalculator({
                             <div key={t} className="flex flex-col items-center gap-0.5">
                               <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 text-center tracking-wide uppercase">
                                 {ut.label}
+                              </span>
+                              <span className="text-[10px] text-slate-400 dark:text-slate-500 tabular-nums">
+                                ${(ut.inPlaceRent || 0).toLocaleString()} → ${(ut.targetRent || 0).toLocaleString()}
                               </span>
                               {hasData && (
                                 <button
@@ -967,15 +1027,38 @@ export function RehabRentCalculator({
                       const market = totalTargetAnnual * Math.pow(1 + grossRentGrowthPct / 100, y - 1);
                       const actual = computeYearRent(y);
                       const ltl = market - actual;
+                      const split = hasMtrOrStr ? computeYearByStrategy(y) : null;
                       return (
-                        <tr key={y} className="border-t border-slate-100 dark:border-slate-700/60 first:border-t-0">
-                          <td className="px-3 py-2 font-semibold text-slate-600 dark:text-slate-300">Yr {y}</td>
-                          <td className="px-3 py-2 text-right tabular-nums text-slate-600 dark:text-slate-300">{fmt$(market)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt$(actual)}</td>
-                          <td className="px-3 py-2 text-right tabular-nums font-semibold text-amber-600 dark:text-amber-400">
-                            {ltl > 0.5 ? fmt$(ltl) : '—'}
-                          </td>
-                        </tr>
+                        <React.Fragment key={y}>
+                          <tr className="border-t border-slate-100 dark:border-slate-700/60 first:border-t-0">
+                            <td className="px-3 py-2 font-semibold text-slate-600 dark:text-slate-300">Yr {y}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-slate-600 dark:text-slate-300">{fmt$(market)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-slate-700 dark:text-slate-200">{fmt$(actual)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums font-semibold text-amber-600 dark:text-amber-400">
+                              {ltl > 0.5 ? fmt$(ltl) : '—'}
+                            </td>
+                          </tr>
+                          {split && (
+                            <>
+                              <tr className="bg-slate-50/50 dark:bg-slate-800/20">
+                                <td className="px-3 py-1 pl-6 text-[11px] text-slate-400 dark:text-slate-500">↳ LTR</td>
+                                <td className="px-3 py-1 text-right tabular-nums text-[11px] text-slate-400 dark:text-slate-500">{fmt$(split.ltr.market)}</td>
+                                <td className="px-3 py-1 text-right tabular-nums text-[11px] text-slate-400 dark:text-slate-500">{fmt$(split.ltr.gross)}</td>
+                                <td className="px-3 py-1 text-right tabular-nums text-[11px] text-amber-600/70 dark:text-amber-400/70">
+                                  {split.ltr.market - split.ltr.gross > 0.5 ? fmt$(split.ltr.market - split.ltr.gross) : '—'}
+                                </td>
+                              </tr>
+                              <tr className="bg-slate-50/50 dark:bg-slate-800/20">
+                                <td className="px-3 py-1 pl-6 text-[11px] text-slate-400 dark:text-slate-500">↳ MTR / STR</td>
+                                <td className="px-3 py-1 text-right tabular-nums text-[11px] text-slate-400 dark:text-slate-500">{fmt$(split.mtr.market)}</td>
+                                <td className="px-3 py-1 text-right tabular-nums text-[11px] text-slate-400 dark:text-slate-500">{fmt$(split.mtr.gross)}</td>
+                                <td className="px-3 py-1 text-right tabular-nums text-[11px] text-amber-600/70 dark:text-amber-400/70">
+                                  {split.mtr.market - split.mtr.gross > 0.5 ? fmt$(split.mtr.market - split.mtr.gross) : '—'}
+                                </td>
+                              </tr>
+                            </>
+                          )}
+                        </React.Fragment>
                       );
                     })}
                   </tbody>
@@ -986,6 +1069,7 @@ export function RehabRentCalculator({
                     const market = totalTargetAnnual * Math.pow(1 + grossRentGrowthPct / 100, y - 1);
                     const actual = computeYearRent(y);
                     const ltl = market - actual;
+                    const split = hasMtrOrStr ? computeYearByStrategy(y) : null;
                     return (
                       <div key={y} className="px-3 py-2.5">
                         <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Year {y}</p>
@@ -1003,6 +1087,22 @@ export function RehabRentCalculator({
                             <p className="tabular-nums font-semibold text-amber-600 dark:text-amber-400">{ltl > 0.5 ? fmt$(ltl) : '—'}</p>
                           </div>
                         </div>
+                        {split && (
+                          <div className="mt-1.5 space-y-0.5 text-[10px] text-slate-400 dark:text-slate-500">
+                            <div className="flex justify-between">
+                              <span>↳ LTR LTL</span>
+                              <span className="tabular-nums text-amber-600/70 dark:text-amber-400/70">
+                                {split.ltr.market - split.ltr.gross > 0.5 ? fmt$(split.ltr.market - split.ltr.gross) : '—'}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>↳ MTR / STR LTL</span>
+                              <span className="tabular-nums text-amber-600/70 dark:text-amber-400/70">
+                                {split.mtr.market - split.mtr.gross > 0.5 ? fmt$(split.mtr.market - split.mtr.gross) : '—'}
+                              </span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}

@@ -221,6 +221,9 @@ export interface CoCCostItem {
   amount: number;
 }
 
+/** Rental strategy for a unit type — drives very different rent/opex economics. */
+export type RentalType = 'LTR' | 'MTR' | 'STR';
+
 export interface CoCUnitMixEntry {
   id: string;
   beds: number;
@@ -231,6 +234,7 @@ export interface CoCUnitMixEntry {
   rentMonthly: number;   // target (stabilized) rent
   unitsToRenovate?: number;
   leaseUpUnits?: number;
+  rentalType?: RentalType;  // defaults to 'LTR' when absent (backward-compat)
 }
 
 export interface CoCAcquisition {
@@ -242,6 +246,7 @@ export interface CoCAcquisition {
   sfrInPlaceRent: number;
   sfrPreStabRent: number;
   sfrTargetRent: number;
+  sfrRentalType?: RentalType;  // for SFR properties — defaults to 'LTR'
   unitMix: CoCUnitMixEntry[];   // when non-empty, overrides units + grossRentMonthly
   purchasePrice: number;
   arv: number;
@@ -289,6 +294,7 @@ export interface CoCRefinance {
   newInterestRate: number;
   newLoanTermYears: number;
   refiCostPct: number; // closing costs as % of new loan amount
+  refiCapRate?: number; // % — market cap rate at refi (populated from AI assumptions when available)
 }
 
 // Pro Forma types
@@ -325,6 +331,20 @@ export interface ProFormaData {
     stab: number | null;
     stabilized: number;
   };
+  /** MTR-specific vacancy override. Optional — only used when the deal has
+   *  MTR unit types. Same shape as vacancyPct. Consumed by the projector when
+   *  `strategyByType` is populated. */
+  vacancyMtrPct?: {
+    stabilized: number;
+  };
+  /** MTR-specific credit loss / bad debt override. Same pattern as vacancyMtrPct. */
+  creditLossMtrPct?: {
+    stabilized: number;
+  };
+  /** Per-unit-type rental strategy (LTR / MTR / STR). Same length + order as
+   *  `leaseAnniversaryByType`. Populated from acquisition.unitMix so the projector
+   *  can split revenue by strategy for strategy-aware vacancy application. */
+  strategyByType?: string[];
   expenses: ProFormaItem[];
   lossToLeaseT12?: number;    // user-entered T12 loss to lease (annual $) — only for T12 column
   propertyTaxRatePct?: number; // derived: (stabilizedValue * 12) / purchasePrice — used in bisection, never shown to user
@@ -336,7 +356,7 @@ export interface ProFormaData {
    * rent (per unit) and its own 12-month renewal histogram. The projector uses this
    * to compute Year 2+ Gross Lease Rent without blending types together.
    */
-  leaseAnniversaryByType?: { targetRent: number; distribution: number[] }[];
+  leaseAnniversaryByType?: { targetRent: number; inPlaceRent?: number; distribution: number[]; yr1Gross?: number }[];
   yearOverrides?: Record<number, {
     grossRent?: number;
     grossRentSystem?: boolean;       // true = set by rent schedule / calculator (not manual)
@@ -345,7 +365,9 @@ export interface ProFormaData {
     otherIncome?: number;
     otherIncomeGrowthPct?: number;
     vacancyPct?: number;
+    vacancyMtrPct?: number;    // MTR-specific per-year vacancy override
     creditLossPct?: number;
+    creditLossMtrPct?: number; // MTR-specific per-year credit loss override
     expenses?: Record<string, number>; // expenseId -> overridden value
     expenseGrowthPcts?: Record<string, number>; // expenseId -> growth rate
     // Tracks which fields were written by auto-cascade (not manually entered).
@@ -427,6 +449,8 @@ export interface SavedDeal {
   mcResults?: unknown; // SavedMCResults — typed as unknown to avoid circular import
   currentStep?: number;
   calcState?: CalcPersistedState;
+  /** AI-generated assumptions (cap rate, rent info, opex source URLs, confidence). */
+  aiAssumptions?: Record<string, unknown>;
   /** Per-step notes keyed by step index (0–4) */
   stepNotes?: Record<number, string>;
   savedAt: string;

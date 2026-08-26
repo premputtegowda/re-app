@@ -34,6 +34,9 @@ class SavedDeal(Base):
     mc_results_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     current_step: Mapped[int | None] = mapped_column(Integer, nullable=True)
     calc_state_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Full AI assumptions response (source URLs, confidence, cap rate, rent info,
+    # opex metadata) — persisted so provenance survives page reloads.
+    ai_assumptions_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # Sharing
     share_token: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, unique=True, index=True)

@@ -12,6 +12,9 @@ interface DownloadPDFButtonProps {
   proForma: ProFormaData;
   refinance: CoCRefinance;
   result: CoCResult;
+  /** Persisted market assumptions (cap rates, per-unit rents, opex sources).
+   *  Optional — falls back to acquisition/proForma-derived values. */
+  aiAssumptions?: Record<string, unknown> | null;
 }
 
 function sanitizeFilename(name: string): string {
@@ -30,6 +33,7 @@ export default function DownloadPDFButton(props: DownloadPDFButtonProps) {
           proForma={props.proForma}
           refinance={props.refinance}
           result={props.result}
+          aiAssumptions={props.aiAssumptions}
         />
       }
       fileName={filename}

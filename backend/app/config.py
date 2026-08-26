@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     # FRED (Federal Reserve Economic Data) — for market mortgage rate lookup
     fred_api_key: str = ""
 
+    # Serper.dev — Google Search API for AI grounding
+    serper_api_key: str = ""
+
     # Cloudflare R2
     r2_account_id: str = ""
     r2_access_key_id: str = ""

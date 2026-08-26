@@ -1,5 +1,5 @@
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
@@ -33,6 +33,7 @@ class DealPayload(BaseModel):
     mcResults: Any | None = None
     currentStep: int | None = None
     calcState: dict[str, Any] | None = None
+    aiAssumptions: dict[str, Any] | None = None
     savedAt: str
     updatedAt: str
 
@@ -50,6 +51,7 @@ class DealResponse(BaseModel):
     mcResults: Any | None
     currentStep: int | None
     calcState: dict[str, Any] | None
+    aiAssumptions: dict[str, Any] | None
     savedAt: str
     updatedAt: str
 
@@ -69,19 +71,28 @@ class DealUpdatePayload(BaseModel):
     mcResults: Any | None = None
     currentStep: int | None = None
     calcState: dict[str, Any] | None = None
+    aiAssumptions: dict[str, Any] | None = None
     updatedAt: str
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _parse_iso(value: str | None) -> datetime | None:
+    """Parse an ISO 8601 string into a naive UTC datetime.
+
+    JS `.toISOString()` produces TZ-aware ISO strings (trailing Z or offset),
+    but our TIMESTAMP columns are WITHOUT TIME ZONE. asyncpg rejects TZ-aware
+    values against naive columns. We normalize everything to naive UTC here.
+    """
     if not value:
         return None
-    # Accept trailing Z or offset; datetime.fromisoformat handles most JS ISO strings.
     try:
-        return datetime.fromisoformat(value.replace('Z', '+00:00'))
+        dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
     except ValueError:
         return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
 
 
 def _to_response(deal: SavedDeal) -> DealResponse:
@@ -98,6 +109,7 @@ def _to_response(deal: SavedDeal) -> DealResponse:
         mcResults=deal.mc_results_data,
         currentStep=deal.current_step,
         calcState=deal.calc_state_data,
+        aiAssumptions=deal.ai_assumptions_data,
         savedAt=deal.saved_at.isoformat(),
         updatedAt=deal.updated_at.isoformat(),
     )
@@ -160,6 +172,7 @@ async def create_deal(
         mc_results_data=payload.mcResults,
         current_step=payload.currentStep,
         calc_state_data=payload.calcState,
+        ai_assumptions_data=payload.aiAssumptions,
         saved_at=saved_at,
         updated_at=updated_at,
     )
@@ -198,6 +211,7 @@ async def update_deal(
     deal.mc_results_data = payload.mcResults
     deal.current_step = payload.currentStep
     deal.calc_state_data = payload.calcState
+    deal.ai_assumptions_data = payload.aiAssumptions
     deal.updated_at = datetime.utcnow()
 
     await db.commit()
