@@ -316,10 +316,21 @@ export function RehabRentCalculator({
   const [mode] = useState<'renovate' | 'stabilize' | 'manual'>('renovate');
 
   // ── Local rents (in-place + target per type) — entered inside the calculator ──
-  const [localRents, setLocalRents] = useState<LocalRent[]>(() => {
-    if (initialState?.localRents?.length === unitTypes.length) return initialState.localRents;
-    return unitTypes.map(ut => ({ inPlace: ut.inPlaceRent, target: ut.targetRent }));
-  });
+  // Always initialize from the CURRENT `unitTypes` (Step 2 unit mix is the
+  // source of truth for rents). Do NOT seed from `initialState.localRents`
+  // even when it exists — that value comes from calcState persisted at a
+  // prior calculator run and may be stale if the user later edited unit-mix
+  // rents in Step 2. Using stale localRents on mount triggers the auto-apply
+  // effect (line ~640) with those stale values; onApplyRents then pushes
+  // them back to acquisition.unitMix, silently reverting the user's Step 2
+  // edits and cascading into a wrong pf.grossRent.stabilized +
+  // leaseAnniversaryByType via the parent's sync effect.
+  //
+  // In-calculator rent edits are still preserved: they immediately flow to
+  // unit mix via onApplyRents, so re-mount always reads them from unitTypes.
+  const [localRents, setLocalRents] = useState<LocalRent[]>(() =>
+    unitTypes.map(ut => ({ inPlace: ut.inPlaceRent, target: ut.targetRent }))
+  );
 
   const setLocalRent = (t: number, field: keyof LocalRent, val: number) =>
     setLocalRents(prev => prev.map((r, i) => i === t ? { ...r, [field]: val } : r));

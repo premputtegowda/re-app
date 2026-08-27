@@ -13,6 +13,47 @@ import type { CoCAcquisition, CoCCostItem, ProFormaData } from '@/types';
 // insurance-specific growth rate override without affecting other line items.
 const INSURANCE_NAME_RE = /insurance/i;
 
+// AI's `market_rent_estimation.by_unit_type[]` is keyed by unit_type string
+// (e.g. "2BR/1.0BA") and often CONSOLIDATES rows with the same beds/baths
+// into a single entry with `count` = combined. Meanwhile
+// `acquisition.unitMix` allows multiple rows with matching beds/baths (a
+// user may split them by rentalType, tenancy status, etc.). So positional
+// index matching (`byUnitType[i]` for `unitMix[i]`) drops the rent on the
+// second-and-later duplicates.
+//
+// Match by (beds, baths) instead — find the first AI row whose parsed
+// unit_type matches the unitMix row's beds+baths.
+type AiRentEntry = {
+  unit_type?: string;
+  count?: number;
+  estimated_in_place_rent_monthly?: number | null;
+  estimated_market_rent_monthly?: number | null;
+};
+
+function parseUnitTypeStr(s: string | undefined): { beds: number; baths: number } | null {
+  if (!s) return null;
+  const m = s.match(/^(\d+)\s*BR\s*\/\s*([\d.]+)\s*BA/i);
+  if (!m) return null;
+  const beds = Number(m[1]);
+  const baths = Number(m[2]);
+  if (!Number.isFinite(beds) || !Number.isFinite(baths)) return null;
+  return { beds, baths };
+}
+
+function findAiRentForUnit(
+  aiByUnitType: readonly AiRentEntry[],
+  beds: number,
+  baths: number,
+): AiRentEntry | null {
+  for (const entry of aiByUnitType) {
+    const parsed = parseUnitTypeStr(entry.unit_type);
+    if (!parsed) continue;
+    // Small baths tolerance — AI may return "1.0" or "1"
+    if (parsed.beds === beds && Math.abs(parsed.baths - baths) < 0.05) return entry;
+  }
+  return null;
+}
+
 // Same field set the old StepFinancing needed, so the wizard's existing
 // validation + persistence hook up without changes.
 type FinancingFields = Pick<
@@ -337,13 +378,12 @@ export function StepAssumptions({
       // would display AI rents but acquisition.unitMix stays at 0 → the
       // Operations step warning fires + Calculate button is blocked.
       const rentBlock = (result.assumptions?.market_rent_estimation ?? {}) as Record<string, unknown>;
-      const byUnitType = ((rentBlock.by_unit_type as unknown[]) ?? []) as Array<{
-        estimated_in_place_rent_monthly?: number | null;
-        estimated_market_rent_monthly?: number | null;
-      }>;
+      const byUnitType = ((rentBlock.by_unit_type as unknown[]) ?? []) as AiRentEntry[];
       if (data.propertyType === 'mfr' && data.unitMix?.length && byUnitType.length > 0) {
-        const nextUnitMix = data.unitMix.map((u, i) => {
-          const entry = byUnitType[i];
+        // Match AI row → unitMix rows by beds+baths (not by index). Two
+        // unitMix rows of "1BR/1BA" both get the same AI rent applied.
+        const nextUnitMix = data.unitMix.map((u) => {
+          const entry = findAiRentForUnit(byUnitType, u.beds, u.baths);
           if (!entry) return u;
           const inPlace = entry.estimated_in_place_rent_monthly;
           const target  = entry.estimated_market_rent_monthly;
@@ -415,14 +455,14 @@ export function StepAssumptions({
     // 2) Rent backfill — only fill unitMix entries that are still at 0.
     // Preserves any user overrides (non-zero) already in unitMix.
     const rentBlock = (assumptions.market_rent_estimation ?? {}) as Record<string, unknown>;
-    const byUnitType = ((rentBlock.by_unit_type as unknown[]) ?? []) as Array<{
-      estimated_in_place_rent_monthly?: number | null;
-      estimated_market_rent_monthly?: number | null;
-    }>;
+    const byUnitType = ((rentBlock.by_unit_type as unknown[]) ?? []) as AiRentEntry[];
     if (data.propertyType === 'mfr' && data.unitMix?.length && byUnitType.length > 0) {
       let changed = false;
-      const nextUnitMix = data.unitMix.map((u, i) => {
-        const entry = byUnitType[i];
+      // Match AI row → unitMix rows by beds+baths (not by index) so
+      // duplicate unitMix rows (e.g. two 1BR/1BA rows for a split-tenancy
+      // model) both get the AI rent applied.
+      const nextUnitMix = data.unitMix.map((u) => {
+        const entry = findAiRentForUnit(byUnitType, u.beds, u.baths);
         if (!entry) return u;
         const aiInPlace = entry.estimated_in_place_rent_monthly;
         const aiTarget  = entry.estimated_market_rent_monthly;
@@ -449,6 +489,54 @@ export function StepAssumptions({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assumptions, isNewDeal]);
+
+  // Keep `aiAssumptions.market_rent_estimation.by_unit_type` structure aligned
+  // with the current `data.unitMix` — specifically `count`, `unit_type`, and
+  // the list of rows itself. Rent estimation values (in-place / market) are
+  // PRESERVED by matching existing entries on beds+baths.
+  //
+  // Why this exists: AI's response captures a snapshot of unit-mix at AI-run
+  // time. If the user later edits unit-mix count in Step 2 (e.g. 1 → 2 units),
+  // the projector uses the new count for calculations but the Rent Info
+  // table displays the stale AI count. Same for beds/baths edits.
+  //
+  // This sync runs on every unit-mix change but is a no-op when values
+  // already match (early return via JSON-compare avoids infinite loop).
+  useEffect(() => {
+    if (data.propertyType !== 'mfr' || !data.unitMix?.length) return;
+    if (!assumptions) return; // nothing to sync yet — AI hasn't run
+    const rentBlock = (assumptions.market_rent_estimation ?? {}) as Record<string, unknown>;
+    const existingByUnit = ((rentBlock.by_unit_type as unknown[]) ?? []) as AiRentEntry[];
+
+    // Rebuild the by_unit_type array from unitMix, preserving rent values
+    // from any matching existing entry.
+    const nextByUnit = data.unitMix.map((u) => {
+      const match = findAiRentForUnit(existingByUnit, u.beds, u.baths);
+      return {
+        unit_type: `${u.beds}BR/${u.baths}BA`,
+        count: u.count,
+        estimated_in_place_rent_monthly: match?.estimated_in_place_rent_monthly ?? u.inPlaceRent ?? 0,
+        estimated_market_rent_monthly:  match?.estimated_market_rent_monthly  ?? u.rentMonthly  ?? 0,
+        // Preserve any additional fields from the matched entry (source,
+        // confidence, etc.) so the "conf" badge and source URLs survive.
+        ...(match ? Object.fromEntries(
+          Object.entries(match).filter(([k]) =>
+            !['unit_type', 'count', 'estimated_in_place_rent_monthly', 'estimated_market_rent_monthly'].includes(k)
+          )
+        ) : {}),
+      };
+    });
+
+    // No-op guard — if the array already matches (structure + values), skip
+    // the update to avoid an infinite render loop.
+    if (JSON.stringify(existingByUnit) === JSON.stringify(nextByUnit)) return;
+
+    onAssumptionsChange({
+      ...(assumptions ?? {}),
+      market_rent_estimation: { ...rentBlock, by_unit_type: nextByUnit },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.unitMix, data.propertyType]);
 
   return (
     <div className="space-y-6">

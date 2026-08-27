@@ -13,9 +13,17 @@ interface StepExitProps {
   showWarnings?: boolean;
   /** When exit method is cap rate, the refi property value is derived from NOI ÷ cap rate at the refi year. */
   computedRefiValue?: number | null;
+  /** Optional — when provided, the read-only Exit Cap Rate display prefers
+   *  this value over `acquisition.exitCapRate`. Needed because AI regenerate
+   *  updates `aiAssumptions` (parent state) and the sync effect updates
+   *  `acquisition.exitCapRate` on the parent — but if this step is inside
+   *  a WizardEditSession, the session's captured draft.acquisition doesn't
+   *  automatically pick up parent updates. Reading straight from
+   *  aiAssumptions bypasses that stale-capture path. */
+  aiAssumptions?: Record<string, unknown> | null;
 }
 
-export function StepExit({ acquisition, refinance, onAcquisitionChange, onRefinanceChange, showWarnings = false, computedRefiValue }: StepExitProps) {
+export function StepExit({ acquisition, refinance, onAcquisitionChange, onRefinanceChange, showWarnings = false, computedRefiValue, aiAssumptions }: StepExitProps) {
   const [refiOpen, setRefiOpen] = useState(refinance.enabled);
   const projectionYears = acquisition.projectionYears || 5;
   const method = acquisition.exitMethod ?? 'value';
@@ -76,21 +84,36 @@ export function StepExit({ acquisition, refinance, onAcquisitionChange, onRefina
             />
           )}
 
-          {/* Cap Rate — NOI-based exit */}
-          {method === 'capRate' && (
-            <Input
-              label="Exit Cap Rate (%)"
-              type="number"
-              fullWidth
-              min={0}
-              max={20}
-              step={0.25}
-              placeholder="e.g. 6.0"
-              value={acquisition.exitCapRate || ''}
-              onChange={(e) => onAcquisitionChange('exitCapRate', Number(e.target.value))}
-              helperText="Exit value = final-year NOI ÷ cap rate"
-            />
-          )}
+          {/* Cap Rate — NOI-based exit. Source of truth is the Assumptions
+              step's "Exit Cap Rate" input; shown here read-only so the two
+              places can't diverge (previously users would edit it here after
+              already setting it in Assumptions, and confusion followed). */}
+          {method === 'capRate' && (() => {
+            // Prefer aiAssumptions.cap_rate_estimation.exit_cap_rate_pct
+            // over acquisition.exitCapRate because aiAssumptions is the
+            // source of truth in the Assumptions step and is hoisted at
+            // the parent — always up-to-date. acquisition.exitCapRate is
+            // synced from aiAssumptions but may be stale inside a
+            // WizardEditSession's captured draft.
+            const aiCap = (aiAssumptions as { cap_rate_estimation?: { exit_cap_rate_pct?: number | null } } | undefined)?.cap_rate_estimation?.exit_cap_rate_pct;
+            const displayCap = (typeof aiCap === 'number' && aiCap > 0)
+              ? aiCap
+              : acquisition.exitCapRate;
+            return (
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                  Exit Cap Rate (%)
+                </label>
+                <div className="w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 text-sm text-slate-700 dark:text-slate-300 tabular-nums flex items-center justify-between">
+                  <span>{displayCap > 0 ? `${displayCap.toFixed(2)}%` : '—'}</span>
+                  <span className="text-xs text-slate-400 italic">from Assumptions</span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Exit value = final-year NOI ÷ cap rate. Edit the rate in the Assumptions step.
+                </p>
+              </div>
+            );
+          })()}
 
           {/* Selling costs — always visible */}
           <Input

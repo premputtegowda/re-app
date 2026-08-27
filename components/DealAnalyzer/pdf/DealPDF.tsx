@@ -100,12 +100,18 @@ const styles = StyleSheet.create({
   kvRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
     paddingVertical: 3,
     borderBottomWidth: 0.5,
     borderBottomColor: COLORS.hairline,
+    gap: 12,
   },
-  kvLabel: { color: COLORS.slate },
-  kvValue: { color: COLORS.ink, fontFamily: 'Helvetica-Bold' },
+  // paddingRight guarantees space between the label and value even when
+  // the value wraps or when `gap` isn't honored by older react-pdf versions.
+  kvLabel: { color: COLORS.slate, paddingRight: 8 },
+  // flexShrink lets long address strings wrap gracefully instead of
+  // overflowing the column; textAlign keeps the value right-aligned.
+  kvValue: { color: COLORS.ink, fontFamily: 'Helvetica-Bold', flexShrink: 1, textAlign: 'right' },
 
   twoCol: { flexDirection: 'row', gap: 20, marginTop: 4 },
   col: { flex: 1 },
@@ -535,24 +541,55 @@ export function DealPDF({
       <Page size="LETTER" style={styles.page}>
         <PageHeader dealName={dealName} address={address} pageLabel="Assumptions" generatedAt={generatedAt} />
 
-        {(entryCap != null || exitCapFromAi != null) && (
-          <>
-            <Text style={styles.sectionTitle}>Cap Rate Assumptions</Text>
-            <View style={styles.twoCol}>
-              <View style={styles.col}>
-                {entryCap != null && <KV label="Current Market Cap" value={formatPct(entryCap)} />}
-                {exitCapFromAi != null && <KV label="Exit Cap" value={formatPct(exitCapFromAi)} />}
-                {entryCap != null && exitCapFromAi != null && (
-                  <KV label="Spread" value={`${(exitCapFromAi - entryCap) >= 0 ? '+' : ''}${(exitCapFromAi - entryCap).toFixed(2)}%`} />
-                )}
+        {/* Exit assumption block — swaps between Cap Rate Assumptions and
+            ARV Assumption depending on `acquisition.exitMethod`. Users who
+            exit on ARV (not cap rate) shouldn't see cap-rate math in the
+            PDF, it's not what's driving their terminal value. */}
+        {acquisition.exitMethod === 'capRate' ? (
+          (entryCap != null || exitCapFromAi != null) && (
+            <>
+              <Text style={styles.sectionTitle}>Cap Rate Assumptions</Text>
+              <View style={styles.twoCol}>
+                <View style={styles.col}>
+                  {entryCap != null && <KV label="Current Market Cap" value={formatPct(entryCap)} />}
+                  {exitCapFromAi != null && <KV label="Exit Cap" value={formatPct(exitCapFromAi)} />}
+                  {entryCap != null && exitCapFromAi != null && (
+                    <KV label="Spread" value={`${(exitCapFromAi - entryCap) >= 0 ? '+' : ''}${(exitCapFromAi - entryCap).toFixed(2)}%`} />
+                  )}
+                </View>
+                <View style={styles.col}>
+                  {impliedValueAtEntry != null && (
+                    <KV label="Implied Value @ Entry" value={formatCurrency(impliedValueAtEntry)} />
+                  )}
+                </View>
               </View>
-              <View style={styles.col}>
-                {impliedValueAtEntry != null && (
-                  <KV label="Implied Value @ Entry" value={formatCurrency(impliedValueAtEntry)} />
-                )}
+            </>
+          )
+        ) : (
+          acquisition.arv > 0 && (
+            <>
+              <Text style={styles.sectionTitle}>ARV Assumption</Text>
+              <View style={styles.twoCol}>
+                <View style={styles.col}>
+                  <KV label="ARV / Exit Value" value={formatCurrency(acquisition.arv)} />
+                  {acquisition.purchasePrice > 0 && (
+                    <KV
+                      label="Value Uplift vs Purchase"
+                      value={`${acquisition.arv >= acquisition.purchasePrice ? '+' : ''}${(((acquisition.arv - acquisition.purchasePrice) / acquisition.purchasePrice) * 100).toFixed(1)}%`}
+                    />
+                  )}
+                </View>
+                <View style={styles.col}>
+                  {acquisition.purchasePrice > 0 && (
+                    <KV
+                      label="Purchase Price"
+                      value={formatCurrency(acquisition.purchasePrice)}
+                    />
+                  )}
+                </View>
               </View>
-            </View>
-          </>
+            </>
+          )
         )}
 
         <Text style={styles.sectionTitle}>Growth</Text>

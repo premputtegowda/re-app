@@ -55,8 +55,18 @@ export function makeProFormaProjector(pf: ProFormaData) {
 
     const marketRent = chainedValue('grossRent', 'grossRentGrowthPct', pf.grossRent.stabilized, pf.grossRent.growthPct, year);
 
-    // Year 1 → no LTL applied here (Year 1's actual rent comes from the simulator override)
-    if (year <= 1) return marketRent;
+    // Year 1 gross = actual collected rent, NOT market. If the deal has an
+    // in-place (T-12) total that differs from market (target), the property
+    // is currently renting below market and Yr 1 collections reflect that.
+    // Only use market when in-place isn't set OR when in-place ≥ market
+    // (rare — implies above-market rents, e.g. rent-controlled expiring).
+    // A simulator override at yearOverrides[1].grossRent takes precedence
+    // (handled at the top of this function) — that's the path for value-add
+    // deals with lease-up ramp.
+    if (year <= 1) {
+      const inPlaceTotal = pf.grossRent.t12 || 0;
+      return inPlaceTotal > 0 && inPlaceTotal < marketRent ? inPlaceTotal : marketRent;
+    }
 
     const growthRate = pf.grossRent.growthPct / 100;
 

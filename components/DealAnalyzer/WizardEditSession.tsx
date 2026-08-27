@@ -89,6 +89,13 @@ export interface WizardEditSessionProps {
   /** Fired whenever the autosave status changes. Lets the parent surface
    *  a "saving / saved / error" indicator without prop-drilling. */
   onAutoSaveStateChange?: (status: AutoSaveStatus) => void;
+  /** Fired whenever the draft mutates (any setter) with the current draft,
+   *  and once with `null` when the session unmounts. Lets the parent
+   *  observe the in-flight draft so its live-recompute (e.g. IRR, NOI,
+   *  Yearly Projections) can read from the draft instead of stale
+   *  committed state — without breaking Cancel semantics (unmount →
+   *  onDraftChange(null) → parent falls back to committed state). */
+  onDraftChange?: (draft: WizardEditSessionDraft | null) => void;
   /** Rent-sync effect respects `preStabMethod === 'calculator'` to avoid
    *  stomping on calculator-driven year overrides. */
   preStabMethod: 'calculator' | 'manual' | null;
@@ -109,6 +116,7 @@ export function WizardEditSession({
   onAutoSave,
   autoSaveDelayMs = 1500,
   onAutoSaveStateChange,
+  onDraftChange,
   preStabMethod,
   defaults,
   children,
@@ -159,6 +167,18 @@ export function WizardEditSession({
   // Snapshot the latest draft once per render so useEffect deps see stable
   // (by-value) primitives and React's change-detection works normally.
   const draft = draftRef.current;
+
+  // Publish the draft upward on every mutation so the parent can read
+  // in-flight values for live recompute (e.g. IRR, Yearly Projections).
+  // Cleanup fires `null` on unmount — parent then falls back to its
+  // committed state, which is what Cancel semantics require.
+  useEffect(() => {
+    onDraftChange?.(draft);
+  }, [draft, onDraftChange]);
+  useEffect(() => {
+    return () => { onDraftChange?.(null); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Debounced background persistence. Fires ~1.5s after the user stops
   // typing so a browser crash / tab close mid-edit doesn't lose typed
@@ -278,6 +298,43 @@ export function WizardEditSession({
       });
     }
   }, [acquisition.unitMix, acquisition.propertyType, acquisition.sfrTargetRent, acquisition.sfrInPlaceRent, acquisition.sfrPreStabRent, preStabMethod, setOperations, setProForma]);
+
+  // ── Effect 1b: sync leaseAnniversaryByType targetRent/inPlaceRent from
+  // the current unitMix. Anniversary array is otherwise only written by the
+  // RehabRentCalculator's onApply cycle, so a user editing unit-mix rents
+  // in Assumptions (or elsewhere) without re-visiting the calculator leaves
+  // anniversary.targetRent stale. The projector's Yr 2+ gross rent and Yr
+  // 1 vacancy calc both use anniversary targets → stale here means wrong
+  // returns until the calculator re-runs.
+  //
+  // Parent has the same sync effect (DealAnalyzerForm.tsx) but it watches
+  // parent.acquisition and doesn't fire during a session edit — this
+  // in-session version is what covers rent edits made mid-session.
+  //
+  // No-op guard prevents infinite loops (only fires when a value differs).
+  useEffect(() => {
+    if (acquisition.propertyType !== 'mfr' || acquisition.unitMix.length === 0) return;
+    setProForma((prev) => {
+      const byType = prev.leaseAnniversaryByType ?? [];
+      if (byType.length !== acquisition.unitMix.length) return prev;
+      const needsUpdate = acquisition.unitMix.some((u, i) => {
+        const t = byType[i];
+        if (!t) return false;
+        const currentTarget = u.rentMonthly || 0;
+        const currentInPlace = u.inPlaceRent || 0;
+        return t.targetRent !== currentTarget || (t.inPlaceRent ?? 0) !== currentInPlace;
+      });
+      if (!needsUpdate) return prev;
+      return {
+        ...prev,
+        leaseAnniversaryByType: byType.map((t, i) => ({
+          ...t,
+          targetRent: acquisition.unitMix[i]?.rentMonthly ?? t.targetRent,
+          inPlaceRent: acquisition.unitMix[i]?.inPlaceRent ?? t.inPlaceRent ?? 0,
+        })),
+      };
+    });
+  }, [acquisition.unitMix, acquisition.propertyType, setProForma]);
 
   // ── Effect 2: auto-set exitMethod on MFR unit-count threshold ─────────
   // prevWasLargeMFR lives for the session's lifetime — unmount wipes it,

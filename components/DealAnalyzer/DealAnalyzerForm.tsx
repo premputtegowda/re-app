@@ -21,6 +21,7 @@ import { ResultsPanel } from './ResultsPanel';
 import { ProFormaGrid, defaultProForma } from './ProFormaGrid';
 import { RehabRentCalculator, simulateFromSchedule } from './RehabRentCalculator';
 import { WizardEditSession, type WizardEditSessionDraft } from './WizardEditSession';
+import { enrichProFormaForDisplay, buildProFormaMatrix } from '@/utils/dealSummary';
 import type { AutoSaveStatus } from '@/hooks/useDebouncedAutoSave';
 import type { CalcPersistedState } from '@/types';
 import { projectScenario, formatCurrencyCompact } from '@/utils/dealAnalyzerCalc';
@@ -647,18 +648,22 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   // Sync AI cap rates → downstream fields.
   //  - exit_cap_rate_pct → acquisition.exitCapRate (drives Exit step + exit-value calc)
   //  - current_market_cap_rate_pct → refinance.refiCapRate (default for refi valuation)
-  // Only fills fields that are still at their defaults so we don't stomp on
-  // user edits made directly in the Exit / Refi steps.
+  // Assumptions page owns the cap rate — this effect keeps
+  // acquisition.exitCapRate and refinance.refiCapRate CONTINUOUSLY in sync
+  // (no "only if 0" guard). Exit & Refi step now shows exit cap read-only
+  // and points users back to Assumptions for edits, so bidirectional
+  // conflict is impossible. Only push a change when the value actually
+  // differs to avoid an infinite loop.
   useEffect(() => {
     const cap = (aiAssumptions as { cap_rate_estimation?: { current_market_cap_rate_pct?: number; exit_cap_rate_pct?: number } } | null)?.cap_rate_estimation;
     if (!cap) return;
     const exitPct = cap.exit_cap_rate_pct;
     if (typeof exitPct === 'number' && exitPct > 0) {
-      setAcquisition((prev) => (prev.exitCapRate > 0 ? prev : { ...prev, exitCapRate: exitPct }));
+      setAcquisition((prev) => (prev.exitCapRate === exitPct ? prev : { ...prev, exitCapRate: exitPct }));
     }
     const entryPct = cap.current_market_cap_rate_pct;
     if (typeof entryPct === 'number' && entryPct > 0) {
-      setRefinance((prev) => (prev.refiCapRate && prev.refiCapRate > 0 ? prev : { ...prev, refiCapRate: entryPct }));
+      setRefinance((prev) => (prev.refiCapRate === entryPct ? prev : { ...prev, refiCapRate: entryPct }));
     }
   }, [aiAssumptions]);
   const [aiCost, setAiCost] = useState<{
@@ -749,6 +754,14 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
   const [autoSaveStatus, setAutoSaveStatus] = useState<AutoSaveStatus>('idle');
   const autoSaveStatusRef = useRef<AutoSaveStatus>('idle');
   useEffect(() => { autoSaveStatusRef.current = autoSaveStatus; }, [autoSaveStatus]);
+
+  // Mirror of the WizardEditSession's in-flight draft, published via its
+  // `onDraftChange` callback. When a session is mounted, this holds the
+  // user's uncommitted edits; when the session unmounts (Cancel), it's
+  // reset to null and the live-recompute (see `liveBaseResult` below)
+  // falls back to committed parent state — which is exactly Cancel's
+  // "discard my changes" semantics.
+  const [sessionDraft, setSessionDraft] = useState<WizardEditSessionDraft | null>(null);
 
   // Pre-edit snapshot captured when the user enters edit mode. Used by the
   // Cancel handler to roll back autosaved changes so Cancel still means
@@ -945,6 +958,45 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
       });
     }
   }, [acquisition.unitMix, acquisition.propertyType, acquisition.sfrTargetRent, acquisition.sfrInPlaceRent, acquisition.sfrPreStabRent, preStabMethod]);
+
+  // Sync `pf.leaseAnniversaryByType[i].targetRent` and `.inPlaceRent` from
+  // `acquisition.unitMix[i]` whenever unit-mix rents change.
+  //
+  // Why this exists: the projector uses `pf.leaseAnniversaryByType` for
+  // Yr 2+ gross rent (via the anniversary model), and that array is
+  // ONLY written by the RehabRentCalculator's apply cycle. If a user
+  // edits a unit-mix rent in Step 2 or Assumptions without re-visiting
+  // the calculator step, `pf.grossRent.stabilized` updates via the
+  // sibling effect above but `leaseAnniversaryByType[i].targetRent`
+  // stays stale — the projector then computes Yr 2+ gross with the
+  // OLD target and LTL is wrong for future years.
+  //
+  // Early-return guards prevent infinite loops: only fires when a
+  // value actually differs, and only when array lengths match (we don't
+  // fabricate anniversary rows here — that's still the calculator's job).
+  useEffect(() => {
+    if (acquisition.propertyType !== 'mfr' || acquisition.unitMix.length === 0) return;
+    setProForma((prev) => {
+      const byType = prev.leaseAnniversaryByType ?? [];
+      if (byType.length !== acquisition.unitMix.length) return prev;
+      const needsUpdate = acquisition.unitMix.some((u, i) => {
+        const t = byType[i];
+        if (!t) return false;
+        const currentTarget = u.rentMonthly || 0;
+        const currentInPlace = u.inPlaceRent || 0;
+        return t.targetRent !== currentTarget || (t.inPlaceRent ?? 0) !== currentInPlace;
+      });
+      if (!needsUpdate) return prev;
+      return {
+        ...prev,
+        leaseAnniversaryByType: byType.map((t, i) => ({
+          ...t,
+          targetRent: acquisition.unitMix[i]?.rentMonthly ?? t.targetRent,
+          inPlaceRent: acquisition.unitMix[i]?.inPlaceRent ?? t.inPlaceRent ?? 0,
+        })),
+      };
+    });
+  }, [acquisition.unitMix, acquisition.propertyType]);
 
   // Auto-set exit method based on property type + unit count:
   //   MFR > 4 units  → 'capRate'
@@ -2444,6 +2496,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
             onRefinanceChange={updateRefinance}
             showWarnings={isVisited}
             computedRefiValue={computedRefiValue}
+            aiAssumptions={aiAssumptions}
           />
         );
       case 5:
@@ -2603,8 +2656,68 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
 
   // ── Derived ──
 
-  const currentResult = scenarioResults[activeType] ?? null;
-  const hasAnyResult = Object.keys(scenarioResults).length > 0;
+  // Live-recompute the base scenario on every input change. Any edit to
+  // acquisition / operations / proForma / refinance immediately updates
+  // IRR, NOI, cash flow, and every downstream metric — no stale-cache
+  // window between the user's input and what the UI shows.
+  //
+  // Address changes deliberately DON'T trigger a recompute because
+  // `projectScenario` doesn't depend on address (Census tract, taxes,
+  // etc. flow via aiAssumptions/pf separately). Excluding address from
+  // deps prevents needless recomputation while the user is typing an
+  // address string.
+  //
+  // Non-base scenarios (bear/bull/user-created what-ifs) stay cached in
+  // scenarioResults — they were computed against user-authored knob
+  // values, not the current inputs.
+  // When a WizardEditSession is mounted, its in-flight draft is the
+  // user-visible state — read from it so calculations update live during
+  // an edit. When the session unmounts (Cancel), sessionDraft is null and
+  // we fall back to committed parent state — Cancel semantics preserved.
+  const effectiveAcquisition = sessionDraft?.acquisition ?? acquisition;
+  const effectiveProFormaRaw = sessionDraft?.proForma    ?? proForma;
+  const effectiveRefinance   = sessionDraft?.refinance   ?? refinance;
+  const effectiveOperations  = sessionDraft?.operations  ?? operations;
+
+  // Apply the SAME enrichment that Pro Forma Grid / PDF / Shared View use,
+  // so the deterministic base returns (IRR, NOI, Yearly Projections) share
+  // identical inputs with those display surfaces. Without this, aiAssumptions
+  // opex bulk-sync applied by the enrichment could produce a different OpEx
+  // total than the raw pf.expenses used by projectScenario — Pro Forma Grid
+  // NOI would then diverge from Yearly Projections NOI (root cause of the
+  // recurring "why don't these match?" class of bug).
+  const effectiveProForma = useMemo(
+    () => enrichProFormaForDisplay(effectiveProFormaRaw, effectiveAcquisition, aiAssumptions),
+    [effectiveProFormaRaw, effectiveAcquisition, aiAssumptions],
+  );
+
+  const liveBaseResult = useMemo(() => {
+    const scenario: CoCScenario = {
+      id: 'live-base',
+      name: CHIP_LABELS[activeType],
+      scenarioType: activeType,
+      acquisition: effectiveAcquisition,
+      operations:  effectiveOperations,
+      proForma:    effectiveProForma,
+      refinance:   effectiveRefinance,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    return projectScenario(scenario);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveAcquisition, effectiveOperations, effectiveProForma, effectiveRefinance]);
+
+  // Sync the live base result into scenarioResults so autosave persists
+  // the current computation (shared view + PDF read from persisted state).
+  useEffect(() => {
+    setScenarioResults((prev) => {
+      if (prev[activeType] === liveBaseResult) return prev;
+      return { ...prev, [activeType]: liveBaseResult };
+    });
+  }, [liveBaseResult, activeType]);
+
+  const currentResult = liveBaseResult;
+  const hasAnyResult = true; // liveBaseResult always exists — no more "must click Calculate first"
 
   // When exit method is cap rate, derive refi property value from the projection's NOI at refi year
   const computedRefiValue: number | null = (() => {
@@ -2884,6 +2997,7 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                               onSaveDraft={(draft) => handleSaveDraftFromSession(draft)}
                               onAutoSave={handleAutoSaveFromSession}
                               onAutoSaveStateChange={setAutoSaveStatus}
+                              onDraftChange={setSessionDraft}
                               preStabMethod={preStabMethod}
                               defaults={{
                                 propertyMgmtPct: defaultPropertyMgmtPct,
@@ -2983,52 +3097,28 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         {/* Calculate / prompt / results */}
         {allStepsCompleted && (
           <div ref={resultsRef} className="pt-2 space-y-4">
-            {!hasAnyResult && (
-              hasAnyWarning ? (
-                <div className="text-center space-y-1" data-testid="calc-missing-fields-msg">
-                  <p className="text-sm text-amber-600 dark:text-amber-400">
-                    Fill in the highlighted fields to see your returns
-                  </p>
-                  <p className="text-xs text-slate-400 dark:text-slate-500">
-                    or{' '}
-                    <button type="button" onClick={onBack} className="text-primary-500 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 font-medium transition-colors">
-                      return to dashboard
-                    </button>
-                    {' '}to fill in the data later
-                  </p>
-                </div>
-              ) : (
-                <Button
-                  variant="primary"
-                  fullWidth
-                  onClick={handleCalculate}
-                  data-testid="calculate-btn"
-                >
-                  <Calculator size={16} className="mr-2" />
-                  See Your Returns
-                </Button>
-              )
-            )}
+            {/* Results are ALWAYS live — `liveBaseResult` recomputes on every
+                input change via useMemo. The old "click Calculate to see /
+                refresh returns" prompts have been removed so users don't
+                have to click through to see deterministic returns.
 
-            {hasAnyResult && resultsStale && calcPhase === 'idle' && (
-              hasAnyWarning ? (
-                <p className="text-center text-sm text-amber-600 dark:text-amber-400 py-6" data-testid="calc-incomplete-warning">
-                  Some fields are missing — results may be incomplete
+                What "Calculate Returns" still does: re-runs the RehabRent
+                calculator sim (to refresh anniversaryByType + yearOverrides)
+                and re-runs the Monte Carlo distribution (expensive, so it
+                stays gated behind a button). Rebranded as "Run Risk Analysis". */}
+            {hasAnyResult && resultsStale && calcPhase === 'idle' && !hasAnyWarning && (
+              <div className="flex items-center justify-between gap-4 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 px-4 py-3">
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                  Base returns update live above. Risk analysis (Monte Carlo distribution) may be stale — re-run to refresh.
                 </p>
-              ) : (
-                <div className="text-center space-y-3 py-6">
-                  <p className="text-sm text-slate-500 dark:text-slate-400">
-                    Your inputs have changed since the last calculation
-                  </p>
-                  <Button variant="primary" onClick={handleCalculate}>
-                    <RotateCcw size={15} className="mr-2" />
-                    Refresh your returns
-                  </Button>
-                </div>
-              )
+                <Button variant="secondary" onClick={handleCalculate}>
+                  <RotateCcw size={14} className="mr-2" />
+                  Run Risk Analysis
+                </Button>
+              </div>
             )}
 
-            {hasAnyResult && !resultsStale && (
+            {hasAnyResult && (
               hasAnyWarning ? (
                 <div className="text-center space-y-2 py-8">
                   <AlertTriangle size={24} className="text-amber-500 mx-auto" />
@@ -3043,10 +3133,10 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
                 <div style={calcPhase === 'idle' || calcPhase === 'done' ? { animation: 'fade-in 0.6s ease-out' } : undefined}>
                   <ResultsPanel
                     result={currentResult!}
-                    acquisition={acquisition}
-                    operations={operations}
-                    proForma={proForma}
-                    refinance={refinance}
+                    acquisition={effectiveAcquisition}
+                    operations={effectiveOperations}
+                    proForma={effectiveProForma}
+                    refinance={effectiveRefinance}
                     dealName={saveName || defaultSaveName(acquisition)}
                     mcRanges={mcRanges}
                     onMcRangesChange={setMcRanges}
@@ -3148,22 +3238,14 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
         return (
           <div className="fixed bottom-[60px] lg:bottom-0 left-0 right-0 z-50 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 shadow-[0_-4px_16px_rgba(0,0,0,0.06)]">
             <div className="max-w-4xl mx-auto px-3 pt-2.5" style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}>
-              {resultsStale && calcPhase === 'idle' ? (
-                <div className="flex items-center justify-between py-1">
-                  <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">Inputs changed — results may be outdated</p>
-                  <button type="button" onClick={handleCalculate}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 text-white text-xs font-semibold hover:bg-primary-700 transition-colors shrink-0">
-                    <RotateCcw size={12} /> Refresh
-                  </button>
-                </div>
-              ) : calcPhase !== 'idle' && calcPhase !== 'done' ? (
+              {calcPhase !== 'idle' && calcPhase !== 'done' ? (
                 <div className="flex items-center gap-2 py-1">
                   <svg className="w-4 h-4 text-primary-500 shrink-0 animate-spin" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
                   </svg>
                   <p className="text-xs font-medium text-primary-600 dark:text-primary-400">
-                    {calcPhase === 'returns' ? 'Calculating returns…' : 'Running risk analysis…'}
+                    {calcPhase === 'returns' ? 'Refreshing calculator…' : 'Running risk analysis…'}
                   </p>
                 </div>
               ) : (
@@ -3240,6 +3322,178 @@ export function DealAnalyzerForm({ initialDeal }: DealAnalyzerFormProps) {
           </div>
         );
       })()}
+
+      {/* ── Debug sidebar: live view of state feeding the calc ──────────── */}
+      {/* Toggle with the button. Content updates on every render, showing */}
+      {/* the effective inputs (post session-draft merge) and the resulting */}
+      {/* Yr 1-N calc output. Position: fixed right, scrollable. */}
+      <DebugCalcSidebar
+        sessionDraft={sessionDraft}
+        committedAcquisition={acquisition}
+        committedProForma={proForma}
+        committedRefinance={refinance}
+        committedOperations={operations}
+        effectiveAcquisition={effectiveAcquisition}
+        effectiveProForma={effectiveProForma}
+        effectiveRefinance={effectiveRefinance}
+        effectiveOperations={effectiveOperations}
+        result={liveBaseResult}
+        aiAssumptions={aiAssumptions}
+      />
+    </div>
+  );
+}
+
+// ── Debug sidebar ─────────────────────────────────────────────────────────
+// Toggle-able fixed panel. Always live because it just consumes props that
+// re-render with the parent. Formats key slices as JSON so we can eyeball
+// exactly what the calc is using vs what's committed.
+
+interface DebugCalcSidebarProps {
+  sessionDraft: WizardEditSessionDraft | null;
+  committedAcquisition: CoCAcquisition;
+  committedProForma: ProFormaData;
+  committedRefinance: CoCRefinance;
+  committedOperations: CoCOperations;
+  effectiveAcquisition: CoCAcquisition;
+  effectiveProForma: ProFormaData;
+  effectiveRefinance: CoCRefinance;
+  effectiveOperations: CoCOperations;
+  result: CoCResult;
+  aiAssumptions: Record<string, unknown> | null;
+}
+
+function DebugCalcSidebar({
+  sessionDraft, committedAcquisition, committedProForma,
+  committedRefinance, committedOperations,
+  effectiveAcquisition, effectiveProForma,
+  effectiveRefinance, effectiveOperations,
+  result, aiAssumptions,
+}: DebugCalcSidebarProps) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  const aiRentRows = (aiAssumptions?.market_rent_estimation as { by_unit_type?: unknown[] } | undefined)?.by_unit_type;
+
+  const inputs = {
+    sessionActive: !!sessionDraft,
+    readingFrom: sessionDraft ? 'sessionDraft' : 'committed',
+    unitMix: effectiveAcquisition.unitMix?.map((u) => ({
+      beds: u.beds, baths: u.baths, count: u.count,
+      target: u.rentMonthly, inPlace: u.inPlaceRent,
+      strategy: u.rentalType ?? 'LTR',
+      reno: u.unitsToRenovate ?? 0, leaseUp: u.leaseUpUnits ?? 0,
+    })),
+    grossRent: effectiveProForma.grossRent,
+    lossToLeaseT12: effectiveProForma.lossToLeaseT12,
+    otherIncome: effectiveProForma.otherIncome,
+    vacancyPct: effectiveProForma.vacancyPct,
+    creditLossPct: effectiveProForma.creditLossPct,
+    vacancyMtrPct: effectiveProForma.vacancyMtrPct,
+    strategyByType: effectiveProForma.strategyByType,
+    yearOverrides: effectiveProForma.yearOverrides,
+    anniversaryTargetRents: effectiveProForma.leaseAnniversaryByType?.map((t) => ({
+      target: t.targetRent, inPlace: t.inPlaceRent, yr1Gross: t.yr1Gross,
+      distribution: t.distribution,
+    })),
+    exitCapRate: effectiveAcquisition.exitCapRate,
+    interestRate: effectiveAcquisition.interestRate,
+    purchasePrice: effectiveAcquisition.purchasePrice,
+  };
+
+  const output = {
+    yearlyProjections: result.yearlyProjections?.map((p) => ({
+      yr: p.year,
+      market: Math.round(p.marketRent),
+      gross: Math.round(p.grossRent),
+      // Loss to lease = market rent (potential) − gross rent (collected).
+      // Positive value = user is renting below market. Zero when Yr 1
+      // stabilized deals or when anniversary model puts all units at
+      // full market rate for the year.
+      ltl: Math.round(p.marketRent - p.grossRent),
+      egi: Math.round(p.effectiveRent),
+      opex: Math.round(p.opex),
+      noi: Math.round(p.noi),
+      cf: Math.round(p.cashFlow),
+      coc: Number(p.coCReturn?.toFixed(2)),
+    })),
+    equityMultiple: Number(result.equityMultiple?.toFixed(3)),
+    avgCoC: Number(result.avgCoCReturn?.toFixed(2)),
+    totalInvested: result.totalInvested,
+    terminalValue: result.terminalPropertyValue,
+  };
+
+  // Pro Forma Grid NOI — computed via buildProFormaMatrix on the same
+  // enriched proForma the on-screen grid uses. Included in the debug JSON
+  // so we can spot divergence between the two NOI code paths.
+  const proFormaMatrix = buildProFormaMatrix(effectiveProForma, effectiveAcquisition.projectionYears || 5);
+  const noiRow = proFormaMatrix.find((r) => r.label === 'Net Operating Income (NOI)');
+  const proFormaOutput = noiRow ? {
+    noiByYear: noiRow.years?.map((v, i) => ({ yr: i + 1, noi: Math.round(v) })),
+    t12: Math.round(noiRow.t12),
+  } : { note: 'NOI row not found in Pro Forma matrix' };
+
+  // Diff view — highlight where draft differs from committed
+  const diffs: string[] = [];
+  if (sessionDraft) {
+    const cUnits = committedAcquisition.unitMix?.map(u => `${u.count}x${u.beds}BR t=${u.rentMonthly} ip=${u.inPlaceRent}`).join('|');
+    const dUnits = effectiveAcquisition.unitMix?.map(u => `${u.count}x${u.beds}BR t=${u.rentMonthly} ip=${u.inPlaceRent}`).join('|');
+    if (cUnits !== dUnits) diffs.push(`unitMix: committed [${cUnits}] → draft [${dUnits}]`);
+    if (committedProForma.grossRent?.stabilized !== effectiveProForma.grossRent?.stabilized) {
+      diffs.push(`grossRent.stabilized: ${committedProForma.grossRent?.stabilized} → ${effectiveProForma.grossRent?.stabilized}`);
+    }
+    if (committedProForma.grossRent?.t12 !== effectiveProForma.grossRent?.t12) {
+      diffs.push(`grossRent.t12: ${committedProForma.grossRent?.t12} → ${effectiveProForma.grossRent?.t12}`);
+    }
+  }
+
+  // Suppress unused warnings for future-diff readers
+  void committedRefinance; void committedOperations; void effectiveRefinance; void effectiveOperations;
+
+  return (
+    <div
+      className="fixed top-4 right-4 z-50 w-96 max-h-[calc(100vh-2rem)] bg-slate-900 dark:bg-slate-950 text-slate-100 rounded-lg shadow-2xl border border-slate-700 flex flex-col"
+      style={{ fontFamily: 'ui-monospace, monospace' }}
+    >
+      <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700 shrink-0">
+        <span className="text-xs font-bold">🐛 Live Calc State</span>
+        <button
+          type="button"
+          onClick={() => setCollapsed(v => !v)}
+          className="text-xs px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600"
+        >
+          {collapsed ? 'Expand' : 'Collapse'}
+        </button>
+      </div>
+      {!collapsed && (
+        <div className="overflow-y-auto px-3 py-2 text-[10px] leading-tight space-y-2">
+          {sessionDraft && (
+            <div className="bg-amber-950/50 border border-amber-700 rounded px-2 py-1">
+              <div className="font-bold text-amber-300">Session active</div>
+              {diffs.length > 0 ? diffs.map((d, i) => (
+                <div key={i} className="text-amber-200 text-[9px] break-words">{d}</div>
+              )) : <div className="text-amber-200 text-[9px]">draft matches committed</div>}
+            </div>
+          )}
+          <div>
+            <div className="font-bold text-emerald-400 mb-0.5">Inputs (feeding calc)</div>
+            <pre className="whitespace-pre-wrap break-words text-[9.5px]">{JSON.stringify(inputs, null, 2)}</pre>
+          </div>
+          <div>
+            <div className="font-bold text-cyan-400 mb-0.5">Output (liveBaseResult — Yearly Projections)</div>
+            <pre className="whitespace-pre-wrap break-words text-[9.5px]">{JSON.stringify(output, null, 2)}</pre>
+          </div>
+          <div>
+            <div className="font-bold text-orange-400 mb-0.5">Pro Forma NOI (buildProFormaMatrix)</div>
+            <pre className="whitespace-pre-wrap break-words text-[9.5px]">{JSON.stringify(proFormaOutput, null, 2)}</pre>
+          </div>
+          {aiRentRows && (
+            <div>
+              <div className="font-bold text-purple-400 mb-0.5">AI market_rent_estimation.by_unit_type</div>
+              <pre className="whitespace-pre-wrap break-words text-[9.5px]">{JSON.stringify(aiRentRows, null, 2)}</pre>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
