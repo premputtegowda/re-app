@@ -16,3 +16,44 @@ models:
       - name: pop_latest
         tests:
           - not_null
+
+  - name: int_migration_3yr_accel
+    description: >
+      Tier 1 demand signal: per-capita net domestic migration + 3yr
+      acceleration. `domesticmig_accel_3yr` positive = accelerating
+      inflows relative to prior 3-year average.
+    columns:
+      - name: fips
+        tests: [not_null]
+      - name: period_end_date
+        tests: [not_null]
+
+  - name: int_high_wage_share
+    description: >
+      Tier 1 demand signal: fraction of total employment in NAICS
+      supersectors 51+52+54+55 (Info, Finance, Prof Services, Mgmt).
+    columns:
+      - name: fips
+        tests: [not_null]
+    # Bounded-share sanity check needs dbt_utils.expression_is_true;
+    # deferred to Batch F when packages.yml gets added.
+
+  - name: int_wage_growth_yoy
+    description: >
+      Tier 1 demand signal: YoY change in QCEW county avg annual pay,
+      demeaned vs universe median for the same period.
+    columns:
+      - name: fips
+        tests: [not_null]
+      - name: wage_growth_yoy_demeaned
+        tests: [not_null]
+
+  - name: int_employment_growth_yoy
+    description: >
+      Tier 1 demand signal: YoY change in QCEW county total employment,
+      demeaned vs universe median for the same period.
+    columns:
+      - name: fips
+        tests: [not_null]
+      - name: emp_growth_yoy_demeaned
+        tests: [not_null]
