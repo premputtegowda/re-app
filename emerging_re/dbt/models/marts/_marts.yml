@@ -30,5 +30,17 @@ models:
         tests: [not_null]
       - name: target_zori_24mo_demeaned
         tests: [not_null]
-    # Composite-key uniqueness test needs dbt_utils; deferring to Batch F
-    # when we install packages.yml and pull in the full test kit.
+
+  - name: mart_county_features
+    description: >
+      The Phase 2 output — one wide row per (fips, period_end_date, Dec 31)
+      combining every intermediate feature with both forward-return targets
+      (HPI 24mo demeaned, ZORI 24mo demeaned). This is the table Phase 3
+      backtest feeds into a scoring function. Features are raw (not
+      standardized); z-scoring happens at scoring time so each backtest
+      fold uses its own universe.
+    columns:
+      - name: fips
+        tests: [not_null]
+      - name: period_end_date
+        tests: [not_null]
