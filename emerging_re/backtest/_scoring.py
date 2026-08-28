@@ -40,23 +40,42 @@ class FeatureSpec:
     sign: int  # +1 or -1
 
 
-# The pre-registered feature set. Order matters only for logs / provenance;
-# scoring is commutative.
+# The active feature set. Iteration history:
+#
+#   v1 (pre-registered per DECISIONS.md §7): tiers 1-3, contrarian theory.
+#      FAILED ship — lost to momentum baseline by 0.25 Spearman.
+#      Ablation identified two features actively hurting: permits_intensity_ratio
+#      and rent_minus_price_growth (both contrarian bets that at 24-36mo
+#      horizon fight momentum, which dominates).
+#
+#   v2 (Path 1, 2026-08-29): added tier4_momentum. Composite jumped from
+#      +0.02 to +0.23. Still short of ship by ~0.05.
+#
+#   v3 (Path 1+2, 2026-08-29): dropped the two harmful contrarian features.
+#      Tier 2 supply and Tier 3 pricing removed entirely. Composite now =
+#      fundamentals (demand + high-wage share + wages + employment) + momentum,
+#      equal-weighted across the two remaining tiers.
 FEATURES: tuple[FeatureSpec, ...] = (
-    # Tier 1 — demand
-    FeatureSpec("domesticmig_per_1000",       "tier1_demand",  +1),
-    FeatureSpec("domesticmig_accel_3yr",      "tier1_demand",  +1),
-    FeatureSpec("high_wage_share",            "tier1_demand",  +1),
-    FeatureSpec("high_wage_share_yoy_chg",    "tier1_demand",  +1),
-    FeatureSpec("wage_growth_yoy_demeaned",   "tier1_demand",  +1),
-    FeatureSpec("emp_growth_yoy_demeaned",    "tier1_demand",  +1),
-    # Tier 2 — supply
-    FeatureSpec("permits_intensity_ratio",    "tier2_supply",  -1),
-    # Tier 3 — pricing (rent growth outpacing price growth)
-    FeatureSpec("rent_minus_price_growth",    "tier3_pricing", +1),
+    # Tier 1 — demand fundamentals (all Tier 1 features retained; ablation
+    # showed migration is the strongest single-feature contributor and the
+    # rest are neutral-to-mildly-helpful).
+    FeatureSpec("domesticmig_per_1000",       "tier1_demand",   +1),
+    FeatureSpec("domesticmig_accel_3yr",      "tier1_demand",   +1),
+    FeatureSpec("high_wage_share",            "tier1_demand",   +1),
+    FeatureSpec("high_wage_share_yoy_chg",    "tier1_demand",   +1),
+    FeatureSpec("wage_growth_yoy_demeaned",   "tier1_demand",   +1),
+    FeatureSpec("emp_growth_yoy_demeaned",    "tier1_demand",   +1),
+    # Tier 4 — trailing momentum. The winning signal at 24-36mo horizons.
+    FeatureSpec("hpi_yoy",                    "tier4_momentum", +1),
+    FeatureSpec("zori_yoy",                   "tier4_momentum", +1),
+    # DROPPED v3: permits_intensity_ratio (tier2_supply, sign -1)
+    # DROPPED v3: rent_minus_price_growth   (tier3_pricing,  sign +1)
+    # Both had large positive ablation deltas (removing them improved
+    # Spearman by 0.10-0.16). Their theoretical justification (mean-
+    # reversion) doesn't fit the 24-36mo horizon.
 )
 
-TIERS = ("tier1_demand", "tier2_supply", "tier3_pricing")
+TIERS = ("tier1_demand", "tier4_momentum")
 
 
 def _zscore(s: pd.Series) -> pd.Series:

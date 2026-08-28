@@ -10,8 +10,7 @@ select
     composite_score,
     composite_rank,
     score_tier1_demand,
-    score_tier2_supply,
-    score_tier3_pricing,
+    score_tier4_momentum,
     any_disqualifier,
     -- Individual feature z-scores (contributions) for the "why is this
     -- ranked 14th" UI breakdown.
@@ -21,11 +20,15 @@ select
     z_high_wage_share_yoy_chg,
     z_wage_growth_yoy_demeaned,
     z_emp_growth_yoy_demeaned,
-    z_permits_intensity_ratio,
-    z_rent_minus_price_growth,
-    -- Realized targets for post-hoc comparison.
+    z_hpi_yoy,
+    z_zori_yoy,
+    -- Realized targets for post-hoc comparison (both horizons).
     target_hpi_24mo_demeaned,
     target_zori_24mo_demeaned,
+    target_hpi_36mo_demeaned,
+    target_zori_36mo_demeaned,
     hpi_forward_return_24mo,
-    zori_forward_return_24mo
+    zori_forward_return_24mo,
+    hpi_forward_return_36mo,
+    zori_forward_return_36mo
 from {{ source('backtest', 'scores') }}

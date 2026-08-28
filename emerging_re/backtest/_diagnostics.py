@@ -21,14 +21,24 @@ REGIMES = {
     "2023-2025": lambda dt: (dt >= "2023-01-01") & (dt <= "2025-12-31"),
 }
 
-TARGETS = ("target_hpi_24mo_demeaned", "target_zori_24mo_demeaned")
+TARGETS = (
+    "target_hpi_24mo_demeaned",
+    "target_zori_24mo_demeaned",
+    "target_hpi_36mo_demeaned",
+    "target_zori_36mo_demeaned",
+)
 
 # Baseline signals — what the framework must beat. Pre-registered per
-# DECISIONS.md ("baseline = trailing-12mo price growth"). Momentum in
-# BOTH HPI and ZORI to cover both targets fairly.
+# DECISIONS.md ("baseline = trailing-12mo price growth"). Same trailing-
+# momentum baseline is tested against both horizons — if momentum
+# predicts 24mo well, we want to know whether it ALSO predicts 36mo
+# well (in which case beating it is still hard), or falls off (making
+# the framework's contrarian theory more competitive at longer horizon).
 BASELINE_FEATURES = {
     "target_hpi_24mo_demeaned":  ("hpi_yoy",  "trailing 12mo HPI"),
     "target_zori_24mo_demeaned": ("zori_yoy", "trailing 12mo ZORI"),
+    "target_hpi_36mo_demeaned":  ("hpi_yoy",  "trailing 12mo HPI"),
+    "target_zori_36mo_demeaned": ("zori_yoy", "trailing 12mo ZORI"),
 }
 
 

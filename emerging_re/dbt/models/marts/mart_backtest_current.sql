@@ -18,8 +18,7 @@ select
     s.composite_score,
     s.composite_rank,
     s.score_tier1_demand,
-    s.score_tier2_supply,
-    s.score_tier3_pricing,
+    s.score_tier4_momentum,
     s.any_disqualifier,
     s.z_domesticmig_per_1000,
     s.z_domesticmig_accel_3yr,
@@ -27,7 +26,7 @@ select
     s.z_high_wage_share_yoy_chg,
     s.z_wage_growth_yoy_demeaned,
     s.z_emp_growth_yoy_demeaned,
-    s.z_permits_intensity_ratio,
-    s.z_rent_minus_price_growth
+    s.z_hpi_yoy,
+    s.z_zori_yoy
 from {{ ref('mart_backtest_scores') }} s
 inner join latest_period p on s.period_end_date = p.period_end_date

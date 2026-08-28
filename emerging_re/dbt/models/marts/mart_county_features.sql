@@ -124,8 +124,9 @@ with_disq as (
         on d.fips = r.fips and d.period_end_date = r.period_end_date
 ),
 
--- Targets
-with_target_a as (
+-- Targets (24mo + 36mo variants — 24mo predominantly momentum-driven,
+-- 36mo lets mean-reversion play out for IRR-oriented investors)
+with_target_a24 as (
     select
         d.*,
         ta.forward_return_24mo as hpi_forward_return_24mo,
@@ -135,14 +136,34 @@ with_target_a as (
         on ta.fips = d.fips and ta.period_end_date = d.period_end_date
 ),
 
-with_target_b as (
+with_target_b24 as (
     select
         a.*,
         tb.forward_return_24mo as zori_forward_return_24mo,
         tb.target_zori_24mo_demeaned
-    from with_target_a a
+    from with_target_a24 a
     left join {{ ref('mart_zori_forward_returns_24mo') }} tb
+        on tb.fips = a.fips and tb.period_end_date = a.period_end_date
+),
+
+with_target_a36 as (
+    select
+        b.*,
+        ta.forward_return_36mo as hpi_forward_return_36mo,
+        ta.target_hpi_36mo_demeaned
+    from with_target_b24 b
+    left join {{ ref('mart_hpi_forward_returns_36mo') }} ta
+        on ta.fips = b.fips and ta.period_end_date = b.period_end_date
+),
+
+with_target_b36 as (
+    select
+        a.*,
+        tb.forward_return_36mo as zori_forward_return_36mo,
+        tb.target_zori_36mo_demeaned
+    from with_target_a36 a
+    left join {{ ref('mart_zori_forward_returns_36mo') }} tb
         on tb.fips = a.fips and tb.period_end_date = a.period_end_date
 )
 
-select * from with_target_b
+select * from with_target_b36

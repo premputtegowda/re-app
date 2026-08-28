@@ -29,7 +29,7 @@ import duckdb
 import pandas as pd
 
 from ._diagnostics import evaluate, evaluate_ablation, evaluate_baseline
-from ._scoring import FEATURES, score_all_periods
+from ._scoring import FEATURES, TIERS, score_all_periods
 
 logger = logging.getLogger(__name__)
 
@@ -61,20 +61,25 @@ def write_scores(scored: pd.DataFrame, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "scores.parquet"
 
+    # Build keep_cols dynamically from TIERS + FEATURES so schema stays in
+    # sync when the active feature set changes across iterations.
     keep_cols = [
         "fips", "period_end_date", "county_name", "state_name", "pop_latest",
         "composite_score", "composite_rank",
-        "score_tier1_demand", "score_tier2_supply", "score_tier3_pricing",
+        *[f"score_{t}" for t in TIERS],
         "any_disqualifier",
         # Individual feature z-scores — useful for the UI "why is this ranked
         # 14th" contribution breakdown.
         *[f"z_{s.column}" for s in FEATURES],
-        # Also keep the targets so the UI can show realized-vs-predicted per
-        # county without joining back.
+        # Realized targets — 24mo + 36mo horizons.
         "target_hpi_24mo_demeaned",
         "target_zori_24mo_demeaned",
+        "target_hpi_36mo_demeaned",
+        "target_zori_36mo_demeaned",
         "hpi_forward_return_24mo",
         "zori_forward_return_24mo",
+        "hpi_forward_return_36mo",
+        "zori_forward_return_36mo",
     ]
     keep_cols = [c for c in keep_cols if c in scored.columns]
     scored[keep_cols].to_parquet(out_path, index=False)
@@ -102,9 +107,16 @@ def write_diagnostics(all_results: list, out_dir: Path) -> Path:
 
 def print_summary(all_results: list) -> None:
     """Human-readable summary — the moment-of-truth table."""
+    # Parse target into (metric, horizon) for cleaner display.
+    def _split_target(t: str) -> tuple[str, str]:
+        # e.g. "target_hpi_24mo_demeaned" → ("hpi", "24mo")
+        parts = t.replace("target_", "").replace("_demeaned", "").split("_")
+        return parts[0], parts[1]  # (metric, horizon)
+
     df = pd.DataFrame([{
         "experiment": r.experiment,
-        "target": r.target.replace("target_", "").replace("_24mo_demeaned", ""),
+        "metric": _split_target(r.target)[0],
+        "horizon": _split_target(r.target)[1],
         "regime": r.regime,
         "spearman": r.spearman if r.spearman is not None else float("nan"),
         "n": r.n,
@@ -114,54 +126,50 @@ def print_summary(all_results: list) -> None:
     print("PHASE 3 BACKTEST — SPEARMAN RANK CORRELATION")
     print("=" * 78)
 
-    # Baseline vs composite comparison — the ship criterion table.
-    print("\n--- HEAD-TO-HEAD: composite vs baseline (target = HPI 24mo demeaned) ---")
-    hpi_view = df[
-        (df["target"] == "hpi")
-        & (df["experiment"].isin(["composite", "baseline"]))
-    ].pivot(index="regime", columns="experiment", values="spearman")
-    print(hpi_view.round(4).to_string())
+    for horizon in ("24mo", "36mo"):
+        print(f"\n\n{'=' * 30} HORIZON = {horizon} {'=' * 30}")
+        for metric in ("hpi", "zori"):
+            view = df[
+                (df["metric"] == metric)
+                & (df["horizon"] == horizon)
+                & (df["experiment"].isin(["composite", "baseline"]))
+            ].pivot(index="regime", columns="experiment", values="spearman")
+            print(f"\n--- composite vs baseline ({metric.upper()} {horizon}) ---")
+            print(view.round(4).to_string())
 
-    print("\n--- HEAD-TO-HEAD: composite vs baseline (target = ZORI 24mo demeaned) ---")
-    zori_view = df[
-        (df["target"] == "zori")
-        & (df["experiment"].isin(["composite", "baseline"]))
-    ].pivot(index="regime", columns="experiment", values="spearman")
-    print(zori_view.round(4).to_string())
+        # Ship criterion for this horizon.
+        print(f"\n--- SHIP CRITERION (composite beats baseline by >= 0.05, {horizon}) ---")
+        for metric in ("hpi", "zori"):
+            try:
+                comp = df[(df["experiment"] == "composite") & (df["metric"] == metric) & (df["horizon"] == horizon) & (df["regime"] == "all")]["spearman"].iloc[0]
+                base = df[(df["experiment"] == "baseline") & (df["metric"] == metric) & (df["horizon"] == horizon) & (df["regime"] == "all")]["spearman"].iloc[0]
+                delta = comp - base
+                verdict = "PASS" if delta >= 0.05 else "FAIL"
+                print(f"  {metric.upper()} {horizon}: composite={comp:+.4f}, baseline={base:+.4f}, delta={delta:+.4f} [{verdict}]")
+            except (IndexError, KeyError):
+                print(f"  {metric.upper()} {horizon}: insufficient data")
 
-    # Ship criterion: composite beats baseline by >=0.05 Spearman on
-    # at least one target in the "all" regime.
-    print("\n--- SHIP CRITERION (composite beats baseline by >= 0.05 Spearman) ---")
-    for target in ("hpi", "zori"):
-        try:
-            comp = df[(df["experiment"] == "composite") & (df["target"] == target) & (df["regime"] == "all")]["spearman"].iloc[0]
-            base = df[(df["experiment"] == "baseline") & (df["target"] == target) & (df["regime"] == "all")]["spearman"].iloc[0]
-            delta = comp - base
-            verdict = "PASS" if delta >= 0.05 else "FAIL"
-            print(f"  {target.upper()}: composite={comp:+.4f}, baseline={base:+.4f}, delta={delta:+.4f} [{verdict}]")
-        except (IndexError, KeyError):
-            print(f"  {target.upper()}: insufficient data")
-
-    # Ablation — which features matter?
-    print("\n--- FEATURE ABLATION (drop feature, measure Spearman change, 'all' regime) ---")
-    for target in ("hpi", "zori"):
-        try:
-            comp_all = df[(df["experiment"] == "composite") & (df["target"] == target) & (df["regime"] == "all")]["spearman"].iloc[0]
-        except (IndexError, KeyError):
-            continue
-        print(f"\n  Target = {target.upper()} (composite = {comp_all:+.4f})")
-        ablation_rows = df[
-            df["experiment"].str.startswith("ablation:")
-            & (df["target"] == target)
-            & (df["regime"] == "all")
-        ].copy()
-        ablation_rows["feature_dropped"] = ablation_rows["experiment"].str.replace("ablation:drop_", "")
-        ablation_rows["delta_vs_full"] = ablation_rows["spearman"] - comp_all
-        # Feature importance = -delta (bigger drop = more important).
-        ablation_rows = ablation_rows.sort_values("delta_vs_full")
-        for _, row in ablation_rows.iterrows():
-            marker = "!" if row["delta_vs_full"] < -0.01 else " "
-            print(f"    {marker} drop {row['feature_dropped']:<35} spearman={row['spearman']:+.4f}  delta={row['delta_vs_full']:+.4f}")
+    # Ablation — which features matter? Show for both horizons + both metrics.
+    print("\n\n--- FEATURE ABLATION ('all' regime, sorted by importance) ---")
+    for horizon in ("24mo", "36mo"):
+        for metric in ("hpi", "zori"):
+            try:
+                comp_all = df[(df["experiment"] == "composite") & (df["metric"] == metric) & (df["horizon"] == horizon) & (df["regime"] == "all")]["spearman"].iloc[0]
+            except (IndexError, KeyError):
+                continue
+            print(f"\n  Target = {metric.upper()} {horizon} (composite = {comp_all:+.4f})")
+            ablation_rows = df[
+                df["experiment"].str.startswith("ablation:")
+                & (df["metric"] == metric)
+                & (df["horizon"] == horizon)
+                & (df["regime"] == "all")
+            ].copy()
+            ablation_rows["feature_dropped"] = ablation_rows["experiment"].str.replace("ablation:drop_", "")
+            ablation_rows["delta_vs_full"] = ablation_rows["spearman"] - comp_all
+            ablation_rows = ablation_rows.sort_values("delta_vs_full")
+            for _, row in ablation_rows.iterrows():
+                marker = "!" if row["delta_vs_full"] < -0.01 else " "
+                print(f"    {marker} drop {row['feature_dropped']:<35} spearman={row['spearman']:+.4f}  delta={row['delta_vs_full']:+.4f}")
 
     print("\n" + "=" * 78 + "\n")
 
