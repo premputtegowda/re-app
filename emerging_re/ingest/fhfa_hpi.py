@@ -1,19 +1,18 @@
-"""FHFA HPI (House Price Index) loader — county-level, quarterly.
+"""FHFA HPI (House Price Index) loader — county-level, annual.
 
 Source: Federal Housing Finance Agency (public domain).
-    https://www.fhfa.gov/hpi/download/quarterly_datasets
-
-Publishes at county granularity going back to ~1975 for major counties. Uses
-repeat-sales methodology on conforming mortgage transactions, so the index
-represents same-property appreciation net of house-mix effects. This is the
-target variable for Section 7 Target A (forward 24-month HPI change).
-
-**IMPORTANT — verify URL on first run.** FHFA's download URLs are not
-versioned and occasionally move. If the download fails with 404, browse to
     https://www.fhfa.gov/data/hpi/datasets
-and copy the current "HPI by County (annual, all-transactions)" link into
-`HPI_COUNTY_URL` below. The file format is stable — tab-separated text with
-columns as documented in `EXPECTED_COLUMNS`.
+
+The county file is an XLSX with the actual data table starting on row 6
+(header row 5 with 8 columns). Repeat-sales methodology on all-transactions
+(includes refinances) — this is the target for Section 7 Target A (forward
+24-month HPI change).
+
+**IMPORTANT — verify URL on first run.** FHFA's download page occasionally
+moves files. If the download fails with 404, browse to
+    https://www.fhfa.gov/data/hpi/datasets
+and update `HPI_COUNTY_URL` below. Look for the "HPI by County (annual,
+all-transactions, experimental)" download link.
 
 Run: `uv run python -m ingest.fhfa_hpi`
     or with a specific as_of_date for backfill:
@@ -45,18 +44,24 @@ logger = logging.getLogger(__name__)
 SOURCE_NAME = "fhfa_hpi"
 
 # FHFA's county HPI file. Update if FHFA reorganizes their download page.
-HPI_COUNTY_URL = "https://www.fhfa.gov/hpi/download/quarterly_datasets/HPI_AT_BDL_county.txt"
+# Verified 2026-08-28: https://www.fhfa.gov/data/hpi/datasets
+HPI_COUNTY_URL = "https://www.fhfa.gov/hpi/download/annual/hpi_at_county.xlsx"
 
-# Expected column layout of the source TSV (per FHFA documentation as of 2024).
+# XLSX has 5 title/note rows above the actual header. Header row is row 5
+# (0-indexed) with 8 columns; data starts on row 6.
+XLSX_HEADER_ROW = 5
+XLSX_SHEET_NAME = "county"
+
+# Expected column layout of the source XLSX (verified 2026-08-28).
 # We validate presence of these columns before processing; a schema drift
 # should fail loudly, not silently corrupt downstream data.
 EXPECTED_COLUMNS = {
-    "State": "state",         # 2-char state abbreviation
-    "County": "county_name",  # human-readable county name
-    "FIPS code": "fips_raw",  # 5-digit FIPS
-    "Year": "year",           # 4-digit year
+    "State": "state",              # 2-char state abbreviation
+    "County": "county_name",       # human-readable county name
+    "FIPS code": "fips_raw",       # 5-digit FIPS (may have leading zero)
+    "Year": "year",                # 4-digit year
     "Annual Change (%)": "annual_change_pct",
-    "HPI": "hpi",             # index level (1990=100 by default series)
+    "HPI": "hpi",                  # index level (default base)
     "HPI with 1990 base": "hpi_1990_base",
     "HPI with 2000 base": "hpi_2000_base",
 }
@@ -81,10 +86,11 @@ def load(as_of_date: date | None = None) -> Path:
 
     # 1. Download to tempfile
     with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_dl = Path(tmpdir) / "hpi_at_county.txt"
+        tmp_dl = Path(tmpdir) / "hpi_at_county.xlsx"
         download(HPI_COUNTY_URL, tmp_dl)
 
-        # 2. Snapshot raw (immutable, gzipped)
+        # 2. Snapshot raw (immutable, gzipped — XLSX compresses poorly but
+        #    we gzip anyway for uniform snapshot format across sources)
         snapshot_raw(SOURCE_NAME, as_of, tmp_dl)
 
         # 3. Parse + validate
@@ -108,12 +114,18 @@ def load(as_of_date: date | None = None) -> Path:
 
 
 def _parse_and_validate(source_file: Path) -> pd.DataFrame:
-    """Read TSV, rename columns to snake_case, validate schema.
+    """Read XLSX, rename columns to snake_case, validate schema.
 
-    FHFA's file is tab-separated with a header row and column names that
-    include spaces + special chars. Rename to Python-friendly for downstream.
+    FHFA's file is XLSX with 5 title rows above the actual header. FIPS
+    codes are read as strings to preserve leading zeros (Alabama = 01xxx,
+    Alaska = 02xxx, etc.) — Excel strips them by default without dtype hint.
     """
-    df = pd.read_csv(source_file, sep="\t", dtype={"FIPS code": str})
+    df = pd.read_excel(
+        source_file,
+        sheet_name=XLSX_SHEET_NAME,
+        header=XLSX_HEADER_ROW,
+        dtype={"FIPS code": str},
+    )
     logger.info("Parsed %d rows from FHFA source", len(df))
 
     # Schema drift check — every EXPECTED_COLUMNS key must be in df.columns.
