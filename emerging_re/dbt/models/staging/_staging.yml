@@ -1,0 +1,63 @@
+version: 2
+
+# Schema-level tests on staging views. Cheap to run — catches Parquet
+# corruption + FIPS-format drift before it propagates to features.
+models:
+  - name: stg_fhfa_hpi
+    columns:
+      - name: fips
+        tests:
+          - not_null
+      - name: period_end_date
+        tests:
+          - not_null
+      - name: as_of_date
+        tests:
+          - not_null
+
+  - name: stg_zillow_zori
+    columns:
+      - name: fips
+        tests:
+          - not_null
+      - name: period_end_date
+        tests:
+          - not_null
+      - name: zori
+        tests:
+          - not_null
+
+  - name: stg_census_pep
+    columns:
+      - name: fips
+        tests:
+          - not_null
+      - name: period_end_date
+        tests:
+          - not_null
+      - name: popestimate
+        tests:
+          - not_null
+
+  - name: stg_census_bps
+    columns:
+      - name: fips
+        tests:
+          - not_null
+      - name: period_end_date
+        tests:
+          - not_null
+
+  - name: stg_bls_qcew
+    columns:
+      - name: fips
+        tests:
+          - not_null
+      - name: period_end_date
+        tests:
+          - not_null
+      - name: agglvl_code
+        tests:
+          - not_null
+          - accepted_values:
+              values: [70, 74]

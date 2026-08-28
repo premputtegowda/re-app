@@ -1,0 +1,18 @@
+version: 2
+
+models:
+  - name: int_universe
+    description: >
+      The screener's target universe: counties with population >= 50,000
+      that have both FHFA HPI and Zillow ZORI history. One row per county.
+      Expected size ~500-600 (from ~1,010 pop>=50k counties, narrowed by
+      ZORI coverage).
+    columns:
+      - name: fips
+        description: "2020 census FIPS code, 5-digit."
+        tests:
+          - not_null
+          - unique
+      - name: pop_latest
+        tests:
+          - not_null

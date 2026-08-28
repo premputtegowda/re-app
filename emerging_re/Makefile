@@ -1,4 +1,4 @@
-.PHONY: install ingest-fhfa ingest-zori ingest-pep ingest-pep-backfill ingest-bps ingest-qcew ingest-all query-fhfa test lint clean
+.PHONY: install ingest-fhfa ingest-zori ingest-pep ingest-pep-backfill ingest-bps ingest-qcew ingest-all dbt-build dbt-test dbt-docs query-fhfa test lint clean
 
 # Setup — install deps into .venv/. Requires `uv` (https://docs.astral.sh/uv/).
 install:
@@ -38,7 +38,20 @@ ingest-qcew:
 
 # All Phase 1 sources — add more targets as loaders land.
 ingest-all: ingest-fhfa ingest-zori ingest-pep ingest-bps ingest-qcew
-	@echo "TODO: add hud_usps_vacancy"
+	@echo "Phase 1 complete. HUD USPS vacancy deferred (see DECISIONS.md §3)."
+
+# Phase 2 — dbt feature models.
+# `dbt build` = compile + run + test all models. Idempotent; safe to re-run.
+dbt-build:
+	cd dbt && uv run dbt build --profiles-dir .
+
+# Run only tests (no rebuilding). Useful after touching source Parquet files.
+dbt-test:
+	cd dbt && uv run dbt test --profiles-dir .
+
+# Generate + serve model DAG + docs at http://localhost:8080.
+dbt-docs:
+	cd dbt && uv run dbt docs generate --profiles-dir . && uv run dbt docs serve --profiles-dir .
 
 # Sanity query — dumps last 5 rows for Franklin County, OH from curated FHFA.
 query-fhfa:

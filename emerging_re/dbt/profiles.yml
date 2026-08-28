@@ -1,0 +1,17 @@
+# DuckDB backing store for dbt models. Not committed to git — the .duckdb
+# file is rebuildable from Parquet + dbt models via `dbt build`.
+#
+# Path is relative to this profile file's directory. When dbt runs from
+# `emerging_re/dbt/`, the warehouse ends up at `emerging_re/data/warehouse/`.
+emerging_re:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "../data/warehouse/emerging_re.duckdb"
+      threads: 4
+      # Extensions loaded on startup. httpfs isn't strictly needed since our
+      # Parquet is local, but harmless and future-proofs remote Parquet reads.
+      extensions:
+        - httpfs
+        - parquet

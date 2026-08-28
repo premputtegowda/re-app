@@ -1,0 +1,38 @@
+name: 'emerging_re'
+version: '1.0.0'
+config-version: 2
+
+profile: 'emerging_re'
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+analysis-paths: ["analyses"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# Absolute path to the curated Parquet root — sources build read_parquet()
+# calls using this. Overridable via `dbt run --vars 'curated_dir: /some/path'`.
+vars:
+  curated_dir: "/Users/premputtegowda/reps/reps-tracker/emerging_re/data/curated"
+
+# Materialization defaults per layer.
+# - staging: views (thin projections over Parquet — no data duplication)
+# - intermediate: tables (feature computations are expensive; materialize once)
+# - marts: tables (final wide tables consumed by downstream code)
+models:
+  emerging_re:
+    staging:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +materialized: table
+      +schema: intermediate
+    marts:
+      +materialized: table
+      +schema: marts

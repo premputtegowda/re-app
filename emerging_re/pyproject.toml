@@ -10,6 +10,9 @@ dependencies = [
     "httpx>=0.27.0",
     # openpyxl only needed if a source ships .xlsx (FHFA sometimes does).
     "openpyxl>=3.1.0",
+    # Phase 2 — dbt orchestration over DuckDB. dbt-duckdb pins compatible
+    # dbt-core versions automatically.
+    "dbt-duckdb>=1.9.0",
 ]
 
 [project.optional-dependencies]
@@ -18,8 +21,6 @@ dev = [
     "pytest-cov>=5.0.0",
     "ruff>=0.5.0",
 ]
-# dbt-duckdb pulled in when Phase 2 (features) begins — omitting until then
-# to keep the initial install light and avoid dbt version churn.
 
 [tool.ruff]
 line-length = 100

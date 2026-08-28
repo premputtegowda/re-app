@@ -1,0 +1,30 @@
+version: 2
+
+# External sources = Parquet files written by the Phase 1 ingest loaders.
+# dbt-duckdb's `external_location` meta lets staging models reference them
+# via `{{ source('curated', '<table>') }}` — expanded into read_parquet()
+# calls that respect the as_of_date hive partition.
+#
+# `curated_dir` is defined in dbt_project.yml vars.
+sources:
+  - name: curated
+    description: >
+      Curated Parquet outputs from ingest loaders. Each source is
+      hive-partitioned by as_of_date, giving us bitemporal history —
+      downstream models can filter to a single vintage for point-in-time
+      backtests or aggregate across vintages for latest-known values.
+    meta:
+      external_location: >-
+        read_parquet('{{ var("curated_dir") }}/{name}/**/*.parquet',
+          hive_partitioning=1)
+    tables:
+      - name: fhfa_hpi
+        description: "Annual county HPI (all-transactions), 1975-present."
+      - name: zillow_zori
+        description: "Monthly county rent index (ZORI), 2015-present."
+      - name: census_pep
+        description: "Annual county population + components of change (2010-present across two vintages)."
+      - name: census_bps
+        description: "Annual county building permits (2000-present)."
+      - name: bls_qcew
+        description: "Annual county employment + wages by NAICS supersector (2000-present)."

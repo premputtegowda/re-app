@@ -3,6 +3,13 @@
 data/raw/
 data/curated/
 data/quarantine/
+data/warehouse/
+
+# dbt build artifacts — regenerated from models on every `dbt build`.
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+dbt/.user.yml
 
 # Python
 .venv/
