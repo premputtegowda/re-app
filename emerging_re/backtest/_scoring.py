@@ -56,9 +56,7 @@ class FeatureSpec:
 #      fundamentals (demand + high-wage share + wages + employment) + momentum,
 #      equal-weighted across the two remaining tiers.
 FEATURES: tuple[FeatureSpec, ...] = (
-    # Tier 1 — demand fundamentals (all Tier 1 features retained; ablation
-    # showed migration is the strongest single-feature contributor and the
-    # rest are neutral-to-mildly-helpful).
+    # Tier 1 — demand fundamentals
     FeatureSpec("domesticmig_per_1000",       "tier1_demand",   +1),
     FeatureSpec("domesticmig_accel_3yr",      "tier1_demand",   +1),
     FeatureSpec("high_wage_share",            "tier1_demand",   +1),
@@ -70,9 +68,16 @@ FEATURES: tuple[FeatureSpec, ...] = (
     FeatureSpec("zori_yoy",                   "tier4_momentum", +1),
     # DROPPED v3: permits_intensity_ratio (tier2_supply, sign -1)
     # DROPPED v3: rent_minus_price_growth   (tier3_pricing,  sign +1)
-    # Both had large positive ablation deltas (removing them improved
-    # Spearman by 0.10-0.16). Their theoretical justification (mean-
-    # reversion) doesn't fit the 24-36mo horizon.
+    # DROPPED v4: internationalmig_per_1000  (tier1_demand,   sign +1)
+    # DROPPED v4: employment_diversity_hhi   (tier1_demand,   sign -1)
+    # DROPPED v4: rent_growth_vs_wage_growth (tier1_demand,   sign -1)
+    #   v3 dropped: contrarian bets that fight momentum at 24-36mo horizon.
+    #   v4 dropped: three new features tested 2026-08-29 that individually
+    #   were neutral-to-mildly-harmful in ablation. Adding them together
+    #   broke the ship criterion on both ZORI targets. The intermediate
+    #   dbt models remain in place (int_international_migration,
+    #   int_employment_diversity) — they're useful as UI context metrics
+    #   even though they don't earn a spot in the composite.
 )
 
 TIERS = ("tier1_demand", "tier4_momentum")

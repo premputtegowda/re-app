@@ -103,10 +103,39 @@ with_rvp as (
         p.*,
         r.hpi_yoy,
         r.zori_yoy,
-        r.rent_minus_price_growth
+        r.rent_minus_price_growth,
+        -- New feature (2026-08-29): affordability compression proxy.
+        -- Rents outpacing wages = tenants stretched = future rent moderation
+        -- likely. Sign for scoring is -1 (negative gap = wages winning =
+        -- future rent runway).
+        r.zori_yoy - w.wage_growth_yoy as rent_growth_vs_wage_growth
     from with_permits p
     left join {{ ref('int_rent_vs_price_growth') }} r
         on r.fips = p.fips and r.period_end_date = p.period_end_date
+    left join {{ ref('int_wage_growth_yoy') }} w
+        on w.fips = p.fips and w.period_end_date = p.period_end_date
+),
+
+-- New Tier 1 features (2026-08-29): international migration + emp diversity
+with_intl_mig as (
+    select
+        r.*,
+        im.internationalmig,
+        im.internationalmig_per_1000
+    from with_rvp r
+    left join {{ ref('int_international_migration') }} im
+        on im.fips = r.fips
+        and year(im.period_end_date) = year(r.period_end_date)
+),
+
+with_diversity as (
+    select
+        m.*,
+        d.employment_diversity_hhi,
+        d.n_supersectors_reporting
+    from with_intl_mig m
+    left join {{ ref('int_employment_diversity') }} d
+        on d.fips = m.fips and d.period_end_date = m.period_end_date
 ),
 
 -- Disqualifiers
@@ -119,7 +148,7 @@ with_disq as (
         d.hpi_trailing_24mo,
         d.disq_price_ran_25pct,
         d.any_disqualifier
-    from with_rvp r
+    from with_diversity r
     left join {{ ref('int_disqualifiers') }} d
         on d.fips = r.fips and d.period_end_date = r.period_end_date
 ),
