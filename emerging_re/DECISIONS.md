@@ -133,7 +133,7 @@ snapshot cadence (informs how often we re-ingest). Table is the source of truth.
 | Census PEP (population/migration) | `census_pep` | Annual | ~9 mo | Minor | Year |
 | Zillow ZHVI (home value index) | `zillow_zhvi` | Monthly | ~1 mo | **Full history, monthly** | Month |
 | Zillow ZORI (rent index) | `zillow_zori` | Monthly | ~1 mo | **Full history, monthly** | Month |
-| HUD USPS vacancy | `hud_usps_vacancy` | Quarterly | ~3-4 mo | Minor | Quarter |
+| HUD USPS vacancy | `hud_usps_vacancy` | Quarterly | ~3-4 mo | Minor | Quarter ✗ blocked |
 
 **Rule:** Snapshot on every scheduled run regardless of whether we think the
 source restated. Marginal cost of an extra CSV is ~50MB; marginal cost of
@@ -159,6 +159,24 @@ target universe with continuous coverage. Options at Phase 3: (a) restrict
 backtest to BPS-covered counties, or (b) run with-BPS vs no-BPS feature
 sets and measure marginal Spearman lift to decide if BPS is worth the
 sample-size hit.
+
+**✗ HUD USPS vacancy — deferred out of Phase 1 (discovered 2026-08-28).**
+The NCWM API returns 403 on our token: *"You are not allowed to access this
+dataset API because you are not registered for USPS Vacancies Data."* The
+underlying registration
+(https://www.huduser.gov/apps/public/usps/register) is the gate where HUD's
+governmental/nonprofit/educational-only eligibility check happens — the
+free HUD USER account we have only reaches the public USPS Crosswalk API
+(address ratios, no vacancy field).
+
+Impact on framework: loses the Tier 2 "long-term vacancy declining"
+signal. Compensating: Tier 2 still has BPS permits (post-2022) + Census
+household formation (via PEP dwellings). Phase 3 backtest will show
+whether the framework materially needs the vacancy signal — if it does,
+consider (a) applying for USPS Vacancies registration through an eligible
+affiliation, (b) USPS PostalPro Occupancy Trends as substitute, or (c)
+commercial parcel-level source (Regrid). Probe script preserved at
+`scripts/probe_hud.py` for re-testing when access changes.
 
 **Look-ahead rule (backtests only):** When scoring a county at `t`, only use
 rows where `as_of_date <= t - lag_source` where `lag_source` comes from this

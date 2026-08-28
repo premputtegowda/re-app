@@ -11,3 +11,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 uv.lock
+
+# Secrets — HUD API token etc. Never commit.
+.env
+.env.*
+!.env.example
