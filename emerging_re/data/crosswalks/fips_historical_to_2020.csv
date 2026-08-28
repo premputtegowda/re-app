@@ -1,0 +1,35 @@
+# NBER-style FIPS crosswalk: historical FIPS → 2020 FIPS
+# One row per historical→canonical mapping. Weight = fraction of population/area
+# from the historical FIPS that maps to the 2020 FIPS. For simple renames
+# weight = 1.0. For splits/merges, weights sum to 1.0 across all successors.
+#
+# This is a SEED file with only the most impactful cases in the last 25 years.
+# For production, replace with the full NBER county crosswalk downloaded from:
+#   https://data.nber.org/data/county-crosswalk-data.html
+# (has ~40 historical events since 1990 across all US counties).
+#
+# Format: from_fips,to_fips_2020,effective_period_end,weight,note
+from_fips,to_fips_2020,effective_period_end,weight,note
+# Alaska: Wade Hampton Census Area → Kusilvak Census Area (2015-07-01 rename)
+02270,02158,2015-06-30,1.0,Wade Hampton renamed to Kusilvak
+# Alaska: Prince of Wales-Outer Ketchikan Census Area split (2008)
+# → merged into Prince of Wales-Hyder (02198) and Ketchikan Gateway (02130).
+# Approximate population weights.
+02201,02198,2008-06-30,0.60,POW-Outer Ketchikan split (majority to POW-Hyder)
+02201,02130,2008-06-30,0.40,POW-Outer Ketchikan split (portion to Ketchikan Gateway)
+# Alaska: Skagway-Hoonah-Angoon → Skagway (02230) and Hoonah-Angoon (02105), 2007
+02231,02230,2007-06-30,0.30,Skagway-Hoonah-Angoon split (Skagway portion)
+02231,02105,2007-06-30,0.70,Skagway-Hoonah-Angoon split (Hoonah-Angoon portion)
+# Alaska: Petersburg Census Area created 2013 from part of Wrangell (02275)
+# — no historical remap needed since Petersburg is the new FIPS; Wrangell
+# remains, just smaller. Documenting for reference.
+# Colorado: Broomfield County created 2001-11-15 from Boulder, Adams, Weld, Jefferson
+# — data pre-2001 for Broomfield doesn't exist; no back-mapping needed for our
+# use case (targets are forward-looking, historical Broomfield rows would come
+# from allocation which we don't do).
+# Virginia: Bedford City (51515) reverted to Bedford County (51019), 2013-07-01
+51515,51019,2013-06-30,1.0,Bedford City reverted to Bedford County
+# Virginia: Clifton Forge City (51560) reverted to Alleghany County (51005), 2001
+51560,51005,2001-06-30,1.0,Clifton Forge City reverted to Alleghany County
+# Virginia: South Boston City (51780) reverted to Halifax County (51083), 1995
+51780,51083,1995-06-30,1.0,South Boston City reverted to Halifax County

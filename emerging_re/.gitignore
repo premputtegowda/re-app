@@ -1,0 +1,13 @@
+# Data files — snapshots are ingested from source URLs, not committed.
+# Crosswalks (data/crosswalks/) are the exception; they're version-controlled.
+data/raw/
+data/curated/
+data/quarantine/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+uv.lock

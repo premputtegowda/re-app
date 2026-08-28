@@ -1,0 +1,30 @@
+[project]
+name = "emerging-re"
+version = "0.1.0"
+description = "Emerging real-estate market county screener — county-level ranking with bitemporal storage + rent/HPI dual-target backtest"
+requires-python = ">=3.11"
+dependencies = [
+    "duckdb>=1.0.0",
+    "pyarrow>=15.0.0",
+    "pandas>=2.2.0",
+    "httpx>=0.27.0",
+    # openpyxl only needed if a source ships .xlsx (FHFA sometimes does).
+    "openpyxl>=3.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.5.0",
+]
+# dbt-duckdb pulled in when Phase 2 (features) begins — omitting until then
+# to keep the initial install light and avoid dbt version churn.
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "B", "UP"]
+ignore = ["E501"]  # line-length handled by formatter
