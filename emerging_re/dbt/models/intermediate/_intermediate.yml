@@ -84,3 +84,16 @@ models:
         tests: [not_null]
       - name: rent_minus_price_growth
         tests: [not_null]
+
+  - name: int_disqualifiers
+    description: >
+      Boolean disqualifier flags per (fips, period). Three implemented:
+      aging_trap (pop shrinking despite positive migration),
+      sector_concentration (>25% of employment in one supersector),
+      price_ran_25pct (trailing 24mo HPI change >25%). Downstream
+      scorer treats any_disqualifier=true as automatic zero rank.
+    columns:
+      - name: fips
+        tests: [not_null]
+      - name: period_end_date
+        tests: [not_null]
