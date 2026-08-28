@@ -76,10 +76,14 @@ def write_scores(scored: pd.DataFrame, out_dir: Path) -> Path:
         "target_zori_24mo_demeaned",
         "target_hpi_36mo_demeaned",
         "target_zori_36mo_demeaned",
+        "target_hpi_60mo_demeaned",
+        "target_zori_60mo_demeaned",
         "hpi_forward_return_24mo",
         "zori_forward_return_24mo",
         "hpi_forward_return_36mo",
         "zori_forward_return_36mo",
+        "hpi_forward_return_60mo",
+        "zori_forward_return_60mo",
     ]
     keep_cols = [c for c in keep_cols if c in scored.columns]
     scored[keep_cols].to_parquet(out_path, index=False)
@@ -126,7 +130,7 @@ def print_summary(all_results: list) -> None:
     print("PHASE 3 BACKTEST — SPEARMAN RANK CORRELATION")
     print("=" * 78)
 
-    for horizon in ("24mo", "36mo"):
+    for horizon in ("24mo", "36mo", "60mo"):
         print(f"\n\n{'=' * 30} HORIZON = {horizon} {'=' * 30}")
         for metric in ("hpi", "zori"):
             view = df[
@@ -151,7 +155,7 @@ def print_summary(all_results: list) -> None:
 
     # Ablation — which features matter? Show for both horizons + both metrics.
     print("\n\n--- FEATURE ABLATION ('all' regime, sorted by importance) ---")
-    for horizon in ("24mo", "36mo"):
+    for horizon in ("24mo", "36mo", "60mo"):
         for metric in ("hpi", "zori"):
             try:
                 comp_all = df[(df["experiment"] == "composite") & (df["metric"] == metric) & (df["horizon"] == horizon) & (df["regime"] == "all")]["spearman"].iloc[0]

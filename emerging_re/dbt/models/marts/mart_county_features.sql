@@ -229,6 +229,26 @@ with_target_b36 as (
     from with_target_a36 a
     left join {{ ref('mart_zori_forward_returns_36mo') }} tb
         on tb.fips = a.fips and tb.period_end_date = a.period_end_date
+),
+
+with_target_a60 as (
+    select
+        b.*,
+        ta.forward_return_60mo as hpi_forward_return_60mo,
+        ta.target_hpi_60mo_demeaned
+    from with_target_b36 b
+    left join {{ ref('mart_hpi_forward_returns_60mo') }} ta
+        on ta.fips = b.fips and ta.period_end_date = b.period_end_date
+),
+
+with_target_b60 as (
+    select
+        a.*,
+        tb.forward_return_60mo as zori_forward_return_60mo,
+        tb.target_zori_60mo_demeaned
+    from with_target_a60 a
+    left join {{ ref('mart_zori_forward_returns_60mo') }} tb
+        on tb.fips = a.fips and tb.period_end_date = a.period_end_date
 )
 
-select * from with_target_b36
+select * from with_target_b60
