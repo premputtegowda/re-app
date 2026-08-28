@@ -1,4 +1,4 @@
-.PHONY: install ingest-fhfa ingest-zori ingest-pep ingest-pep-backfill ingest-all query-fhfa test lint clean
+.PHONY: install ingest-fhfa ingest-zori ingest-pep ingest-pep-backfill ingest-bps ingest-all query-fhfa test lint clean
 
 # Setup — install deps into .venv/. Requires `uv` (https://docs.astral.sh/uv/).
 install:
@@ -22,9 +22,16 @@ ingest-pep:
 ingest-pep-backfill:
 	uv run python -m ingest.census_pep --vintage 2019
 
+# BPS = building permits. Default loads 2000 through current year — one
+# Dec YTD file per year plus latest partial for current year. Coverage
+# is thin (~750 counties) before 2022, ~3000 counties from 2022 on;
+# see DECISIONS.md §3 footnote.
+ingest-bps:
+	uv run python -m ingest.census_bps
+
 # All Phase 1 sources — add more targets as loaders land.
-ingest-all: ingest-fhfa ingest-zori ingest-pep
-	@echo "TODO: add bls_qcew, bps_permits, hud_usps_vacancy"
+ingest-all: ingest-fhfa ingest-zori ingest-pep ingest-bps
+	@echo "TODO: add bls_qcew, hud_usps_vacancy"
 
 # Sanity query — dumps last 5 rows for Franklin County, OH from curated FHFA.
 query-fhfa:

@@ -128,7 +128,7 @@ snapshot cadence (informs how often we re-ingest). Table is the source of truth.
 | Source | Table code | Cadence | Publish lag | Restates? | Snapshot every |
 |---|---|---|---|---|---|
 | FHFA HPI (county) | `fhfa_hpi` | Quarterly | ~3 mo | Minor revisions | Quarter |
-| Census BPS (permits) | `bps_permits` | Monthly | ~2 mo | Occasionally | Month |
+| Census BPS (permits) | `census_bps` | Monthly | ~2 mo | Occasionally | Month* |
 | BLS QCEW (employment by sector) | `bls_qcew` | Quarterly | ~5 mo | **Yes, ~90 days** | Quarter |
 | Census PEP (population/migration) | `census_pep` | Annual | ~9 mo | Minor | Year |
 | Zillow ZHVI (home value index) | `zillow_zhvi` | Monthly | ~1 mo | **Full history, monthly** | Month |
@@ -139,6 +139,26 @@ snapshot cadence (informs how often we re-ingest). Table is the source of truth.
 source restated. Marginal cost of an extra CSV is ~50MB; marginal cost of
 losing a vintage is unrecoverable. Total storage: ~7 sources × 100MB avg ×
 12 monthly snapshots = ~8GB/year. Trivial.
+
+**\* Census BPS coverage cliff (discovered 2026-08-28):** Pre-2022 county
+files include only counties with at least one reporting permit-issuing
+jurisdiction (~750 counties total, ~45% of pop≥50k universe). Starting the
+2022 vintage, Census publishes all ~3,000 counties (with imputation for
+non-reporters). Impact on target universe:
+
+| Population rank | Pre-2022 BPS coverage |
+|---|---|
+| Top 100 | 83% |
+| Top 300 | 67% |
+| Top 500 | 47% |
+| 500-750 | 35% |
+
+**Downstream implication:** The historical backtest can compute BPS-based
+features (permits per capita, 3-yr rolling permits) for the ~half of the
+target universe with continuous coverage. Options at Phase 3: (a) restrict
+backtest to BPS-covered counties, or (b) run with-BPS vs no-BPS feature
+sets and measure marginal Spearman lift to decide if BPS is worth the
+sample-size hit.
 
 **Look-ahead rule (backtests only):** When scoring a county at `t`, only use
 rows where `as_of_date <= t - lag_source` where `lag_source` comes from this
