@@ -22,13 +22,17 @@ select
     z_emp_growth_yoy_demeaned,
     z_hpi_yoy,
     z_zori_yoy,
-    -- Realized targets for post-hoc comparison (both horizons).
+    -- Realized targets for post-hoc comparison (all three horizons).
     target_hpi_24mo_demeaned,
     target_zori_24mo_demeaned,
     target_hpi_36mo_demeaned,
     target_zori_36mo_demeaned,
+    target_hpi_60mo_demeaned,
+    target_zori_60mo_demeaned,
     hpi_forward_return_24mo,
     zori_forward_return_24mo,
     hpi_forward_return_36mo,
-    zori_forward_return_36mo
+    zori_forward_return_36mo,
+    hpi_forward_return_60mo,
+    zori_forward_return_60mo
 from {{ source('backtest', 'scores') }}

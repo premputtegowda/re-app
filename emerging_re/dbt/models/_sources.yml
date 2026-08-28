@@ -39,6 +39,13 @@ sources:
           Annual county Business Applications counts (2005-2025). Leading
           indicator: new business apps precede employer formation by 4-8
           quarters. Publish lag ~5 months.
+      - name: census_acs_1yr
+        description: >
+          ACS 1-year estimates — calendar-year snapshots (not smoothed).
+          Only counties with pop >= 65,000 (~861 counties). Preferred
+          over 5yr when available; int_acs_features falls back to 5yr
+          for smaller counties. Vintage 2020 unavailable (Census
+          cancelled due to pandemic sample issues).
 
   - name: backtest
     description: >
