@@ -69,3 +69,18 @@ models:
         tests: [not_null]
       - name: period_end_date
         tests: [not_null]
+
+  - name: int_rent_vs_price_growth
+    description: >
+      Tier 3 pricing signal — the framework's "most important single
+      criterion" per DECISIONS.md. Emits YoY HPI growth, YoY ZORI Dec-
+      to-Dec growth, and their difference. Positive gap = rent
+      outpacing price (yields expanding, entry window); negative gap =
+      price outpacing rent (late cycle, yields compressing).
+    columns:
+      - name: fips
+        tests: [not_null]
+      - name: period_end_date
+        tests: [not_null]
+      - name: rent_minus_price_growth
+        tests: [not_null]
