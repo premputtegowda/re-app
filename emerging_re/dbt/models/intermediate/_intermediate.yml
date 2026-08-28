@@ -57,3 +57,15 @@ models:
         tests: [not_null]
       - name: emp_growth_yoy_demeaned
         tests: [not_null]
+
+  - name: int_permits_intensity
+    description: >
+      Tier 2 supply signal: current-year permits/1000 residents vs the
+      county's own 10-year historical average. Ratio > 1 = supply
+      catching up; ratio < 1 = supply constrained. `permits_10yr_baseline_years_available`
+      flags data-thin counties (BPS coverage cliff — see DECISIONS.md §3).
+    columns:
+      - name: fips
+        tests: [not_null]
+      - name: period_end_date
+        tests: [not_null]
