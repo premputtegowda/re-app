@@ -138,6 +138,42 @@ with_diversity as (
         on d.fips = m.fips and d.period_end_date = m.period_end_date
 ),
 
+-- v5 additions (2026-08-29): BFS + ACS-derived features to test
+-- predictability. ACS features join on period_end_date via a nearest-
+-- prior match — ACS 5yr midpoints are Dec 31 of (vintage−2), so scoring
+-- at Dec 31 of year Y matches the ACS vintage that INCLUDES year Y.
+with_bfs as (
+    select
+        d.*,
+        bf.business_applications,
+        bf.business_apps_per_1000,
+        bf.business_apps_per_1000_3yr_avg
+    from with_diversity d
+    left join {{ ref('int_bfs_apps_per_capita') }} bf
+        on bf.fips = d.fips and bf.period_end_date = d.period_end_date
+),
+
+with_acs as (
+    -- ACS 5yr vintage YYYY period_end = Dec 31 of (YYYY−2). For scoring
+    -- at Dec 31 of year Y, the ACS vintage that CENTERS on Y-2 gives us
+    -- info that reasonably reflects the market at scoring time.
+    -- We match to the ACS row with period_end_date closest to (but not
+    -- greater than) the scoring date.
+    select
+        b.*,
+        af.rental_vacancy_rate,
+        af.rent_to_income_ratio,
+        af.cap_rate_proxy
+    from with_bfs b
+    left join lateral (
+        select rental_vacancy_rate, rent_to_income_ratio, cap_rate_proxy
+        from {{ ref('int_acs_features') }} a
+        where a.fips = b.fips and a.period_end_date <= b.period_end_date
+        order by a.period_end_date desc
+        limit 1
+    ) af on true
+),
+
 -- Disqualifiers
 with_disq as (
     select
@@ -148,7 +184,7 @@ with_disq as (
         d.hpi_trailing_24mo,
         d.disq_price_ran_25pct,
         d.any_disqualifier
-    from with_diversity r
+    from with_acs r
     left join {{ ref('int_disqualifiers') }} d
         on d.fips = r.fips and d.period_end_date = r.period_end_date
 ),

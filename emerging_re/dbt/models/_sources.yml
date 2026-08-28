@@ -28,6 +28,17 @@ sources:
         description: "Annual county building permits (2000-present)."
       - name: bls_qcew
         description: "Annual county employment + wages by NAICS supersector (2000-present)."
+      - name: census_acs
+        description: >
+          ACS 5-year rolling estimates — county-level median income, median
+          rent ($), median home value, rental vacancy rate. Level metrics
+          for UI context (not composite scoring — see v4 experiment result
+          in _scoring.py). Vintages 2019-2024 loaded.
+      - name: census_bfs
+        description: >
+          Annual county Business Applications counts (2005-2025). Leading
+          indicator: new business apps precede employer formation by 4-8
+          quarters. Publish lag ~5 months.
 
   - name: backtest
     description: >

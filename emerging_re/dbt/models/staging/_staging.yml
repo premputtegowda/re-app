@@ -61,3 +61,12 @@ models:
           - not_null
           - accepted_values:
               values: [70, 74]
+
+  - name: stg_census_acs
+    columns:
+      - name: fips
+        tests: [not_null]
+      - name: period_end_date
+        tests: [not_null]
+      - name: as_of_date
+        tests: [not_null]

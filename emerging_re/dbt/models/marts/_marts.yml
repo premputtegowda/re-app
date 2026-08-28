@@ -79,3 +79,16 @@ models:
         tests: [not_null]
       - name: regime
         tests: [not_null]
+
+  - name: mart_county_context
+    description: >
+      Per-county $-denominated context metrics for the UI county-detail
+      page. Latest ACS 5-year vintage: median household income, median
+      gross rent, median home value, rental vacancy rate. Plus derived
+      metrics: cap_rate_proxy (rent × 12 / home value) and
+      rent_to_income_ratio.
+    columns:
+      - name: fips
+        tests:
+          - not_null
+          - unique

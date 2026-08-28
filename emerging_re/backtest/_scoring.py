@@ -63,6 +63,13 @@ FEATURES: tuple[FeatureSpec, ...] = (
     FeatureSpec("high_wage_share_yoy_chg",    "tier1_demand",   +1),
     FeatureSpec("wage_growth_yoy_demeaned",   "tier1_demand",   +1),
     FeatureSpec("emp_growth_yoy_demeaned",    "tier1_demand",   +1),
+    # v5 addition (2026-08-29): cap_rate_proxy only.
+    # Tested BFS business_apps_per_1000 + ACS rental_vacancy_rate +
+    # rent_to_income_ratio alongside; those were mixed-to-slightly-harmful
+    # in ablation (see git history commit for full v5 test details).
+    # cap_rate_proxy stands out — helps ZORI 24mo by +0.015 Spearman
+    # when included. First value-oriented signal that empirically holds.
+    FeatureSpec("cap_rate_proxy",             "tier1_demand",   +1),
     # Tier 4 — trailing momentum. The winning signal at 24-36mo horizons.
     FeatureSpec("hpi_yoy",                    "tier4_momentum", +1),
     FeatureSpec("zori_yoy",                   "tier4_momentum", +1),
