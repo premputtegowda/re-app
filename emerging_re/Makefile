@@ -1,4 +1,4 @@
-.PHONY: install ingest-fhfa ingest-all query-fhfa test lint clean
+.PHONY: install ingest-fhfa ingest-zori ingest-pep ingest-pep-backfill ingest-all query-fhfa test lint clean
 
 # Setup — install deps into .venv/. Requires `uv` (https://docs.astral.sh/uv/).
 install:
@@ -9,9 +9,22 @@ install:
 ingest-fhfa:
 	uv run python -m ingest.fhfa_hpi
 
+ingest-zori:
+	uv run python -m ingest.zillow_zori
+
+ingest-pep:
+	uv run python -m ingest.census_pep
+
+# One-time backfill — loads the V2019 PEP vintage (2010-2019) under its
+# actual release-date as_of (2020-03-26) so the bitemporal schema reflects
+# when this data was publicly available. Combined with `ingest-pep` this
+# gives migration history from 2010 to the latest vintage year.
+ingest-pep-backfill:
+	uv run python -m ingest.census_pep --vintage 2019
+
 # All Phase 1 sources — add more targets as loaders land.
-ingest-all: ingest-fhfa
-	@echo "TODO: add zillow_zori, bls_qcew, census_pep, bps_permits, hud_usps_vacancy"
+ingest-all: ingest-fhfa ingest-zori ingest-pep
+	@echo "TODO: add bls_qcew, bps_permits, hud_usps_vacancy"
 
 # Sanity query — dumps last 5 rows for Franklin County, OH from curated FHFA.
 query-fhfa:

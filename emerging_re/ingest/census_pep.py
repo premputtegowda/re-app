@@ -52,48 +52,101 @@ logger = logging.getLogger(__name__)
 
 SOURCE_NAME = "census_pep"
 
-# Latest vintage as of 2026-08. Update annually when Census publishes a new
-# vintage (~March each year). The URL pattern is stable:
-# https://www2.census.gov/programs-surveys/popest/datasets/{start}-{end}/counties/totals/co-est{end}-alldata.csv
-PEP_COUNTY_URL = (
-    "https://www2.census.gov/programs-surveys/popest/datasets/"
-    "2020-2025/counties/totals/co-est2025-alldata.csv"
-)
+# PEP publishes annual "vintages" — each restates prior years' estimates
+# using the latest methodology. To build multi-decade history we load
+# multiple vintages under different as_of_date values (bitemporal schema
+# preserves each vintage's point-in-time view).
+#
+# Vintage → decade span mapping. URL pattern:
+#   https://www2.census.gov/programs-surveys/popest/datasets/{start}-{end}/counties/totals/co-est{end}-alldata.csv
+LATEST_VINTAGE = 2025
+
+# Known PEP vintage release dates. Used as default as_of_date when loading a
+# specific vintage — reflects when the data was actually publicly available,
+# which is what the bitemporal schema requires (no look-ahead bias).
+# Source: Census Bureau release calendars.
+VINTAGE_RELEASE_DATES: dict[int, date] = {
+    2019: date(2020, 3, 26),   # V2019 — final pre-decennial vintage
+    2020: date(2021, 5, 4),    # V2020 — delayed by 2020 Census
+    2021: date(2022, 3, 24),
+    2022: date(2023, 3, 30),
+    2023: date(2024, 3, 14),
+    2024: date(2025, 3, 20),
+    2025: date(2026, 3, 13),
+}
 
 # Metrics we extract per year — one column per metric per year in the source.
-# For each metric we melt wide→long and store one row per (fips, year, metric).
-# Skipping ESTIMATESBASE2020 (starting-point-only) and RESIDUAL (statistical
-# reconciliation, not a substantive signal).
+# Skipping ESTIMATESBASE* (starting-point-only), CENSUS*POP (decennial anchor),
+# and RESIDUAL (statistical reconciliation, not a substantive signal).
+# NATURALCHG (V2020+) and NATURALINC (V2019 and earlier) are the same
+# quantity (births − deaths); we normalize both to `naturalchg` in output.
 METRIC_STEMS = (
     "POPESTIMATE",       # total population
     "NPOPCHG",           # net population change
     "BIRTHS",
     "DEATHS",
-    "NATURALCHG",        # births - deaths
+    "NATURALCHG",        # V2020+ name for births − deaths
+    "NATURALINC",        # V2019− name for the same quantity
     "INTERNATIONALMIG",
     "DOMESTICMIG",       # ← Tier 1 signal
     "NETMIG",            # international + domestic
 )
 
+# Older vintages (V2019 and earlier) name the yearly-change columns with an
+# underscore: NPOPCHG_2010, NBIRTHS_2010. Newer vintages drop the underscore.
+# The optional `_?` accommodates both without splitting the loader in two.
+METRIC_COLUMN_RE = re.compile(r"^(" + "|".join(METRIC_STEMS) + r")_?(\d{4})$")
+
+# Rename map applied after melt so both vintages produce identically-named
+# columns in the curated Parquet.
+METRIC_ALIASES = {"naturalinc": "naturalchg"}
+
 # SUMLEV = 50 → county-level rows. Other values are national (10), regional
 # (20), state (40) aggregates that we don't want in the county universe.
 COUNTY_SUMLEV = 50
 
-# Matches metric column names like "POPESTIMATE2020", "DOMESTICMIG2025", etc.
-METRIC_COLUMN_RE = re.compile(r"^(" + "|".join(METRIC_STEMS) + r")(\d{4})$")
+
+def _vintage_url(vintage: int) -> str:
+    """Build the source CSV URL for a given PEP vintage year."""
+    # V2019 and earlier belong to the 2010-decade file layout;
+    # V2020+ belong to the 2020-decade layout.
+    start = 2010 if vintage <= 2019 else 2020
+    return (
+        "https://www2.census.gov/programs-surveys/popest/datasets/"
+        f"{start}-{vintage}/counties/totals/co-est{vintage}-alldata.csv"
+    )
 
 
-def load(as_of_date: date | None = None) -> Path:
-    """Full ingest pipeline for Census PEP county data.
+def load(vintage: int = LATEST_VINTAGE, as_of_date: date | None = None) -> Path:
+    """Full ingest pipeline for a single Census PEP vintage.
+
+    When loading an older vintage as a historical backfill, `as_of_date`
+    defaults to the vintage's actual release date so the bitemporal schema
+    correctly reflects when the data was publicly available. Callers can
+    override via the `as_of_date` arg (e.g. for a "re-snapshot today"
+    workflow that treats the historical file as freshly downloaded).
 
     Returns path to the curated Parquet file.
     """
-    as_of = compute_as_of_date(as_of_date)
-    logger.info("Starting Census PEP ingest (as_of_date=%s)", as_of.isoformat())
+    if vintage not in VINTAGE_RELEASE_DATES:
+        raise ValueError(
+            f"Unknown PEP vintage {vintage}. Known vintages: "
+            f"{sorted(VINTAGE_RELEASE_DATES)}"
+        )
+    if as_of_date is None:
+        as_of = VINTAGE_RELEASE_DATES[vintage]
+    else:
+        as_of = compute_as_of_date(as_of_date)
+
+    url = _vintage_url(vintage)
+    logger.info(
+        "Starting Census PEP ingest (vintage=V%d, as_of_date=%s, url=%s)",
+        vintage, as_of.isoformat(), url,
+    )
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_dl = Path(tmpdir) / "co-est-alldata.csv"
-        download(PEP_COUNTY_URL, tmp_dl)
+        tmp_dl = Path(tmpdir) / f"co-est{vintage}-alldata.csv"
+        download(url, tmp_dl)
         snapshot_raw(SOURCE_NAME, as_of, tmp_dl)
         df_wide = _parse_and_validate(tmp_dl)
 
@@ -185,7 +238,7 @@ def _melt_to_long(df_wide: pd.DataFrame) -> pd.DataFrame:
     )
     # Split "POPESTIMATE2020" → metric="popestimate", year=2020
     extract = tall["metric_year"].str.extract(METRIC_COLUMN_RE)
-    tall["metric"] = extract[0].str.lower()
+    tall["metric"] = extract[0].str.lower().replace(METRIC_ALIASES)
     tall["year"] = extract[1].astype(int)
     tall = tall.drop(columns=["metric_year"])
 
@@ -262,14 +315,21 @@ def _normalize_and_partition(
 def _main() -> None:
     parser = argparse.ArgumentParser(description="Ingest Census PEP county population + migration")
     parser.add_argument(
+        "--vintage", type=int, default=LATEST_VINTAGE,
+        choices=sorted(VINTAGE_RELEASE_DATES),
+        help=f"PEP vintage year (default: {LATEST_VINTAGE}). Older vintages "
+             "provide pre-2020 history under their release-date as_of.",
+    )
+    parser.add_argument(
         "--as-of", type=date.fromisoformat, default=None,
-        help="Override as_of_date (YYYY-MM-DD) for backfills. Default: today UTC.",
+        help="Override as_of_date (YYYY-MM-DD). Default: vintage's release date "
+             "(preserves bitemporal correctness for historical backfills).",
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="DEBUG-level logging")
     args = parser.parse_args()
 
     configure_logging(logging.DEBUG if args.verbose else logging.INFO)
-    load(as_of_date=args.as_of)
+    load(vintage=args.vintage, as_of_date=args.as_of)
 
 
 if __name__ == "__main__":
