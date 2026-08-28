@@ -1,0 +1,34 @@
+version: 2
+
+models:
+  - name: mart_hpi_forward_returns_24mo
+    description: >
+      Target A per DECISIONS.md §7: forward 24-month FHFA HPI change,
+      demeaned cross-sectionally vs the national median per period.
+      One row per (fips, period_end_date) where a valid +24mo HPI reading
+      exists. Annual cadence.
+    columns:
+      - name: fips
+        tests: [not_null]
+      - name: period_end_date
+        tests: [not_null]
+      - name: target_hpi_24mo_demeaned
+        tests: [not_null]
+    # Composite-key uniqueness test needs dbt_utils; deferring to Batch F
+    # when we install packages.yml and pull in the full test kit.
+
+  - name: mart_zori_forward_returns_24mo
+    description: >
+      Target B per DECISIONS.md §7: forward 24-month Zillow ZORI change,
+      demeaned cross-sectionally vs the national median per period.
+      One row per (fips, period_end_date) where a valid +24mo ZORI reading
+      exists. Monthly cadence.
+    columns:
+      - name: fips
+        tests: [not_null]
+      - name: period_end_date
+        tests: [not_null]
+      - name: target_zori_24mo_demeaned
+        tests: [not_null]
+    # Composite-key uniqueness test needs dbt_utils; deferring to Batch F
+    # when we install packages.yml and pull in the full test kit.
