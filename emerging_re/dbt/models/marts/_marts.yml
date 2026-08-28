@@ -44,3 +44,38 @@ models:
         tests: [not_null]
       - name: period_end_date
         tests: [not_null]
+
+  - name: mart_backtest_scores
+    description: >
+      Per-(fips, period_end_date) composite score + rank + tier
+      contributions + individual z-scored feature contributions.
+      Written by backtest/run_backtest.py. Consumed by UI county-detail
+      view.
+    columns:
+      - name: fips
+        tests: [not_null]
+      - name: period_end_date
+        tests: [not_null]
+
+  - name: mart_backtest_current
+    description: >
+      Latest-period scoring per county — the UI's main landing page
+      reads this. One row per fips.
+    columns:
+      - name: fips
+        tests:
+          - not_null
+          - unique
+
+  - name: mart_backtest_diagnostics
+    description: >
+      Per-(experiment, target, regime) Spearman correlation + n.
+      Consumed by backtest performance page in UI + the ship-decision
+      logic.
+    columns:
+      - name: experiment
+        tests: [not_null]
+      - name: target
+        tests: [not_null]
+      - name: regime
+        tests: [not_null]

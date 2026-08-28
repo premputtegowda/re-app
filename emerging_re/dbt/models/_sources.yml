@@ -28,3 +28,18 @@ sources:
         description: "Annual county building permits (2000-present)."
       - name: bls_qcew
         description: "Annual county employment + wages by NAICS supersector (2000-present)."
+
+  - name: backtest
+    description: >
+      Outputs from backtest/run_backtest.py. Not partitioned — a fresh
+      run overwrites (backtest history isn't tracked here; git history
+      of the scoring code is the source of truth for what the model
+      was on any given day).
+    meta:
+      external_location: >-
+        read_parquet('{{ var("curated_dir") }}/backtest/{name}/*.parquet')
+    tables:
+      - name: scores
+        description: "Per-(fips, period) composite score, rank, and tier contributions."
+      - name: diagnostics
+        description: "Per-(experiment, target, regime) Spearman correlation + sample size."

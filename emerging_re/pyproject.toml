@@ -13,6 +13,8 @@ dependencies = [
     # Phase 2 — dbt orchestration over DuckDB. dbt-duckdb pins compatible
     # dbt-core versions automatically.
     "dbt-duckdb>=1.9.0",
+    # Phase 3 — Spearman correlations + regime stats for backtest.
+    "scipy>=1.14.0",
 ]
 
 [project.optional-dependencies]
