@@ -1,10 +1,16 @@
 # DECISIONS.md — Emerging-RE Module (Phase 0)
 
-**Version:** 0.3
+**Version:** 0.4
 **Last updated:** 2026-08-28
 **Status:** Draft — awaiting sign-off before Phase 1 (ingestion) begins
 
 **Changelog:**
+- 0.4 — Dual target for backtest: composite is evaluated against BOTH forward
+  HPI (appreciation) and forward ZORI (rent growth). Ship criterion is "pass
+  at least one target, label the county's ranking accordingly." Captures the
+  fact that appreciation markets and rental markets are both actionable for a
+  rental investor — different regimes, both valuable. Also adds ZORI coverage
+  to inclusion rule (Section 5) — reduces universe from ~800 to ~500-600.
 - 0.3 — Added Section 11 on machine learning scope: linear equal-weight
   composite is the scorer; ML restricted to catalyst NLP (Phase 5) and Phase 3
   diagnostic (detect non-linear signal, refactor features rather than switch
@@ -177,32 +183,41 @@ alongside "Fairfax County, VA".
 
 ---
 
-## 5. Inclusion rule — pop ≥50k with 10yr continuous coverage
+## 5. Inclusion rule — pop ≥50k with 10yr continuous coverage on BOTH targets
 
 **Decision:** A county enters the universe if:
 
 1. 2020 population ≥50,000 (from Census `census_pep`)
 2. Has non-null values in all Phase 1 sources for `period_end_date >= 2015-01-01`
    (at least 10 years of coverage → 40 quarterly vintages for backtests)
-3. Isn't a US territory (excluded from FHFA HPI coverage anyway)
+3. Has non-null **Zillow ZORI (rent index) values from 2018-01-01** — needed
+   so rent-target backtest has enough history (ZORI has less coverage than
+   FHFA HPI, this is the constraint that binds)
+4. Isn't a US territory (excluded from FHFA HPI coverage anyway)
 
-Result: ~800 counties. Written to `data/curated/universe.parquet`.
+Result: ~500-600 counties (down from ~800 pre-ZORI-requirement).
+Written to `data/curated/universe.parquet`.
 
-Counties below 50k pop are ingested (for potential future use) but excluded
-from ranking, backtest scoring, and the UI.
+Counties below 50k pop OR without ZORI coverage are ingested (for potential
+future use) but excluded from ranking, backtest scoring, and the UI.
 
 **Why 50k?** Below that, single-employer concentration is the norm, not the
 exception (which would trigger our disqualifier), and monthly BPS permit data
 gets noisy (single-digit permits are the median).
 
-**Why 10yr coverage?** Phase 3 backtest scores at annual vintages from 2015
-onward → 10 scoring vintages × 24-month forward window = returns realized
-through 2027. Need enough history for the Spearman calculation to be
-non-degenerate.
+**Why 10yr coverage on HPI + 8yr on ZORI?** Phase 3 backtest scores at annual
+vintages from 2015 onward for HPI target and 2018 onward for ZORI target.
+Different history depths per target but both give enough vintages for
+non-degenerate Spearman calculation.
+
+**Alternative considered:** Two universes ("full universe" for HPI target,
+"rent-covered subset" for ZORI target). Rejected because it complicates the
+composite scoring — the same county would get different ranks depending on
+which universe it's in. Simpler to intersect and use one universe for both.
 
 ---
 
-## 6. License posture
+## 6. License posture — Zillow ZORI is now central, productization risk elevated
 
 **Decision matrix:**
 
@@ -212,116 +227,151 @@ non-degenerate.
 | Census (PEP, BPS) | Public domain (US Gov) | ✅ | ✅ |
 | BLS QCEW | Public domain (US Gov) | ✅ | ✅ |
 | HUD USPS vacancy | Free w/ HUD account, ToS applies | ✅ | ⚠️ Check ToS |
-| Zillow ZHVI/ZORI | "Personal, non-commercial" per Zillow Research Terms | ✅ | ❌ Must replace |
+| Zillow ZHVI | "Personal, non-commercial" per Zillow Research Terms | ✅ | ❌ Must replace |
+| **Zillow ZORI** (rent index) | "Personal, non-commercial" per Zillow Research Terms | ✅ | ❌ Must replace |
 
 **Decision:** Build phase 1 with Zillow. If/when productization is planned,
-Zillow gets replaced with a licensed source (CoreLogic, ATTOM, etc.) or
-dropped in favor of BLS/Census-derived proxies.
+Zillow gets replaced with a licensed source.
 
-This decision has no code implications right now — it's a flag to prevent
-future-us from accidentally shipping Zillow-based rankings as a paid product.
+**Elevated productization risk:** ZORI is now a co-target for the backtest
+(Section 7), not just a supplementary input. If this module ever gets
+productized, we can't just "drop Zillow" — we'd need a licensed rent index
+of comparable coverage. Realistic options:
+
+- **Apartments.com research** — proprietary, requires licensing negotiation
+- **CoStar / STR** — enterprise pricing (~$$$$$)
+- **CoreLogic Multifamily** — enterprise pricing (~$$$$)
+- **Roll our own from public data** — HUD FMR (Fair Market Rent) as a proxy,
+  but it's designed for voucher-program administration, not investment
+  signal, and lags market rents by 12-18 months. Weak substitute.
+
+Practical implication: this module can never be a paid product without
+resolving the ZORI dependency. Fine for personal use, fine for a free/
+non-commercial tool. Flag in every doc that describes future plans.
 
 **License notice** to include in the eventual UI: "Home value and rent data
 sourced from Zillow Research. For personal non-commercial use only."
 
 ---
 
-## 7. Pre-registered success thresholds — relative to a computed baseline
+## 7. Pre-registered success thresholds — dual target, relative to baseline
 
 **Decision — commit to the SHAPE of the tests before Phase 3, pin ABSOLUTE
-thresholds after computing the baseline but BEFORE scoring the composite:**
+thresholds after computing baselines but BEFORE scoring the composite:**
 
-The composite score is expressed relative to a naive baseline computed from
-the same joined data. This is the only defensible framing because we don't yet
-know what Spearman value is achievable on our specific universe (~800
-counties, quarterly vintages, public sources only) — and made-up absolute
-numbers are false precision.
+The composite is evaluated against **two forward targets** since rental
+investors care about both appreciation (equity growth on exit) and rent
+growth (cash flow while holding):
 
-**Baseline to beat:** Trailing-12-month county HPI growth alone, scored at the
-same annual vintages against the same 24-month forward target. This is the
-"momentum-only" model — cheap, obvious, and what any competing screener
-implicitly beats by adding features.
+- **Target A — forward 24mo FHFA HPI change**, demeaned vs national median
+- **Target B — forward 24mo Zillow ZORI change**, demeaned vs national median
 
-### The three thresholds (framed as margins over baseline)
+Each target has its own naive momentum baseline (trailing-12mo growth of the
+same series) that the composite must beat by a margin.
+
+### The three thresholds — applied per target
+
+For EACH of Target A (HPI) and Target B (ZORI):
 
 1. **Composite Spearman > baseline Spearman + 0.05.**
-   If trailing-momentum alone hits Spearman 0.14 against forward HPI, our
-   composite must hit ≥ 0.19. If baseline hits 0.22, composite must hit ≥ 0.27.
-   Adding features to beat momentum by any less than 0.05 isn't a meaningful
-   improvement — it's noise within Spearman's own sampling variance.
+   Beat trailing-12mo momentum of the same series by ≥ 0.05 Spearman.
+   Adding features to beat momentum by less than 0.05 is noise within
+   Spearman's own sampling variance.
 
 2. **Top-decile lift > baseline top-decile lift + 1pp annualized.**
-   Take the top 80 counties by composite score. Compute mean forward 24mo HPI
-   change minus the same for the other 720. Do the same for the baseline
-   (top 80 by trailing-12mo growth). The composite's lift must exceed the
-   baseline's lift by ≥ 1 percentage point annualized. Same "beat the naive
-   thing meaningfully" principle applied to the actionable slice.
+   Top 80 counties by composite score must outperform the bottom 720 by
+   ≥ 1pp/yr more than the top-80-by-momentum-baseline does.
 
-3. **Regime stability: no half performs worse than baseline in that half.**
-   Split at 2022-01-01. Compute composite Spearman AND baseline Spearman for
-   each half separately. Composite must beat baseline in BOTH halves (allowing
-   for a small tolerance: composite ≥ baseline − 0.03 in the weaker half).
-   Guards against a composite that works pre-2022 but is worse than momentum
-   post-2022 — regime-specific artifact, not a signal.
+3. **Regime stability: composite ≥ baseline − 0.03 in each half of the
+   pre/post-2022 split.** Guards against composites that only work in one
+   macro regime.
 
-### Sanity floors — don't ship even if we beat baseline
+### Ship criterion — pass at least ONE target, label the county's rank
 
-If baseline Spearman is < 0.05 (i.e. even momentum barely works on our data),
-composite hitting 0.10 is not a proud result — the underlying prediction
-problem is fundamentally hard. We ship only if composite Spearman ≥ **0.12
-absolute** in the full sample, regardless of how it compares to baseline. This
-is a floor to prevent shipping a "signal" that's just less bad than another
-non-signal.
+- **Pass Target A AND Target B** → "Strong emerging market" — composite is
+  meaningfully predictive for both appreciation AND rent growth. Ship without
+  label caveat.
+- **Pass Target A only (HPI)** → "Appreciation market" signal. Ship with a
+  label — top-of-list counties are expected to see price growth but the same
+  ranking is NOT trustworthy for rent growth predictions.
+- **Pass Target B only (ZORI)** → "Rental market" signal. Ship with a label —
+  top-of-list counties are expected to see rent growth (cash flow) but the
+  same ranking is NOT trustworthy for appreciation predictions.
+- **Fail both** → don't ship the composite. Iterate features per the failure
+  protocol below.
+
+**Both a valid outcome for our user.** A rental investor who cares primarily
+about cash flow gets real value from a "rental market" signal even if it
+doesn't predict appreciation. A value-add flipper gets value from an
+"appreciation market" signal even if rents are already at market. Different
+regimes, both actionable. The UI must communicate which regime a county is
+being ranked for.
+
+### Sanity floors — don't ship even if we beat baseline on a target
+
+Per target, if the baseline itself is < 0.05 Spearman (even momentum barely
+works on our data for this target), composite hitting 0.10 isn't a proud
+result. Absolute floor: composite Spearman ≥ **0.12** in the full sample for
+that target, regardless of how it compares to baseline.
 
 ### Absolute thresholds get pinned in Phase 3, BEFORE composite scoring
 
 Order of operations:
 
-1. Phase 1-2: build ingestion + baseline model (trailing-12mo momentum)
-2. **Phase 3 step 1: score baseline, compute its Spearman, top-decile lift,
-   pre-2022 Spearman, post-2022 Spearman. Amend DECISIONS.md with those
-   specific numbers.**
+1. Phase 1-2: build ingestion + baseline model (trailing-12mo momentum, per
+   target)
+2. **Phase 3 step 1: score both baselines. For each of Target A and Target B,
+   compute Spearman, top-decile lift, pre-2022 Spearman, post-2022 Spearman.
+   Amend DECISIONS.md with those specific numbers (per target).**
 3. Phase 3 step 2: score composite, compare against the numbers pinned in
-   step 1. Pass/fail called against the frozen thresholds.
+   step 1 (per target). Pass/fail called against the frozen thresholds.
 
-This preserves anti-goalpost-moving discipline (thresholds are pinned before
-composite results are visible) while removing the false precision of picking
-absolute numbers a priori. The commitment is the SHAPE (beat baseline by X,
-sanity floor Y) — the numbers get calibrated to reality once we see the
-baseline.
+Anti-goalpost-moving discipline preserved: thresholds pinned before composite
+results are visible.
 
 ### Failure protocol
 
-If thresholds miss:
+If thresholds miss on BOTH targets:
 
 - **We do NOT tune composite weights.** Weight-tuning against a backtest is
-  p-hacking. Different weights would produce different Spearman values across
-  many attempts; the one that "passes" is the survivor of a search process
-  and doesn't generalize.
+  p-hacking.
 - **We revisit features.** Remove noisy ones, add new ones from the "additional
-  data sources" list in the framework (HUD USPS long-term vacancy, Census BFS,
-  FCC broadband, etc.). Re-backtest cold, once.
-- **After two feature-revision cycles that both fail, we accept the thesis
-  isn't supported by public data and stop.** Ship whatever partial value the
-  ingest + baseline model provides, or don't ship. Not spending 6 months
-  finding a Spearman 0.05 improvement that turns out to be noise.
+  data sources" list (HUD USPS long-term vacancy, Census BFS, FCC broadband,
+  etc.). Re-backtest cold, once.
+- **After two feature-revision cycles that both fail on both targets, we
+  accept the thesis isn't supported by public data and stop.**
+
+If thresholds miss on ONE target only, that's still a shippable outcome per
+the ship criterion above — just labeled accordingly. Iteration is optional
+(could try to improve the failing target with different features), not
+required.
 
 ### Why NOT absolute numbers up-front
 
-I originally proposed absolute thresholds (Spearman ≥ 0.20, top-decile ≥ 2pp,
-regime ≥ 0.15). Those numbers were vibes — plausibly-sized for the domain, but
-not derived from either (a) our specific dataset's null distribution, (b) the
-trailing-momentum baseline's actual performance, or (c) domain-expert
-input on "what edge would you pay for". Committing to made-up numbers is
-worse than not committing, because:
+Section 7's numbers were originally vibes (Spearman ≥ 0.20, top-decile ≥ 2pp,
+regime ≥ 0.15) — plausibly-sized for the domain, but not derived from either
+(a) our specific dataset's null distribution, (b) actual baseline performance,
+or (c) domain-expert input. Committing to made-up numbers is worse than not
+committing:
 
-- Too low → we ship noise dressed up as signal
-- Too high → we never ship even when we have real signal
-- Either way → we're setting the bar somewhere unrelated to what our data can
-  actually produce
+- Too low → ship noise dressed up as signal
+- Too high → never ship even with real signal
+- Either way → bar unrelated to what our data can produce
 
-Relative-to-baseline commits us to the discipline (beat the obvious thing by
-a margin) without pretending we know the level.
+Relative-to-baseline commits us to the discipline (beat the obvious thing
+by a margin) without pretending we know the level.
+
+### Options kept open for later revisit
+
+Rejected for Phase 3 but may revisit if Option B (this) doesn't work:
+
+- **Option A** — Two separate composites, one per target. Explored; deferred
+  because features driving rent growth and price growth heavily overlap and
+  a single composite should work for both if the fundamental thesis holds.
+- **Option D** — Total return proxy target (cap rate × 24mo + terminal
+  appreciation). Most economically meaningful for a rental investor, deferred
+  to a possible Phase 4 UI enhancement (compute a total-return score for
+  display) rather than the underlying backtest target.
 
 ---
 
