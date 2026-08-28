@@ -1,4 +1,4 @@
-.PHONY: install ingest-fhfa ingest-zori ingest-pep ingest-pep-backfill ingest-bps ingest-all query-fhfa test lint clean
+.PHONY: install ingest-fhfa ingest-zori ingest-pep ingest-pep-backfill ingest-bps ingest-qcew ingest-all query-fhfa test lint clean
 
 # Setup — install deps into .venv/. Requires `uv` (https://docs.astral.sh/uv/).
 install:
@@ -29,9 +29,16 @@ ingest-pep-backfill:
 ingest-bps:
 	uv run python -m ingest.census_bps
 
+# QCEW = quarterly census of employment + wages. Loads one annual singlefile
+# per year (~75MB compressed each) from 2000 through last full year.
+# Filtered to county-total + county×supersector-private rows only (~99% of
+# raw rows dropped). Full backfill takes ~15 min for ~1.6M rows.
+ingest-qcew:
+	uv run python -m ingest.bls_qcew
+
 # All Phase 1 sources — add more targets as loaders land.
-ingest-all: ingest-fhfa ingest-zori ingest-pep ingest-bps
-	@echo "TODO: add bls_qcew, hud_usps_vacancy"
+ingest-all: ingest-fhfa ingest-zori ingest-pep ingest-bps ingest-qcew
+	@echo "TODO: add hud_usps_vacancy"
 
 # Sanity query — dumps last 5 rows for Franklin County, OH from curated FHFA.
 query-fhfa:
