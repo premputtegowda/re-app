@@ -16,14 +16,15 @@ with hpi_latest as (
 ),
 
 hpi_pivoted as (
-    -- Get each fips's HPI at t, t-1yr, t-2yrs, t-3yrs (using latest period as t).
+    -- Get each fips's HPI at t, t-1yr, t-2yrs, t-3yrs, t-5yrs.
     select
         h_now.fips,
         h_now.period_end_date as latest_period,
         h_now.hpi as hpi_now,
         h_1.hpi as hpi_1yr_ago,
         h_2.hpi as hpi_2yr_ago,
-        h_3.hpi as hpi_3yr_ago
+        h_3.hpi as hpi_3yr_ago,
+        h_5.hpi as hpi_5yr_ago
     from hpi_latest h_now
     left join hpi_latest h_1
         on h_1.fips = h_now.fips
@@ -34,6 +35,9 @@ hpi_pivoted as (
     left join hpi_latest h_3
         on h_3.fips = h_now.fips
         and h_3.period_end_date = h_now.period_end_date - interval '3 years'
+    left join hpi_latest h_5
+        on h_5.fips = h_now.fips
+        and h_5.period_end_date = h_now.period_end_date - interval '5 years'
     where h_now.recency_rank = 1
 ),
 
@@ -55,7 +59,8 @@ zori_pivoted as (
         z_now.zori as zori_now,
         z_1.zori as zori_1yr_ago,
         z_2.zori as zori_2yr_ago,
-        z_3.zori as zori_3yr_ago
+        z_3.zori as zori_3yr_ago,
+        z_5.zori as zori_5yr_ago
     from zori_annual z_now
     left join zori_annual z_1
         on z_1.fips = z_now.fips
@@ -66,6 +71,9 @@ zori_pivoted as (
     left join zori_annual z_3
         on z_3.fips = z_now.fips
         and z_3.period_end_date = z_now.period_end_date - interval '3 years'
+    left join zori_annual z_5
+        on z_5.fips = z_now.fips
+        and z_5.period_end_date = z_now.period_end_date - interval '5 years'
     qualify row_number() over (partition by z_now.fips order by z_now.period_end_date desc) = 1
 )
 
@@ -73,7 +81,7 @@ select
     coalesce(h.fips, z.fips) as fips,
     h.latest_period as hpi_latest_period,
     z.latest_zori_period,
-    -- Trailing HPI (price appreciation): YoY (12mo), 24mo, 36mo
+    -- Trailing HPI (price appreciation) — cumulative
     case
         when h.hpi_now is null or h.hpi_1yr_ago is null or h.hpi_1yr_ago = 0 then null
         else (h.hpi_now / h.hpi_1yr_ago) - 1
@@ -86,7 +94,24 @@ select
         when h.hpi_now is null or h.hpi_3yr_ago is null or h.hpi_3yr_ago = 0 then null
         else (h.hpi_now / h.hpi_3yr_ago) - 1
     end as hpi_trailing_36mo,
-    -- Trailing ZORI (rent appreciation): YoY (12mo), 24mo, 36mo
+    case
+        when h.hpi_now is null or h.hpi_5yr_ago is null or h.hpi_5yr_ago = 0 then null
+        else (h.hpi_now / h.hpi_5yr_ago) - 1
+    end as hpi_trailing_60mo,
+    -- Annualized (CAGR) versions
+    case
+        when h.hpi_now is null or h.hpi_2yr_ago is null or h.hpi_2yr_ago = 0 then null
+        else pow(h.hpi_now / h.hpi_2yr_ago, 1.0/2) - 1
+    end as hpi_annualized_2yr,
+    case
+        when h.hpi_now is null or h.hpi_3yr_ago is null or h.hpi_3yr_ago = 0 then null
+        else pow(h.hpi_now / h.hpi_3yr_ago, 1.0/3) - 1
+    end as hpi_annualized_3yr,
+    case
+        when h.hpi_now is null or h.hpi_5yr_ago is null or h.hpi_5yr_ago = 0 then null
+        else pow(h.hpi_now / h.hpi_5yr_ago, 1.0/5) - 1
+    end as hpi_annualized_5yr,
+    -- Trailing ZORI (rent appreciation) — cumulative
     case
         when z.zori_now is null or z.zori_1yr_ago is null or z.zori_1yr_ago = 0 then null
         else (z.zori_now / z.zori_1yr_ago) - 1
@@ -98,6 +123,23 @@ select
     case
         when z.zori_now is null or z.zori_3yr_ago is null or z.zori_3yr_ago = 0 then null
         else (z.zori_now / z.zori_3yr_ago) - 1
-    end as zori_trailing_36mo
+    end as zori_trailing_36mo,
+    case
+        when z.zori_now is null or z.zori_5yr_ago is null or z.zori_5yr_ago = 0 then null
+        else (z.zori_now / z.zori_5yr_ago) - 1
+    end as zori_trailing_60mo,
+    -- Annualized (CAGR) versions
+    case
+        when z.zori_now is null or z.zori_2yr_ago is null or z.zori_2yr_ago = 0 then null
+        else pow(z.zori_now / z.zori_2yr_ago, 1.0/2) - 1
+    end as zori_annualized_2yr,
+    case
+        when z.zori_now is null or z.zori_3yr_ago is null or z.zori_3yr_ago = 0 then null
+        else pow(z.zori_now / z.zori_3yr_ago, 1.0/3) - 1
+    end as zori_annualized_3yr,
+    case
+        when z.zori_now is null or z.zori_5yr_ago is null or z.zori_5yr_ago = 0 then null
+        else pow(z.zori_now / z.zori_5yr_ago, 1.0/5) - 1
+    end as zori_annualized_5yr
 from hpi_pivoted h
 full outer join zori_pivoted z using (fips)

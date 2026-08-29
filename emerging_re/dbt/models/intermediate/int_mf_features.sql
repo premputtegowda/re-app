@@ -120,14 +120,21 @@ select
              or median_home_value = 0 then null
         else (median_gross_rent * 12.0) / median_home_value
     end as sfr_cap_rate_proxy,
-    -- MF-adjusted cap rate: 2BR FMR × 12 / home value + 1.5% MF premium.
-    -- 2BR is the workhorse of MF stock. 1.5% is midpoint of 100-200bps
-    -- typical premium for commercial MF vs SFR economics.
+    -- MF cap rate (2BR FMR method): 2BR FMR × 12 / home value + 1.5% MF premium.
+    -- Uses HUD's MF-oriented rent (Section 8 40th percentile of standard-quality).
     case
         when fmr_2br is null or median_home_value is null
              or median_home_value = 0 then null
         else (fmr_2br * 12.0) / median_home_value + 0.015
     end as mf_cap_rate_estimated,
+    -- Alternative MF cap rate (SFR-proxy + 1.5% premium method).
+    -- Uses ACS median gross rent (all-inventory blend) + same premium.
+    -- Comparison lets investor sanity-check the FMR-based number.
+    case
+        when median_gross_rent is null or median_home_value is null
+             or median_home_value = 0 then null
+        else (median_gross_rent * 12.0) / median_home_value + 0.015
+    end as mf_cap_rate_from_sfr,
     -- Also expose raw 2BR FMR for UI display
     fmr_2br,
     fmr_1br,

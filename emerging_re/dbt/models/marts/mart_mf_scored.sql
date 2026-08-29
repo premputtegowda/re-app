@@ -37,9 +37,26 @@ disq_latest as (
 
 trailing_appr as (
     select fips,
-           hpi_trailing_12mo, hpi_trailing_24mo, hpi_trailing_36mo,
-           zori_trailing_12mo, zori_trailing_24mo, zori_trailing_36mo
+           hpi_annualized_2yr, hpi_annualized_3yr, hpi_annualized_5yr,
+           zori_annualized_2yr, zori_annualized_3yr, zori_annualized_5yr
     from {{ ref('int_trailing_appreciation') }}
+),
+
+-- Raw composite prediction variables (latest period per fips).
+-- These are the 9 features the composite scoring uses.
+comp_features as (
+    select
+        fips,
+        domesticmig_per_1000,
+        domesticmig_accel_3yr,
+        high_wage_share,
+        high_wage_share_yoy_chg,
+        wage_growth_yoy_demeaned,
+        emp_growth_yoy_demeaned,
+        hpi_yoy,
+        zori_yoy
+    from {{ ref('mart_county_features') }}
+    qualify row_number() over (partition by fips order by period_end_date desc) = 1
 ),
 
 base as (
@@ -55,27 +72,37 @@ base as (
         cc.median_gross_rent,
         cc.median_home_value,
         cc.median_household_income,
-        ta.hpi_trailing_12mo,
-        ta.hpi_trailing_24mo,
-        ta.hpi_trailing_36mo,
-        ta.zori_trailing_12mo,
-        ta.zori_trailing_24mo,
-        ta.zori_trailing_36mo,
+        ta.hpi_annualized_2yr,
+        ta.hpi_annualized_3yr,
+        ta.hpi_annualized_5yr,
+        ta.zori_annualized_2yr,
+        ta.zori_annualized_3yr,
+        ta.zori_annualized_5yr,
         mf.renter_share,
         mf.mf_permit_ratio,
         mf.rental_vacancy_rate,
         mf.rental_vacancy_change_3yr,
         mf.fmr_2br,
         mf.mf_cap_rate_estimated,
+        mf.mf_cap_rate_from_sfr,
         bps.mf_permits_3yr,
         dl.employment_diversity_hhi,
-        dq.max_supersector_share
+        dq.max_supersector_share,
+        cf.domesticmig_per_1000,
+        cf.domesticmig_accel_3yr,
+        cf.high_wage_share,
+        cf.high_wage_share_yoy_chg,
+        cf.wage_growth_yoy_demeaned,
+        cf.emp_growth_yoy_demeaned,
+        cf.hpi_yoy,
+        cf.zori_yoy
     from {{ ref('mart_backtest_current') }} bc
     left join {{ ref('mart_county_context') }} cc using (fips)
     left join {{ ref('int_mf_features') }} mf using (fips)
     left join div_latest dl using (fips)
     left join disq_latest dq using (fips)
     left join trailing_appr ta using (fips)
+    left join comp_features cf using (fips)
     left join (
         -- 3yr MF permit total (needed for the filter).
         select
@@ -134,9 +161,10 @@ select
     round(mf_score::decimal, 3) as mf_score,
     round(composite_score::decimal, 3) as composite_score,
     -- Primary yield metric: MF-adjusted (2BR FMR × 12 / home_val + 150bps)
-    round(mf_cap_rate_estimated * 100, 2) as mf_cap_pct,
-    -- Compare against SFR-ish proxy for context
-    round(sfr_cap_rate_proxy * 100, 2) as sfr_cap_pct,
+    round(mf_cap_rate_estimated * 100, 2) as mf_cap_from_fmr_pct,
+    round(mf_cap_rate_from_sfr * 100, 2) as mf_cap_from_sfr_pct,
+    -- Raw SFR-ish proxy (no premium added) for context
+    round(sfr_cap_rate_proxy * 100, 2) as sfr_cap_raw_pct,
     round(renter_share * 100, 1) as renter_share_pct,
     round(rental_vacancy_rate * 100, 1) as vacancy_pct,
     round(rental_vacancy_change_3yr * 100, 1) as vacancy_change_3yr_pp,
@@ -146,16 +174,25 @@ select
     median_gross_rent,
     median_home_value,
     median_household_income,
-    -- Trailing PRICE appreciation (from FHFA HPI).
-    round(hpi_trailing_12mo * 100, 1) as hpi_trailing_12mo_pct,
-    round(hpi_trailing_24mo * 100, 1) as hpi_trailing_24mo_pct,
-    round(hpi_trailing_36mo * 100, 1) as hpi_trailing_36mo_pct,
-    -- Trailing RENT appreciation (from Zillow ZORI, Dec-to-Dec).
-    round(zori_trailing_12mo * 100, 1) as zori_trailing_12mo_pct,
-    round(zori_trailing_24mo * 100, 1) as zori_trailing_24mo_pct,
-    round(zori_trailing_36mo * 100, 1) as zori_trailing_36mo_pct,
-    -- Employment concentration/diversity context.
+    -- Annualized (CAGR) PRICE appreciation.
+    round(hpi_annualized_2yr * 100, 1) as price_annualized_2yr_pct,
+    round(hpi_annualized_3yr * 100, 1) as price_annualized_3yr_pct,
+    round(hpi_annualized_5yr * 100, 1) as price_annualized_5yr_pct,
+    -- Annualized (CAGR) RENT appreciation.
+    round(zori_annualized_2yr * 100, 1) as rent_annualized_2yr_pct,
+    round(zori_annualized_3yr * 100, 1) as rent_annualized_3yr_pct,
+    round(zori_annualized_5yr * 100, 1) as rent_annualized_5yr_pct,
+    -- Diversity metrics (sector-level via HHI; employer-level not available).
     round(employment_diversity_hhi::decimal, 3) as hhi,
-    round(max_supersector_share * 100, 1) as top_sector_pct
+    round(max_supersector_share * 100, 1) as top_sector_pct,
+    -- Composite prediction variables (the 9 features that drive the score).
+    round(domesticmig_per_1000::decimal, 2) as var_domesticmig_per_1000,
+    round(domesticmig_accel_3yr::decimal, 2) as var_domesticmig_accel_3yr,
+    round(high_wage_share * 100, 1) as var_high_wage_share_pct,
+    round(high_wage_share_yoy_chg * 100, 2) as var_high_wage_yoy_chg_pct,
+    round(wage_growth_yoy_demeaned * 100, 2) as var_wage_growth_demeaned_pct,
+    round(emp_growth_yoy_demeaned * 100, 2) as var_emp_growth_demeaned_pct,
+    round(hpi_yoy * 100, 2) as var_hpi_yoy_pct,
+    round(zori_yoy * 100, 2) as var_zori_yoy_pct
 from final
 order by mf_rank
