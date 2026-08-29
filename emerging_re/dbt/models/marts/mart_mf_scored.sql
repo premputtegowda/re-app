@@ -30,7 +30,7 @@ with base as (
         bc.composite_score,
         bc.score_tier1_demand,
         bc.score_tier4_momentum,
-        cc.cap_rate_proxy,
+        cc.cap_rate_proxy as sfr_cap_rate_proxy,
         cc.median_gross_rent,
         cc.median_home_value,
         cc.median_household_income,
@@ -38,6 +38,8 @@ with base as (
         mf.mf_permit_ratio,
         mf.rental_vacancy_rate,
         mf.rental_vacancy_change_3yr,
+        mf.fmr_2br,
+        mf.mf_cap_rate_estimated,
         bps.mf_permits_3yr
     from {{ ref('mart_backtest_current') }} bc
     left join {{ ref('mart_county_context') }} cc using (fips)
@@ -66,23 +68,23 @@ filtered as (
 ),
 
 with_combined_score as (
-    -- Combined ranking: 70% composite + 30% cap-rate z-score.
-    -- z-score computed WITHIN the filtered MF universe so it reflects
-    -- yield relative to peer MF markets, not the whole 978-county universe.
+    -- Combined ranking uses MF-adjusted cap rate (2BR FMR + 150bps premium)
+    -- instead of the SFR-ish cap_rate_proxy. Z-score within the filtered
+    -- MF universe so it reflects yield relative to peer MF markets.
     select
         *,
         case
-            when cap_rate_proxy is null then null
-            else (cap_rate_proxy - avg(cap_rate_proxy) over ())
-                 / nullif(stddev_pop(cap_rate_proxy) over (), 0)
-        end as cap_rate_zscore
+            when mf_cap_rate_estimated is null then null
+            else (mf_cap_rate_estimated - avg(mf_cap_rate_estimated) over ())
+                 / nullif(stddev_pop(mf_cap_rate_estimated) over (), 0)
+        end as mf_cap_zscore
     from filtered
 ),
 
 final as (
     select
         *,
-        0.7 * composite_score + 0.3 * coalesce(cap_rate_zscore, 0) as mf_score
+        0.7 * composite_score + 0.3 * coalesce(mf_cap_zscore, 0) as mf_score
     from with_combined_score
 )
 
@@ -99,12 +101,16 @@ select
     end as pop_tier,
     round(mf_score::decimal, 3) as mf_score,
     round(composite_score::decimal, 3) as composite_score,
-    round(cap_rate_proxy * 100, 2) as cap_rate_pct,
+    -- Primary yield metric: MF-adjusted (2BR FMR × 12 / home_val + 150bps)
+    round(mf_cap_rate_estimated * 100, 2) as mf_cap_pct,
+    -- Compare against SFR-ish proxy for context
+    round(sfr_cap_rate_proxy * 100, 2) as sfr_cap_pct,
     round(renter_share * 100, 1) as renter_share_pct,
     round(rental_vacancy_rate * 100, 1) as vacancy_pct,
     round(rental_vacancy_change_3yr * 100, 1) as vacancy_change_3yr_pp,
     round(mf_permit_ratio * 100, 1) as mf_permit_share_pct,
     mf_permits_3yr,
+    fmr_2br as fmr_2br_monthly,
     median_gross_rent,
     median_home_value,
     median_household_income

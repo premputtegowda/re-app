@@ -1,35 +1,36 @@
 -- Multi-family (10-20 unit) investor-oriented features.
 --
--- Three MF-relevant signals per (fips, period_end_date):
---   1. `renter_share` — renter-occupied / (renter + owner). High share =
---      MF-friendly market (professional PMs, deep tenant pool, mature
---      rental culture). Sign in scoring: +1.
---   2. `mf_permit_ratio` — 5+ unit permits / total permits (trailing 3yr
---      to smooth annual noise). High = market's new supply is skewing
---      MF (developers see MF demand). Sign in scoring: +1.
---   3. `rental_vacancy_change_3yr` — current vacancy − vacancy 3 years
---      ago. Negative = tightening market (landlord pricing power).
---      Sign in scoring: -1.
+-- Emits per (fips):
+--   `renter_share`               ACS renter / (renter + owner)
+--   `mf_permit_ratio`            BPS units_5plus / units_total (trailing 3yr)
+--   `rental_vacancy_change_3yr`  ACS 1yr vacancy trend (NULL for 5yr-only)
+--   `rental_vacancy_rate`        current (level)
+--   `mf_cap_rate_estimated`      2BR FMR × 12 / median_home_value + 1.5% MF premium
+--   `sfr_cap_rate_proxy`         ACS median rent × 12 / median_home_value (from mart_county_context — reproduced here for direct comparison)
 --
--- ACS-derived features prefer 1yr data (~832 counties); fall back to 5yr
--- for the smaller 146 counties. Vacancy trend needs 1yr history so it's
--- NULL for 5yr-only counties.
+-- MF cap rate design:
+--   Numerator: HUD FMR 2BR (MF-oriented, 40th percentile)
+--   Denominator: ACS median_home_value (still SFR-biased, but closest
+--     available for county-level home values)
+--   Premium: fixed +1.5% (midpoint of the 100-200 bps range typical for
+--     10-20 unit MF vs SFR investor economics — commercial financing,
+--     PM overhead, vacancy/turnover exposure, value-add expectation).
+--
+-- This is an ESTIMATE, not a real cap rate. Actual 10-20 unit MF deals
+-- in any specific market will vary 50-100 bps around this figure
+-- depending on property class, condition, and local investor demand.
 with acs_1yr_latest as (
-    -- Latest 1yr vintage per fips.
     select
         fips, period_end_date,
-        owner_occupied_units, renter_occupied_units, rental_vacancy_rate
+        owner_occupied_units, renter_occupied_units, rental_vacancy_rate,
+        median_home_value, median_gross_rent
     from {{ ref('stg_census_acs_1yr') }}
     qualify row_number() over (partition by fips order by period_end_date desc, as_of_date desc) = 1
 ),
 
 acs_1yr_3yr_ago as (
-    -- ACS 1yr vintage 3 years before the LATEST. For "latest = 2024",
-    -- 3-year lookback is 2021 (since 2020 vintage is missing).
-    -- Match: latest.period_end_date − 3 years = target period.
     select
         a.fips,
-        a.period_end_date,
         a.rental_vacancy_rate as vacancy_3yr_ago
     from {{ ref('stg_census_acs_1yr') }} a
     inner join acs_1yr_latest curr
@@ -39,23 +40,22 @@ acs_1yr_3yr_ago as (
 ),
 
 acs_5yr_latest as (
-    -- Fallback for counties < 65K pop that don't have 1yr data.
     select
         fips, period_end_date,
-        owner_occupied_units, renter_occupied_units, rental_vacancy_rate
+        owner_occupied_units, renter_occupied_units, rental_vacancy_rate,
+        median_home_value, median_gross_rent
     from {{ ref('stg_census_acs') }}
     qualify row_number() over (partition by fips order by period_end_date desc, as_of_date desc) = 1
 ),
 
 acs_preferred as (
-    -- Prefer 1yr; fall back to 5yr per fips.
     select
         u.fips,
         coalesce(a1.owner_occupied_units, a5.owner_occupied_units) as owner_occupied_units,
         coalesce(a1.renter_occupied_units, a5.renter_occupied_units) as renter_occupied_units,
         coalesce(a1.rental_vacancy_rate, a5.rental_vacancy_rate) as rental_vacancy_rate,
-        -- vacancy_3yr_ago only from 1yr (5yr comparison is too smoothed
-        -- to be meaningful for a 3yr trend)
+        coalesce(a1.median_home_value, a5.median_home_value) as median_home_value,
+        coalesce(a1.median_gross_rent, a5.median_gross_rent) as median_gross_rent,
         a13.vacancy_3yr_ago
     from {{ ref('int_universe') }} u
     left join acs_1yr_latest a1 using (fips)
@@ -63,9 +63,16 @@ acs_preferred as (
     left join acs_1yr_3yr_ago a13 using (fips)
 ),
 
+fmr_latest as (
+    -- Latest FY FMR per fips (2BR primary + other bedroom counts for UI).
+    select
+        fips, fmr_0br, fmr_1br, fmr_2br, fmr_3br, fmr_4br,
+        period_end_date as fmr_period_end
+    from {{ ref('stg_hud_fmr') }}
+    qualify row_number() over (partition by fips order by period_end_date desc, as_of_date desc) = 1
+),
+
 bps_recent as (
-    -- Trailing 3-year MF permit share (units_5plus / total units) to
-    -- smooth annual noise. Uses full-year Dec-end rows only.
     select
         fips,
         sum(units_5plus) as mf_units_3yr,
@@ -73,29 +80,56 @@ bps_recent as (
     from {{ ref('stg_census_bps') }}
     where period_end_date in (date '2023-12-31', date '2024-12-31', date '2025-12-31')
     group by fips
+),
+
+joined as (
+    select
+        a.fips,
+        a.owner_occupied_units, a.renter_occupied_units, a.rental_vacancy_rate,
+        a.vacancy_3yr_ago, a.median_home_value, a.median_gross_rent,
+        f.fmr_2br, f.fmr_1br, f.fmr_3br,
+        b.mf_units_3yr, b.total_units_3yr
+    from acs_preferred a
+    left join fmr_latest f using (fips)
+    left join bps_recent b using (fips)
 )
 
 select
-    a.fips,
-    -- Renter share of occupied households.
+    fips,
+    -- Renter share
     case
-        when a.owner_occupied_units is null or a.renter_occupied_units is null then null
-        when (a.owner_occupied_units + a.renter_occupied_units) = 0 then null
-        else 1.0 * a.renter_occupied_units
-             / (a.owner_occupied_units + a.renter_occupied_units)
+        when owner_occupied_units is null or renter_occupied_units is null then null
+        when (owner_occupied_units + renter_occupied_units) = 0 then null
+        else 1.0 * renter_occupied_units / (owner_occupied_units + renter_occupied_units)
     end as renter_share,
-    -- MF permit ratio (3yr rolling).
+    -- MF permit ratio
     case
-        when b.total_units_3yr is null or b.total_units_3yr = 0 then null
-        else 1.0 * b.mf_units_3yr / b.total_units_3yr
+        when total_units_3yr is null or total_units_3yr = 0 then null
+        else 1.0 * mf_units_3yr / total_units_3yr
     end as mf_permit_ratio,
-    -- Rental vacancy trend: negative = tightening, positive = loosening.
+    -- Rental vacancy trend + level
+    rental_vacancy_rate,
+    vacancy_3yr_ago,
     case
-        when a.rental_vacancy_rate is null or a.vacancy_3yr_ago is null then null
-        else a.rental_vacancy_rate - a.vacancy_3yr_ago
+        when rental_vacancy_rate is null or vacancy_3yr_ago is null then null
+        else rental_vacancy_rate - vacancy_3yr_ago
     end as rental_vacancy_change_3yr,
-    -- Also expose the current vacancy level (for filtering + UI).
-    a.rental_vacancy_rate,
-    a.vacancy_3yr_ago
-from acs_preferred a
-left join bps_recent b using (fips)
+    -- SFR-ish cap rate proxy (for direct comparison — same math as mart_county_context)
+    case
+        when median_gross_rent is null or median_home_value is null
+             or median_home_value = 0 then null
+        else (median_gross_rent * 12.0) / median_home_value
+    end as sfr_cap_rate_proxy,
+    -- MF-adjusted cap rate: 2BR FMR × 12 / home value + 1.5% MF premium.
+    -- 2BR is the workhorse of MF stock. 1.5% is midpoint of 100-200bps
+    -- typical premium for commercial MF vs SFR economics.
+    case
+        when fmr_2br is null or median_home_value is null
+             or median_home_value = 0 then null
+        else (fmr_2br * 12.0) / median_home_value + 0.015
+    end as mf_cap_rate_estimated,
+    -- Also expose raw 2BR FMR for UI display
+    fmr_2br,
+    fmr_1br,
+    fmr_3br
+from joined

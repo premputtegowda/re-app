@@ -46,6 +46,13 @@ sources:
           over 5yr when available; int_acs_features falls back to 5yr
           for smaller counties. Vintage 2020 unavailable (Census
           cancelled due to pandemic sample issues).
+      - name: hud_fmr
+        description: >
+          HUD Fair Market Rents — county-level, annual (FY). Set at 40th
+          percentile of standard-quality rentals. Section 8 usage is
+          heavily MF, so FMR is a better MF-rent proxy than Zillow ZORI
+          (which blends SFR + condo + MF). 2BR FMR is our primary MF
+          rent signal. Loaded FY2019-FY2026. Free via HUD API.
 
   - name: backtest
     description: >
