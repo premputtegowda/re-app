@@ -10,6 +10,7 @@ select
     median_household_income,
     median_gross_rent,
     median_home_value,
+    owner_occupied_units,
     renter_occupied_units,
     vacant_for_rent_units,
     rental_vacancy_rate,

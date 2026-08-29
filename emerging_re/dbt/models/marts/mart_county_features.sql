@@ -174,6 +174,17 @@ with_acs as (
     ) af on true
 ),
 
+-- v6 additions (2026-08-29): MF-oriented features
+with_mf as (
+    select
+        a.*,
+        mf.renter_share,
+        mf.mf_permit_ratio,
+        mf.rental_vacancy_change_3yr
+    from with_acs a
+    left join {{ ref('int_mf_features') }} mf using (fips)
+),
+
 -- Disqualifiers
 with_disq as (
     select
@@ -184,7 +195,7 @@ with_disq as (
         d.hpi_trailing_24mo,
         d.disq_price_ran_25pct,
         d.any_disqualifier
-    from with_acs r
+    from with_mf r
     left join {{ ref('int_disqualifiers') }} d
         on d.fips = r.fips and d.period_end_date = r.period_end_date
 ),

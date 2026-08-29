@@ -70,6 +70,14 @@ FEATURES: tuple[FeatureSpec, ...] = (
     # cap_rate_proxy stands out — helps ZORI 24mo by +0.015 Spearman
     # when included. First value-oriented signal that empirically holds.
     FeatureSpec("cap_rate_proxy",             "tier1_demand",   +1),
+    # v6 tested + reverted (2026-08-29): renter_share, mf_permit_ratio,
+    # rental_vacancy_change_3yr added to test MF-optimization.
+    # Result: hurt composite marginally across all targets (dropped ZORI
+    # 36mo below ship). Root cause: our forward-return targets are
+    # SFR-biased (FHFA HPI + Zillow ZORI blended-inventory), so MF-
+    # specific features fight the target signal. Intermediate model
+    # int_mf_features remains — used for MF-specific FILTERING via
+    # mart_mf_scored, not for composite scoring.
     # Tier 4 — trailing momentum. The winning signal at 24-36mo horizons.
     FeatureSpec("hpi_yoy",                    "tier4_momentum", +1),
     FeatureSpec("zori_yoy",                   "tier4_momentum", +1),

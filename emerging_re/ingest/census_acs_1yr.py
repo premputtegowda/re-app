@@ -70,6 +70,7 @@ ACS_VARIABLES: dict[str, str] = {
     "B19013_001E": "median_household_income",
     "B25064_001E": "median_gross_rent",
     "B25077_001E": "median_home_value",
+    "B25003_002E": "owner_occupied_units",           # for renter_share denominator
     "B25003_003E": "renter_occupied_units",
     "B25004_002E": "vacant_for_rent_units",
     "B01003_001E": "total_population",
@@ -202,7 +203,8 @@ def _normalize_and_partition(
     keep_cols = [
         "fips", "period_end_date",
         "median_household_income", "median_gross_rent", "median_home_value",
-        "renter_occupied_units", "vacant_for_rent_units", "rental_vacancy_rate",
+        "owner_occupied_units", "renter_occupied_units",
+        "vacant_for_rent_units", "rental_vacancy_rate",
         "total_population", "county_state_name",
         "_fips_remap_flag",
     ]

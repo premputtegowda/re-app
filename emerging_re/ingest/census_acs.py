@@ -76,6 +76,7 @@ ACS_VARIABLES: dict[str, str] = {
     "B19013_001E": "median_household_income",       # dollars
     "B25064_001E": "median_gross_rent",             # dollars per month
     "B25077_001E": "median_home_value",             # dollars
+    "B25003_002E": "owner_occupied_units",          # count — for renter_share denominator
     "B25003_003E": "renter_occupied_units",         # count
     "B25004_002E": "vacant_for_rent_units",         # count
     "B01003_001E": "total_population",              # count (sanity vs PEP)
@@ -236,6 +237,7 @@ def _normalize_and_partition(
         "median_household_income",
         "median_gross_rent",
         "median_home_value",
+        "owner_occupied_units",
         "renter_occupied_units",
         "vacant_for_rent_units",
         "rental_vacancy_rate",
