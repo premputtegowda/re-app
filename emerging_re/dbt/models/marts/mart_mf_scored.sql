@@ -21,7 +21,28 @@
 -- Gives 70% weight to framework's forward-return signal, 30% to
 -- current-yield attractiveness. Adjustable — this is one reasonable
 -- blend.
-with base as (
+with div_latest as (
+    -- Latest employment diversity (HHI) per fips.
+    select fips, employment_diversity_hhi
+    from {{ ref('int_employment_diversity') }}
+    qualify row_number() over (partition by fips order by period_end_date desc) = 1
+),
+
+disq_latest as (
+    -- Top-supersector share (concentration flag context).
+    select fips, max_supersector_share
+    from {{ ref('int_disqualifiers') }}
+    qualify row_number() over (partition by fips order by period_end_date desc) = 1
+),
+
+trailing_appr as (
+    select fips,
+           hpi_trailing_12mo, hpi_trailing_24mo, hpi_trailing_36mo,
+           zori_trailing_12mo, zori_trailing_24mo, zori_trailing_36mo
+    from {{ ref('int_trailing_appreciation') }}
+),
+
+base as (
     select
         bc.fips,
         bc.county_name,
@@ -34,16 +55,27 @@ with base as (
         cc.median_gross_rent,
         cc.median_home_value,
         cc.median_household_income,
+        ta.hpi_trailing_12mo,
+        ta.hpi_trailing_24mo,
+        ta.hpi_trailing_36mo,
+        ta.zori_trailing_12mo,
+        ta.zori_trailing_24mo,
+        ta.zori_trailing_36mo,
         mf.renter_share,
         mf.mf_permit_ratio,
         mf.rental_vacancy_rate,
         mf.rental_vacancy_change_3yr,
         mf.fmr_2br,
         mf.mf_cap_rate_estimated,
-        bps.mf_permits_3yr
+        bps.mf_permits_3yr,
+        dl.employment_diversity_hhi,
+        dq.max_supersector_share
     from {{ ref('mart_backtest_current') }} bc
     left join {{ ref('mart_county_context') }} cc using (fips)
     left join {{ ref('int_mf_features') }} mf using (fips)
+    left join div_latest dl using (fips)
+    left join disq_latest dq using (fips)
+    left join trailing_appr ta using (fips)
     left join (
         -- 3yr MF permit total (needed for the filter).
         select
@@ -113,6 +145,17 @@ select
     fmr_2br as fmr_2br_monthly,
     median_gross_rent,
     median_home_value,
-    median_household_income
+    median_household_income,
+    -- Trailing PRICE appreciation (from FHFA HPI).
+    round(hpi_trailing_12mo * 100, 1) as hpi_trailing_12mo_pct,
+    round(hpi_trailing_24mo * 100, 1) as hpi_trailing_24mo_pct,
+    round(hpi_trailing_36mo * 100, 1) as hpi_trailing_36mo_pct,
+    -- Trailing RENT appreciation (from Zillow ZORI, Dec-to-Dec).
+    round(zori_trailing_12mo * 100, 1) as zori_trailing_12mo_pct,
+    round(zori_trailing_24mo * 100, 1) as zori_trailing_24mo_pct,
+    round(zori_trailing_36mo * 100, 1) as zori_trailing_36mo_pct,
+    -- Employment concentration/diversity context.
+    round(employment_diversity_hhi::decimal, 3) as hhi,
+    round(max_supersector_share * 100, 1) as top_sector_pct
 from final
 order by mf_rank
