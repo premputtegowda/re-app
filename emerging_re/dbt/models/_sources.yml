@@ -65,6 +65,13 @@ sources:
           exemptions, and AGI ($ thousands) plus derived AGI-per-return
           (income of movers-in / out) and net metrics. 4 annual vintages
           loaded (tax years 2020-2023).
+      - name: fema_nri
+        description: >
+          FEMA National Risk Index v1.20 — county-level composite natural
+          hazard risk. Overall risk + 17 individual hazards (hurricane,
+          wildfire, coastal flood, earthquake, etc.). Manual download
+          required (Akamai WAF blocks programmatic access); refreshed
+          ~annually.
 
   - name: backtest
     description: >

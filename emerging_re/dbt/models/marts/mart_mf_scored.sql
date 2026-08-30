@@ -64,6 +64,22 @@ irs_migration as (
     qualify row_number() over (partition by fips order by period_end_date desc, as_of_date desc) = 1
 ),
 
+fema_risk as (
+    -- FEMA NRI composite + key hazards for MF investors.
+    -- Ratings are text ("Very Low" ... "Very High"); scores are 0-100.
+    select fips,
+           risk_score       as fema_composite_risk_score,
+           risk_ratng       as fema_composite_risk_rating,
+           eal_score        as fema_expected_annual_loss_score,
+           cfld_risks       as fema_coastal_flood_risk,
+           hrcn_risks       as fema_hurricane_risk,
+           wfir_risks       as fema_wildfire_risk,
+           erqk_risks       as fema_earthquake_risk,
+           trnd_risks       as fema_tornado_risk,
+           hwav_risks       as fema_heat_wave_risk
+    from {{ ref('stg_fema_nri') }}
+),
+
 -- Raw composite prediction variables (latest period per fips).
 -- These are the 9 features the composite scoring uses.
 comp_features as (
@@ -123,7 +139,16 @@ base as (
         im.inflow_returns as irs_inflow_returns,
         im.inflow_agi_per_return as irs_inflow_avg_income,
         im.outflow_agi_per_return as irs_outflow_avg_income,
-        im.net_migration_returns as irs_net_migration_households
+        im.net_migration_returns as irs_net_migration_households,
+        fr.fema_composite_risk_score,
+        fr.fema_composite_risk_rating,
+        fr.fema_expected_annual_loss_score,
+        fr.fema_coastal_flood_risk,
+        fr.fema_hurricane_risk,
+        fr.fema_wildfire_risk,
+        fr.fema_earthquake_risk,
+        fr.fema_tornado_risk,
+        fr.fema_heat_wave_risk
     from {{ ref('mart_backtest_current') }} bc
     left join {{ ref('mart_county_context') }} cc using (fips)
     left join {{ ref('int_mf_features') }} mf using (fips)
@@ -133,6 +158,7 @@ base as (
     left join comp_features cf using (fips)
     left join unemployment un using (fips)
     left join irs_migration im using (fips)
+    left join fema_risk fr using (fips)
     left join (
         -- 3yr MF permit total (needed for the filter).
         select
@@ -232,6 +258,15 @@ select
     irs_net_migration_households as irs_net_households,
     round(irs_inflow_avg_income::decimal, 0) as irs_inflow_avg_income,
     round(irs_outflow_avg_income::decimal, 0) as irs_outflow_avg_income,
-    round((irs_inflow_avg_income - irs_outflow_avg_income)::decimal, 0) as irs_income_gap
+    round((irs_inflow_avg_income - irs_outflow_avg_income)::decimal, 0) as irs_income_gap,
+    -- FEMA National Risk Index (v1.20).
+    round(fema_composite_risk_score::decimal, 1) as fema_risk_score,
+    fema_composite_risk_rating as fema_risk_rating,
+    round(fema_coastal_flood_risk::decimal, 1) as fema_coastal_flood_score,
+    round(fema_hurricane_risk::decimal, 1) as fema_hurricane_score,
+    round(fema_wildfire_risk::decimal, 1) as fema_wildfire_score,
+    round(fema_earthquake_risk::decimal, 1) as fema_earthquake_score,
+    round(fema_tornado_risk::decimal, 1) as fema_tornado_score,
+    round(fema_heat_wave_risk::decimal, 1) as fema_heat_wave_score
 from final
 order by mf_rank
