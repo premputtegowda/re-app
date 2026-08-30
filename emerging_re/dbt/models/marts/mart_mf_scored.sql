@@ -51,6 +51,19 @@ unemployment as (
     qualify row_number() over (partition by fips order by period_end_date desc) = 1
 ),
 
+irs_migration as (
+    -- Latest IRS SOI migration vintage per fips. Key MF signal:
+    -- inflow_agi_per_return = income of incoming residents.
+    select fips,
+           inflow_returns,
+           inflow_agi_per_return,
+           outflow_agi_per_return,
+           net_migration_returns,
+           net_agi_thousands
+    from {{ ref('stg_irs_soi_migration') }}
+    qualify row_number() over (partition by fips order by period_end_date desc, as_of_date desc) = 1
+),
+
 -- Raw composite prediction variables (latest period per fips).
 -- These are the 9 features the composite scoring uses.
 comp_features as (
@@ -106,7 +119,11 @@ base as (
         cf.hpi_yoy,
         cf.zori_yoy,
         un.unemployment_rate,
-        un.unemployment_rate_yoy_chg
+        un.unemployment_rate_yoy_chg,
+        im.inflow_returns as irs_inflow_returns,
+        im.inflow_agi_per_return as irs_inflow_avg_income,
+        im.outflow_agi_per_return as irs_outflow_avg_income,
+        im.net_migration_returns as irs_net_migration_households
     from {{ ref('mart_backtest_current') }} bc
     left join {{ ref('mart_county_context') }} cc using (fips)
     left join {{ ref('int_mf_features') }} mf using (fips)
@@ -115,6 +132,7 @@ base as (
     left join trailing_appr ta using (fips)
     left join comp_features cf using (fips)
     left join unemployment un using (fips)
+    left join irs_migration im using (fips)
     left join (
         -- 3yr MF permit total (needed for the filter).
         select
@@ -208,6 +226,12 @@ select
     round(zori_yoy * 100, 2) as var_zori_yoy_pct,
     -- Unemployment context (BLS LAUS latest).
     round(unemployment_rate::decimal, 2) as unemployment_rate_pct,
-    round(unemployment_rate_yoy_chg::decimal, 2) as unemployment_yoy_chg_pp
+    round(unemployment_rate_yoy_chg::decimal, 2) as unemployment_yoy_chg_pp,
+    -- IRS SOI migration flows (latest tax year available).
+    irs_inflow_returns as irs_inflow_households,
+    irs_net_migration_households as irs_net_households,
+    round(irs_inflow_avg_income::decimal, 0) as irs_inflow_avg_income,
+    round(irs_outflow_avg_income::decimal, 0) as irs_outflow_avg_income,
+    round((irs_inflow_avg_income - irs_outflow_avg_income)::decimal, 0) as irs_income_gap
 from final
 order by mf_rank

@@ -58,6 +58,13 @@ sources:
           BLS Local Area Unemployment Statistics — county-level, monthly.
           One row per fips with latest unemployment_rate + 12mo change.
           Free via BLS bulk file, no auth. ~1-3 month publish lag.
+      - name: irs_soi_migration
+        description: >
+          IRS Statistics of Income county-to-county migration flows,
+          tax-return based. Emits per-county inflow + outflow returns,
+          exemptions, and AGI ($ thousands) plus derived AGI-per-return
+          (income of movers-in / out) and net metrics. 4 annual vintages
+          loaded (tax years 2020-2023).
 
   - name: backtest
     description: >
