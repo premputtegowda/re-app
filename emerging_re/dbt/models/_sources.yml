@@ -53,6 +53,11 @@ sources:
           heavily MF, so FMR is a better MF-rent proxy than Zillow ZORI
           (which blends SFR + condo + MF). 2BR FMR is our primary MF
           rent signal. Loaded FY2019-FY2026. Free via HUD API.
+      - name: bls_laus
+        description: >
+          BLS Local Area Unemployment Statistics — county-level, monthly.
+          One row per fips with latest unemployment_rate + 12mo change.
+          Free via BLS bulk file, no auth. ~1-3 month publish lag.
 
   - name: backtest
     description: >

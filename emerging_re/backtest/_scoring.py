@@ -70,6 +70,11 @@ FEATURES: tuple[FeatureSpec, ...] = (
     # cap_rate_proxy stands out — helps ZORI 24mo by +0.015 Spearman
     # when included. First value-oriented signal that empirically holds.
     FeatureSpec("cap_rate_proxy",             "tier1_demand",   +1),
+    # v7 tested + reverted (2026-08-30): unemployment_rate + yoy_chg from BLS LAUS.
+    # Both were mildly harmful in ablation (drop → +0.004 to +0.008 Spearman).
+    # 4th failed "add-feature" experiment; composite is at diminishing returns.
+    # int_unemployment_features remains for UI display (mart_mf_scored + others)
+    # even though not in composite scoring.
     # v6 tested + reverted (2026-08-29): renter_share, mf_permit_ratio,
     # rental_vacancy_change_3yr added to test MF-optimization.
     # Result: hurt composite marginally across all targets (dropped ZORI

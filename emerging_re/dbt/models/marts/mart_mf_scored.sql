@@ -42,6 +42,15 @@ trailing_appr as (
     from {{ ref('int_trailing_appreciation') }}
 ),
 
+unemployment as (
+    -- Latest LAUS unemployment reading per fips (from int, which has YoY chg).
+    select fips,
+           unemployment_rate,
+           unemployment_rate_yoy_chg
+    from {{ ref('int_unemployment_features') }}
+    qualify row_number() over (partition by fips order by period_end_date desc) = 1
+),
+
 -- Raw composite prediction variables (latest period per fips).
 -- These are the 9 features the composite scoring uses.
 comp_features as (
@@ -95,7 +104,9 @@ base as (
         cf.wage_growth_yoy_demeaned,
         cf.emp_growth_yoy_demeaned,
         cf.hpi_yoy,
-        cf.zori_yoy
+        cf.zori_yoy,
+        un.unemployment_rate,
+        un.unemployment_rate_yoy_chg
     from {{ ref('mart_backtest_current') }} bc
     left join {{ ref('mart_county_context') }} cc using (fips)
     left join {{ ref('int_mf_features') }} mf using (fips)
@@ -103,6 +114,7 @@ base as (
     left join disq_latest dq using (fips)
     left join trailing_appr ta using (fips)
     left join comp_features cf using (fips)
+    left join unemployment un using (fips)
     left join (
         -- 3yr MF permit total (needed for the filter).
         select
@@ -193,6 +205,9 @@ select
     round(wage_growth_yoy_demeaned * 100, 2) as var_wage_growth_demeaned_pct,
     round(emp_growth_yoy_demeaned * 100, 2) as var_emp_growth_demeaned_pct,
     round(hpi_yoy * 100, 2) as var_hpi_yoy_pct,
-    round(zori_yoy * 100, 2) as var_zori_yoy_pct
+    round(zori_yoy * 100, 2) as var_zori_yoy_pct,
+    -- Unemployment context (BLS LAUS latest).
+    round(unemployment_rate::decimal, 2) as unemployment_rate_pct,
+    round(unemployment_rate_yoy_chg::decimal, 2) as unemployment_yoy_chg_pp
 from final
 order by mf_rank

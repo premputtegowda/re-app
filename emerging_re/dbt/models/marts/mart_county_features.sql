@@ -153,6 +153,9 @@ with_bfs as (
         on bf.fips = d.fips and bf.period_end_date = d.period_end_date
 ),
 
+-- v7 addition (2026-08-30): unemployment rate + YoY change from BLS LAUS
+
+
 with_acs as (
     -- ACS 5yr vintage YYYY period_end = Dec 31 of (YYYY−2). For scoring
     -- at Dec 31 of year Y, the ACS vintage that CENTERS on Y-2 gives us
@@ -174,6 +177,25 @@ with_acs as (
     ) af on true
 ),
 
+with_unemployment as (
+    -- LAUS is monthly. For scoring at Dec 31 of year Y, use the LATEST
+    -- LAUS reading available on or before that date (typically the Dec
+    -- or Nov reading of the same year). Prevents look-ahead: never uses
+    -- a monthly reading published after the scoring date.
+    select
+        a.*,
+        un.unemployment_rate,
+        un.unemployment_rate_yoy_chg
+    from with_acs a
+    left join lateral (
+        select unemployment_rate, unemployment_rate_yoy_chg
+        from {{ ref('int_unemployment_features') }} u
+        where u.fips = a.fips and u.period_end_date <= a.period_end_date
+        order by u.period_end_date desc
+        limit 1
+    ) un on true
+),
+
 -- v6 additions (2026-08-29): MF-oriented features
 with_mf as (
     select
@@ -181,7 +203,7 @@ with_mf as (
         mf.renter_share,
         mf.mf_permit_ratio,
         mf.rental_vacancy_change_3yr
-    from with_acs a
+    from with_unemployment a
     left join {{ ref('int_mf_features') }} mf using (fips)
 ),
 
