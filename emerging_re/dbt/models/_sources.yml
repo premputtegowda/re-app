@@ -72,6 +72,26 @@ sources:
           wildfire, coastal flood, earthquake, etc.). Manual download
           required (Akamai WAF blocks programmatic access); refreshed
           ~annually.
+      - name: bea_regional_income
+        description: >
+          BEA CAINC1 — county-level annual personal income, per-capita
+          personal income, and BEA-benchmarked population. Vintage YYYY
+          covers tax year YYYY, publishes ~November of YYYY+1.
+          Vintages loaded 2019-2024. Wealth-migration signal complementary
+          to IRS SOI (which shows WHO moves; BEA shows RESULTING per-capita).
+      - name: faa_enplanements
+        description: >
+          FAA annual passenger boardings by airport, aggregated to county
+          via OurAirports lat/lon + FCC Census Block API. CY2019-CY2025
+          loaded. Real-time economic-activity signal — Bozeman/Provo/
+          Bradenton grew 60-400% 2019-2025 well before mainstream MF ranking.
+      - name: fcc_bdc
+        description: >
+          FCC Broadband Data Collection — county summary of residential
+          fixed broadband availability by technology + speed tier
+          (100/20 Mbps and 1 Gbps). Manual download required (Akamai WAF
+          blocks programmatic access). Fiber @ 1 Gbps = remote-work
+          attractiveness leading indicator.
 
   - name: backtest
     description: >
@@ -87,3 +107,28 @@ sources:
         description: "Per-(fips, period) composite score, rank, and tier contributions."
       - name: diagnostics
         description: "Per-(experiment, target, regime) Spearman correlation + sample size."
+
+  - name: analog_matches
+    description: >
+      Output from analytics/analog_matcher.py. Historical-analog scores
+      per current-day county: cosine similarity to past winners' pre-boom
+      feature signatures. Not partitioned — overwritten on each run.
+    meta:
+      external_location: >-
+        read_parquet('{{ var("curated_dir") }}/analog_matches/*.parquet')
+    tables:
+      - name: analog_matches
+        description: "Per-fips analog rank + best-match historical winner + expected 5y returns from that analog."
+
+  - name: spillover
+    description: >
+      Output from analytics/spillover_model.py. Distance-weighted
+      Tier-1 metro momentum per county — genuine additive signal on top
+      of composite (backtest confirmed +5 pp HPI / +3 pp ZORI Q1-Q5
+      improvement over composite alone).
+    meta:
+      external_location: >-
+        read_parquet('{{ var("curated_dir") }}/spillover/*.parquet')
+    tables:
+      - name: spillover_scores
+        description: "Per-fips spillover HPI + ZORI scores + nearest Tier-1 metro."

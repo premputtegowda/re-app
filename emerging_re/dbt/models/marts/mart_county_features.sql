@@ -207,6 +207,158 @@ with_mf as (
     left join {{ ref('int_mf_features') }} mf using (fips)
 ),
 
+-- v8 candidates (2026-08-31): IRS SOI migration features. IRS is annual
+-- (tax year Dec 31), 2-year publish lag. Match by year-of-period.
+with_irs as (
+    select
+        m.*,
+        i.irs_net_migration_rate,
+        i.irs_inflow_rate,
+        i.irs_income_gap,
+        i.irs_income_gap_pct,
+        i.irs_net_agi_per_capita
+    from with_mf m
+    left join {{ ref('int_irs_migration') }} i
+        on i.fips = m.fips
+        and year(i.period_end_date) = year(m.period_end_date)
+),
+
+-- v9 candidates (2026-08-31): BEA per-capita income growth features.
+-- Annual, ~11mo publish lag. Match by year-of-period. Complementary to
+-- IRS SOI — BEA measures resulting per-capita rather than who moved.
+with_bea as (
+    select
+        i.*,
+        b.per_capita_income,
+        b.pcpi_yoy,
+        b.pcpi_cagr_3yr,
+        b.pcpi_cagr_5yr,
+        b.pcpi_growth_vs_state_1yr_pp,
+        b.pcpi_cagr_3yr_vs_state_pp
+    from with_irs i
+    left join {{ ref('int_bea_income') }} b
+        on b.fips = i.fips
+        and year(b.period_end_date) = year(i.period_end_date)
+),
+
+-- v10 candidates (2026-08-31): HUD FMR growth features — Class B/C rent
+-- momentum. FY-based (period_end Sep 30). Match by year-of-period.
+with_fmr as (
+    select
+        b.*,
+        f.fmr_2br,
+        f.fmr_2br_yoy,
+        f.fmr_2br_cagr_3yr,
+        f.fmr_2br_cagr_3yr_vs_state_pp
+    from with_bea b
+    left join {{ ref('int_fmr_growth') }} f
+        on f.fips = b.fips
+        and year(f.period_end_date) = year(b.period_end_date)
+),
+
+-- v11 candidates (2026-08-31): renter-industry employment growth (QCEW
+-- NAICS 71+72+44-45 combined). Annual (Dec 31). Direct year join.
+with_renter_ind as (
+    select
+        f.*,
+        ri.renter_ind_emp_yoy,
+        ri.renter_ind_emp_cagr_3yr,
+        ri.renter_ind_emp_growth_vs_state_pp
+    from with_fmr f
+    left join {{ ref('int_renter_industry_growth') }} ri
+        on ri.fips = f.fips and ri.period_end_date = f.period_end_date
+),
+
+-- v12 candidates (2026-08-31): rental vacancy time series (proper
+-- per-period, not the static snapshot in int_mf_features). ACS 1yr
+-- period_end = Dec 31 of vintage year — direct year match.
+with_vac_trend as (
+    select
+        ri.*,
+        vt.vacancy_level_current as vt_vacancy_level,
+        vt.vacancy_change_3yr as vt_vacancy_change_3yr,
+        vt.vacancy_change_5yr as vt_vacancy_change_5yr
+    from with_renter_ind ri
+    left join {{ ref('int_vacancy_trend') }} vt
+        on vt.fips = ri.fips and vt.period_end_date = ri.period_end_date
+),
+
+-- v13 candidates (2026-08-31): FAA airport enplanement growth. Annual
+-- (Dec 31 period_end). Direct year match.
+with_airport as (
+    select
+        vt.*,
+        ap.enp_yoy,
+        ap.enp_cagr_3yr,
+        ap.enp_growth_vs_natl_pp
+    from with_vac_trend vt
+    left join {{ ref('int_airport_growth') }} ap
+        on ap.fips = vt.fips and ap.period_end_date = vt.period_end_date
+),
+
+-- v14 candidates (2026-08-31): Age 20-34 cohort share + growth (peak
+-- renter age). ACS 1yr, ~861 counties. Direct year match.
+with_age as (
+    select
+        ap.*,
+        ac.age_20_34_share,
+        ac.age_20_34_share_yoy_chg,
+        ac.age_20_34_growth_3yr_cagr
+    from with_airport ap
+    left join {{ ref('int_age_cohort') }} ac
+        on ac.fips = ap.fips and ac.period_end_date = ap.period_end_date
+),
+
+-- v15 candidates (2026-08-31): foreign-born share + growth (ACS 1yr).
+with_fb as (
+    select
+        ag.*,
+        fb.foreign_born_share,
+        fb.foreign_born_share_yoy_chg,
+        fb.foreign_born_cagr_3yr
+    from with_age ag
+    left join {{ ref('int_foreign_born') }} fb
+        on fb.fips = ag.fips and fb.period_end_date = ag.period_end_date
+),
+
+-- v16 candidates (2026-08-31): knowledge-worker employment growth
+-- (QCEW NAICS 51+54 combined = Information + Professional Services).
+-- Complements v11-A renter-industry (low-wage renters).
+with_knowledge as (
+    select
+        f.*,
+        kw.knowledge_emp_yoy,
+        kw.knowledge_emp_cagr_3yr,
+        kw.knowledge_emp_growth_vs_state_pp
+    from with_fb f
+    left join {{ ref('int_knowledge_worker_growth') }} kw
+        on kw.fips = f.fips and kw.period_end_date = f.period_end_date
+),
+
+-- v17 candidates (2026-08-31): cap rate compression trend. Per-period MF
+-- cap rate + 3yr change. Compressing (negative change) = investor demand.
+with_cap_trend as (
+    select
+        k.*,
+        crt.mf_cap_rate_now as cap_rate_now_ts,
+        crt.mf_cap_rate_change_3yr
+    from with_knowledge k
+    left join {{ ref('int_cap_rate_trend') }} crt
+        on crt.fips = k.fips and crt.period_end_date = k.period_end_date
+),
+
+-- v18 candidates (2026-08-31): MF permit ratio trend (BPS 3yr trailing
+-- share of units_5plus). Sign uncertain — demand or overbuild?
+with_mf_permit_trend as (
+    select
+        ct.*,
+        mpt.mf_permit_ratio_now as mf_permit_ratio_ts,
+        mpt.mf_permit_ratio_change_3yr
+    from with_cap_trend ct
+    left join {{ ref('int_mf_permit_trend') }} mpt
+        on mpt.fips = ct.fips and mpt.period_end_date = ct.period_end_date
+),
+
 -- Disqualifiers
 with_disq as (
     select
@@ -217,7 +369,7 @@ with_disq as (
         d.hpi_trailing_24mo,
         d.disq_price_ran_25pct,
         d.any_disqualifier
-    from with_mf r
+    from with_mf_permit_trend r
     left join {{ ref('int_disqualifiers') }} d
         on d.fips = r.fips and d.period_end_date = r.period_end_date
 ),

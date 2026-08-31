@@ -1,21 +1,30 @@
 """Scoring functions — pure, testable, no I/O.
 
-The composite score is a linear equal-weight combination of z-scored
-features grouped by tier. Feature sign flips a feature so "higher raw
-value = more attractive investment" is uniform across all features.
+We compute THREE target-optimized composites in one pass:
+    - `hpi_composite_score`   — features that empirically help HPI prediction
+    - `zori_composite_score`  — features that empirically help ZORI prediction
+    - `joint_composite_score` — strict intersection (features that help BOTH)
 
-Design choices per DECISIONS.md §7:
-    - Pre-register equal weights. Do NOT tune weights until baseline is
-      established; if equal weights don't beat baseline, change features
-      not weights.
+Classifications derived from v18-A ablation (2026-08-31 run). A feature
+is "helpful" for a target if its leave-one-out drop delta averaged over
+24mo + 36mo horizons is < 0. Features hurting both (high_wage_share,
+high_wage_share_yoy_chg, fmr_2br_yoy) appear in NO composite.
+
+Investor strategy → composite mapping:
+    Cash flow / DSCR loans        → ZORI-max
+    Value-add / flipper           → HPI-max
+    Total return (buy-and-hold)   → JOINT
+
+For back-compat with earlier code, `composite_score` (unqualified) is
+maintained as an alias for `joint_composite_score`.
+
+Design invariants (per DECISIONS.md §7):
+    - Pre-register equal weights. Composite = mean of tier scores; tier
+      score = mean of z-scored feature columns in that tier.
     - Cross-sectional z-score per period so scores reflect *relative*
-      positioning within each fold, not absolute values.
-    - Median imputation for missing features (treats "missing" as
-      "at median" — neutral). Avoids dropping counties with any single
-      NULL feature which would shrink the sample dramatically due to
-      BPS coverage cliff and early ZORI thinness.
-    - Disqualifiers set composite score to NaN so those counties are
-      excluded from ranking (per DECISIONS.md "any one kills a county").
+      positioning within each fold.
+    - Median imputation for missing features.
+    - Disqualifiers set composite score to NaN → excluded from ranking.
 """
 
 from __future__ import annotations
@@ -28,86 +37,150 @@ import pandas as pd
 
 @dataclass(frozen=True)
 class FeatureSpec:
-    """A single feature in the scoring model.
-
-    `sign` = +1 means higher raw value is more attractive (keep as-is
-    when z-scoring). `sign` = -1 means lower is better (flip). Example:
-    `permits_intensity_ratio` uses -1 because low permits vs county's
-    own history = supply constrained = attractive.
-    """
+    """A single feature contribution. `sign` = +1 keep as-is, -1 flip."""
     column: str
-    tier: str  # "tier1_demand" | "tier2_supply" | "tier3_pricing"
-    sign: int  # +1 or -1
+    tier: str  # "tier1_demand" | "tier4_momentum"
+    sign: int
 
 
-# The active feature set. Iteration history:
-#
-#   v1 (pre-registered per DECISIONS.md §7): tiers 1-3, contrarian theory.
-#      FAILED ship — lost to momentum baseline by 0.25 Spearman.
-#      Ablation identified two features actively hurting: permits_intensity_ratio
-#      and rent_minus_price_growth (both contrarian bets that at 24-36mo
-#      horizon fight momentum, which dominates).
-#
-#   v2 (Path 1, 2026-08-29): added tier4_momentum. Composite jumped from
-#      +0.02 to +0.23. Still short of ship by ~0.05.
-#
-#   v3 (Path 1+2, 2026-08-29): dropped the two harmful contrarian features.
-#      Tier 2 supply and Tier 3 pricing removed entirely. Composite now =
-#      fundamentals (demand + high-wage share + wages + employment) + momentum,
-#      equal-weighted across the two remaining tiers.
-FEATURES: tuple[FeatureSpec, ...] = (
+# ── Master feature registry ──────────────────────────────────────────────
+# Sign + tier assignments — the canonical source of truth. Composites
+# reference features by column name; sign/tier looked up here.
+_ALL_FEATURES: tuple[FeatureSpec, ...] = (
     # Tier 1 — demand fundamentals
-    FeatureSpec("domesticmig_per_1000",       "tier1_demand",   +1),
-    FeatureSpec("domesticmig_accel_3yr",      "tier1_demand",   +1),
-    FeatureSpec("high_wage_share",            "tier1_demand",   +1),
-    FeatureSpec("high_wage_share_yoy_chg",    "tier1_demand",   +1),
-    FeatureSpec("wage_growth_yoy_demeaned",   "tier1_demand",   +1),
-    FeatureSpec("emp_growth_yoy_demeaned",    "tier1_demand",   +1),
-    # v5 addition (2026-08-29): cap_rate_proxy only.
-    # Tested BFS business_apps_per_1000 + ACS rental_vacancy_rate +
-    # rent_to_income_ratio alongside; those were mixed-to-slightly-harmful
-    # in ablation (see git history commit for full v5 test details).
-    # cap_rate_proxy stands out — helps ZORI 24mo by +0.015 Spearman
-    # when included. First value-oriented signal that empirically holds.
-    FeatureSpec("cap_rate_proxy",             "tier1_demand",   +1),
-    # v7 tested + reverted (2026-08-30): unemployment_rate + yoy_chg from BLS LAUS.
-    # Both were mildly harmful in ablation (drop → +0.004 to +0.008 Spearman).
-    # 4th failed "add-feature" experiment; composite is at diminishing returns.
-    # int_unemployment_features remains for UI display (mart_mf_scored + others)
-    # even though not in composite scoring.
-    # v6 tested + reverted (2026-08-29): renter_share, mf_permit_ratio,
-    # rental_vacancy_change_3yr added to test MF-optimization.
-    # Result: hurt composite marginally across all targets (dropped ZORI
-    # 36mo below ship). Root cause: our forward-return targets are
-    # SFR-biased (FHFA HPI + Zillow ZORI blended-inventory), so MF-
-    # specific features fight the target signal. Intermediate model
-    # int_mf_features remains — used for MF-specific FILTERING via
-    # mart_mf_scored, not for composite scoring.
-    # Tier 4 — trailing momentum. The winning signal at 24-36mo horizons.
-    FeatureSpec("hpi_yoy",                    "tier4_momentum", +1),
-    FeatureSpec("zori_yoy",                   "tier4_momentum", +1),
-    # DROPPED v3: permits_intensity_ratio (tier2_supply, sign -1)
-    # DROPPED v3: rent_minus_price_growth   (tier3_pricing,  sign +1)
-    # DROPPED v4: internationalmig_per_1000  (tier1_demand,   sign +1)
-    # DROPPED v4: employment_diversity_hhi   (tier1_demand,   sign -1)
-    # DROPPED v4: rent_growth_vs_wage_growth (tier1_demand,   sign -1)
-    #   v3 dropped: contrarian bets that fight momentum at 24-36mo horizon.
-    #   v4 dropped: three new features tested 2026-08-29 that individually
-    #   were neutral-to-mildly-harmful in ablation. Adding them together
-    #   broke the ship criterion on both ZORI targets. The intermediate
-    #   dbt models remain in place (int_international_migration,
-    #   int_employment_diversity) — they're useful as UI context metrics
-    #   even though they don't earn a spot in the composite.
+    FeatureSpec("domesticmig_per_1000",              "tier1_demand",   +1),
+    FeatureSpec("domesticmig_accel_3yr",             "tier1_demand",   +1),
+    FeatureSpec("wage_growth_yoy_demeaned",          "tier1_demand",   +1),
+    FeatureSpec("emp_growth_yoy_demeaned",           "tier1_demand",   +1),
+    FeatureSpec("cap_rate_proxy",                    "tier1_demand",   +1),
+    FeatureSpec("irs_net_migration_rate",            "tier1_demand",   +1),
+    FeatureSpec("irs_inflow_rate",                   "tier1_demand",   +1),
+    FeatureSpec("irs_income_gap",                    "tier1_demand",   +1),
+    FeatureSpec("irs_income_gap_pct",                "tier1_demand",   +1),
+    FeatureSpec("irs_net_agi_per_capita",            "tier1_demand",   +1),
+    FeatureSpec("pcpi_cagr_3yr_vs_state_pp",         "tier1_demand",   +1),
+    FeatureSpec("fmr_2br_cagr_3yr_vs_state_pp",      "tier1_demand",   +1),
+    FeatureSpec("renter_ind_emp_yoy",                "tier1_demand",   +1),
+    FeatureSpec("vt_vacancy_change_3yr",             "tier1_demand",   -1),
+    FeatureSpec("vt_vacancy_change_5yr",             "tier1_demand",   -1),
+    FeatureSpec("age_20_34_share_yoy_chg",           "tier1_demand",   +1),
+    FeatureSpec("foreign_born_share_yoy_chg",        "tier1_demand",   +1),
+    FeatureSpec("mf_permit_ratio_ts",                "tier1_demand",   -1),
+    # Tier 4 — trailing momentum
+    FeatureSpec("hpi_yoy",                           "tier4_momentum", +1),
+    FeatureSpec("zori_yoy",                          "tier4_momentum", +1),
+)
+
+_FEATURES_BY_COL: dict[str, FeatureSpec] = {f.column: f for f in _ALL_FEATURES}
+
+
+def _subset(*column_names: str) -> tuple[FeatureSpec, ...]:
+    """Look up FeatureSpecs by column name in the master registry."""
+    return tuple(_FEATURES_BY_COL[c] for c in column_names)
+
+
+# ── The three composites ─────────────────────────────────────────────────
+# Classifications from v18-A ablation (drop_delta < 0 avg over 24mo+36mo).
+# DROPPED FROM ALL COMPOSITES (hurt both targets): high_wage_share,
+# high_wage_share_yoy_chg, fmr_2br_yoy.
+
+HPI_MAX_FEATURES = _subset(
+    "domesticmig_per_1000",
+    "domesticmig_accel_3yr",
+    "wage_growth_yoy_demeaned",
+    "emp_growth_yoy_demeaned",
+    "irs_net_migration_rate",
+    "irs_inflow_rate",
+    "irs_income_gap",
+    "irs_income_gap_pct",
+    "irs_net_agi_per_capita",
+    "pcpi_cagr_3yr_vs_state_pp",
+    "fmr_2br_cagr_3yr_vs_state_pp",
+    "renter_ind_emp_yoy",
+    "vt_vacancy_change_5yr",
+    "age_20_34_share_yoy_chg",
+    "foreign_born_share_yoy_chg",
+    "hpi_yoy",
+    "zori_yoy",
+)
+
+ZORI_MAX_FEATURES = _subset(
+    "domesticmig_per_1000",
+    "domesticmig_accel_3yr",
+    "cap_rate_proxy",
+    "irs_income_gap",
+    "irs_income_gap_pct",
+    "fmr_2br_cagr_3yr_vs_state_pp",
+    "vt_vacancy_change_3yr",
+    "vt_vacancy_change_5yr",
+    "age_20_34_share_yoy_chg",
+    "foreign_born_share_yoy_chg",
+    "mf_permit_ratio_ts",
+    "hpi_yoy",
+    "zori_yoy",
+)
+
+JOINT_FEATURES = _subset(
+    "domesticmig_per_1000",
+    "domesticmig_accel_3yr",
+    "irs_income_gap",
+    "irs_income_gap_pct",
+    "fmr_2br_cagr_3yr_vs_state_pp",
+    "vt_vacancy_change_5yr",
+    "age_20_34_share_yoy_chg",
+    "foreign_born_share_yoy_chg",
+    "hpi_yoy",
+    "zori_yoy",
+)
+
+
+@dataclass(frozen=True)
+class CompositeSpec:
+    """A named composite with its feature set."""
+    name: str  # "hpi" | "zori" | "joint"
+    features: tuple[FeatureSpec, ...]
+
+    @property
+    def score_col(self) -> str:
+        return f"{self.name}_composite_score"
+
+    @property
+    def rank_col(self) -> str:
+        return f"{self.name}_composite_rank"
+
+
+COMPOSITES: tuple[CompositeSpec, ...] = (
+    CompositeSpec(name="hpi",   features=HPI_MAX_FEATURES),
+    CompositeSpec(name="zori",  features=ZORI_MAX_FEATURES),
+    CompositeSpec(name="joint", features=JOINT_FEATURES),
 )
 
 TIERS = ("tier1_demand", "tier4_momentum")
 
 
+# ── Back-compat exports ──────────────────────────────────────────────────
+# Older code (evaluate_ablation, run_backtest) expects a single FEATURES
+# tuple. Point it at the union so ablation covers every candidate feature.
+FEATURES: tuple[FeatureSpec, ...] = _ALL_FEATURES
+
+
+WINSORIZE_LOWER_Q = 0.01
+WINSORIZE_UPPER_Q = 0.99
+
+
 def _zscore(s: pd.Series) -> pd.Series:
-    """Population z-score. NaN-preserving; returns 0-filled series if
-    all values equal (std=0)."""
+    """Population z-score with 1st/99th-percentile winsorization applied first.
+
+    Winsorization prevents extreme outliers (tiny counties with wild YoY
+    swings, COVID-era one-offs, data-pipeline glitches) from distorting the
+    cross-sectional mean/std so much that legitimate-range counties get
+    squished to near-zero z-scores. Clipping the tails preserves relative
+    ordering while restoring discriminative power for the middle 98%."""
     if s.dropna().empty:
         return pd.Series(np.nan, index=s.index)
+    p_lo, p_hi = s.quantile([WINSORIZE_LOWER_Q, WINSORIZE_UPPER_Q])
+    if pd.notna(p_lo) and pd.notna(p_hi):
+        s = s.clip(lower=p_lo, upper=p_hi)
     mu = s.mean(skipna=True)
     sigma = s.std(ddof=0, skipna=True)
     if sigma == 0 or pd.isna(sigma):
@@ -115,52 +188,67 @@ def _zscore(s: pd.Series) -> pd.Series:
     return (s - mu) / sigma
 
 
-def score_period(df: pd.DataFrame) -> pd.DataFrame:
-    """Score a single period's cross-section.
+def _tier_score(z_cols: list[str], out: pd.DataFrame) -> pd.Series:
+    """Mean of z-score columns (already sign-flipped). NaN when empty."""
+    if not z_cols:
+        return pd.Series(np.nan, index=out.index)
+    return out[z_cols].mean(axis=1)
 
-    Input: DataFrame with feature columns + `any_disqualifier`.
-    Output: original columns + `z_<feature>` + `score_<tier>` +
-            `composite_score`.
+
+def score_period(df: pd.DataFrame) -> pd.DataFrame:
+    """Score a single period's cross-section — computes all 3 composites.
+
+    Output columns added:
+        z_<feature>                         (one per unique feature across composites)
+        {composite}_score_{tier}            (per-composite tier score)
+        {composite}_composite_score         (final score per composite)
+        {composite}_composite_rank          (rank per composite, 1=best)
+        composite_score                     (alias for joint_composite_score)
+        composite_rank                      (alias for joint_composite_rank)
     """
     out = df.copy()
 
-    # Z-score each feature within this period. Median-impute NaNs first
-    # so counties with partial coverage still get a score.
-    for spec in FEATURES:
+    # Z-score every feature ONCE (dedupe across composites via master registry).
+    for spec in _ALL_FEATURES:
         if spec.column not in out.columns:
             continue
         raw = out[spec.column]
         imputed = raw.fillna(raw.median(skipna=True))
         out[f"z_{spec.column}"] = spec.sign * _zscore(imputed)
 
-    # Tier averages — mean of the z-scored feature columns in that tier.
-    for tier in TIERS:
-        tier_zcols = [
-            f"z_{s.column}" for s in FEATURES
-            if s.tier == tier and f"z_{s.column}" in out.columns
-        ]
-        if tier_zcols:
-            out[f"score_{tier}"] = out[tier_zcols].mean(axis=1)
-        else:
-            out[f"score_{tier}"] = np.nan
-
-    # Composite = equal-weighted mean of tier scores (each tier equal
-    # weight, regardless of how many features feed it). This matters
-    # because tier2 has 1 feature and tier1 has 6 — a naive
-    # feature-level mean would let tier1 dominate.
-    out["composite_score"] = out[[f"score_{t}" for t in TIERS]].mean(axis=1)
-
-    # Disqualifier mask: any_disqualifier=true → composite=NaN → excluded
-    # from ranking. Do NOT set to a large negative number — that would
-    # bias downstream correlation calcs.
+    disq_mask = None
     if "any_disqualifier" in out.columns:
-        disq_mask = out["any_disqualifier"] == True  # noqa: E712 pandas boolean
-        out.loc[disq_mask, "composite_score"] = np.nan
+        disq_mask = out["any_disqualifier"] == True  # noqa: E712
 
-    # Rank within the period. Higher score = rank 1 (best).
-    out["composite_rank"] = out["composite_score"].rank(
-        ascending=False, method="min", na_option="bottom"
-    ).astype("Int64")
+    # Per-composite: compute tier scores + composite score + rank.
+    for comp in COMPOSITES:
+        tier_scores: list[str] = []
+        for tier in TIERS:
+            z_cols = [
+                f"z_{s.column}" for s in comp.features
+                if s.tier == tier and f"z_{s.column}" in out.columns
+            ]
+            tier_score_col = f"{comp.name}_score_{tier}"
+            out[tier_score_col] = _tier_score(z_cols, out)
+            tier_scores.append(tier_score_col)
+        # Composite = mean of tier scores (equal-weighted tier structure).
+        # NaN-safe mean via .mean(axis=1) drops NaN tiers automatically.
+        out[comp.score_col] = out[tier_scores].mean(axis=1)
+        if disq_mask is not None:
+            out.loc[disq_mask, comp.score_col] = np.nan
+        out[comp.rank_col] = out[comp.score_col].rank(
+            ascending=False, method="min", na_option="bottom"
+        ).astype("Int64")
+
+    # Back-compat aliases: composite_score / composite_rank = JOINT.
+    out["composite_score"] = out["joint_composite_score"]
+    out["composite_rank"] = out["joint_composite_rank"]
+
+    # Back-compat tier score cols for older mart_backtest_scores schema.
+    # (score_tier1_demand, score_tier4_momentum) point at JOINT's per-tier
+    # scores. New model consumers should read {composite}_score_{tier}.
+    for tier in TIERS:
+        out[f"score_{tier}"] = out[f"joint_score_{tier}"]
 
     return out
 
@@ -168,10 +256,8 @@ def score_period(df: pd.DataFrame) -> pd.DataFrame:
 def score_all_periods(df: pd.DataFrame) -> pd.DataFrame:
     """Apply score_period to every period_end_date in df.
 
-    Uses an explicit loop instead of groupby().apply() because pandas 2.2+
-    excludes the group key from the group DataFrame by default, which
-    would strip `period_end_date` from what score_period sees. The loop
-    keeps every column intact and produces the same result.
+    Explicit loop (not groupby.apply) because pandas 2.2+ excludes group
+    key from group DataFrame by default, stripping `period_end_date`.
     """
     return pd.concat(
         [score_period(group) for _period, group in df.groupby("period_end_date")],

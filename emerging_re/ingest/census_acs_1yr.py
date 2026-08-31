@@ -74,6 +74,39 @@ ACS_VARIABLES: dict[str, str] = {
     "B25003_003E": "renter_occupied_units",
     "B25004_002E": "vacant_for_rent_units",
     "B01003_001E": "total_population",
+    # Age 20-34 cohort (peak renter age). B01001 splits male/female —
+    # need 6 vars total. Downstream sums to a single age_20_34 count.
+    "B01001_009E": "male_20_24",
+    "B01001_010E": "male_25_29",
+    "B01001_011E": "male_30_34",
+    "B01001_033E": "female_20_24",
+    "B01001_034E": "female_25_29",
+    "B01001_035E": "female_30_34",
+    # Foreign-born share (Candidate 6)
+    "B05002_013E": "foreign_born_population",
+    # Units in structure (B25024) — count of HOUSING UNITS (not buildings)
+    # classified by size of building they live in. To estimate BUILDINGS,
+    # divide units by bucket midpoint (e.g., units_in_10_19 / 14.5).
+    # Verified variable→label mapping via Census API 2026-08-31:
+    #   B25024_006E = "5 to 9",   B25024_007E = "10 to 19",
+    #   B25024_008E = "20 to 49", B25024_009E = "50 or more"
+    "B25024_006E": "units_in_5_to_9_bldgs",
+    "B25024_007E": "units_in_10_to_19_bldgs",   # 🎯 primary MF investor target size
+    "B25024_008E": "units_in_20_to_49_bldgs",
+    "B25024_009E": "units_in_50_plus_bldgs",
+    # Year structure built (B25034) — age of housing stock. Pre-1980 stock
+    # is the classic value-add vintage (deferred maintenance, upgradeable
+    # systems, mispriced basis). Verified var→label mapping 2026-08-31.
+    "B25034_002E": "hu_built_2020_plus",
+    "B25034_003E": "hu_built_2010_to_2019",
+    "B25034_004E": "hu_built_2000_to_2009",
+    "B25034_005E": "hu_built_1990_to_1999",
+    "B25034_006E": "hu_built_1980_to_1989",
+    "B25034_007E": "hu_built_1970_to_1979",
+    "B25034_008E": "hu_built_1960_to_1969",
+    "B25034_009E": "hu_built_1950_to_1959",
+    "B25034_010E": "hu_built_1940_to_1949",
+    "B25034_011E": "hu_built_pre_1940",
 }
 
 
@@ -200,15 +233,33 @@ def _normalize_and_partition(
     quarantined = df[quarantined_mask].copy()
     clean = df[~quarantined_mask].copy()
 
+    # Sum male + female age-20-34 sub-brackets into one column.
+    for c in ("male_20_24", "male_25_29", "male_30_34",
+              "female_20_24", "female_25_29", "female_30_34"):
+        if c not in clean.columns:
+            clean[c] = 0
+    clean["age_20_34"] = (
+        clean[["male_20_24", "male_25_29", "male_30_34",
+               "female_20_24", "female_25_29", "female_30_34"]].sum(axis=1)
+    )
+
     keep_cols = [
         "fips", "period_end_date",
         "median_household_income", "median_gross_rent", "median_home_value",
         "owner_occupied_units", "renter_occupied_units",
         "vacant_for_rent_units", "rental_vacancy_rate",
-        "total_population", "county_state_name",
+        "total_population",
+        "age_20_34", "foreign_born_population",
+        "units_in_5_to_9_bldgs", "units_in_10_to_19_bldgs",
+        "units_in_20_to_49_bldgs", "units_in_50_plus_bldgs",
+        "hu_built_2020_plus", "hu_built_2010_to_2019", "hu_built_2000_to_2009",
+        "hu_built_1990_to_1999", "hu_built_1980_to_1989", "hu_built_1970_to_1979",
+        "hu_built_1960_to_1969", "hu_built_1950_to_1959", "hu_built_1940_to_1949",
+        "hu_built_pre_1940",
+        "county_state_name",
         "_fips_remap_flag",
     ]
-    clean = clean[keep_cols]
+    clean = clean[[c for c in keep_cols if c in clean.columns]]
 
     dupes = clean.duplicated(subset=["fips", "period_end_date"]).sum()
     if dupes:

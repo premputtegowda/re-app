@@ -29,7 +29,7 @@ import duckdb
 import pandas as pd
 
 from ._diagnostics import evaluate, evaluate_ablation, evaluate_baseline
-from ._scoring import FEATURES, TIERS, score_all_periods
+from ._scoring import COMPOSITES, FEATURES, TIERS, score_all_periods
 
 logger = logging.getLogger(__name__)
 
@@ -61,12 +61,18 @@ def write_scores(scored: pd.DataFrame, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "scores.parquet"
 
-    # Build keep_cols dynamically from TIERS + FEATURES so schema stays in
-    # sync when the active feature set changes across iterations.
+    # Build keep_cols dynamically. Emit both the JOINT alias
+    # (composite_score) and per-composite scores/ranks so downstream marts
+    # can pick the composite matching an investor's strategy.
     keep_cols = [
         "fips", "period_end_date", "county_name", "state_name", "pop_latest",
         "composite_score", "composite_rank",
         *[f"score_{t}" for t in TIERS],
+        # Per-composite scores + ranks
+        *[c.score_col for c in COMPOSITES],
+        *[c.rank_col for c in COMPOSITES],
+        # Per-composite tier scores (for "why this score" breakdowns)
+        *[f"{c.name}_score_{t}" for c in COMPOSITES for t in TIERS],
         "any_disqualifier",
         # Individual feature z-scores — useful for the UI "why is this ranked
         # 14th" contribution breakdown.
@@ -130,28 +136,48 @@ def print_summary(all_results: list) -> None:
     print("PHASE 3 BACKTEST — SPEARMAN RANK CORRELATION")
     print("=" * 78)
 
+    # For 3-composite mode: show hpi/zori/joint side-by-side vs baseline.
     for horizon in ("24mo", "36mo", "60mo"):
         print(f"\n\n{'=' * 30} HORIZON = {horizon} {'=' * 30}")
         for metric in ("hpi", "zori"):
             view = df[
                 (df["metric"] == metric)
                 & (df["horizon"] == horizon)
-                & (df["experiment"].isin(["composite", "baseline"]))
+                & (df["experiment"].isin(["hpi", "zori", "joint", "baseline"]))
+                & (df["regime"] == "all")
             ].pivot(index="regime", columns="experiment", values="spearman")
-            print(f"\n--- composite vs baseline ({metric.upper()} {horizon}) ---")
+            print(f"\n--- {metric.upper()} {horizon} — Spearman by composite (regime=all) ---")
             print(view.round(4).to_string())
 
-        # Ship criterion for this horizon.
-        print(f"\n--- SHIP CRITERION (composite beats baseline by >= 0.05, {horizon}) ---")
-        for metric in ("hpi", "zori"):
-            try:
-                comp = df[(df["experiment"] == "composite") & (df["metric"] == metric) & (df["horizon"] == horizon) & (df["regime"] == "all")]["spearman"].iloc[0]
-                base = df[(df["experiment"] == "baseline") & (df["metric"] == metric) & (df["horizon"] == horizon) & (df["regime"] == "all")]["spearman"].iloc[0]
+        # Ship criterion — target-specific.
+        # ZORI-max only needs to beat baseline on ZORI (ignores HPI).
+        # HPI-max only needs to beat baseline on HPI.
+        # JOINT must beat baseline on BOTH.
+        print(f"\n--- SHIP CRITERION (target-specific, delta >= 0.05, {horizon}) ---")
+
+        def _get(exp: str, metric: str) -> float | None:
+            rows = df[
+                (df["experiment"] == exp) & (df["metric"] == metric)
+                & (df["horizon"] == horizon) & (df["regime"] == "all")
+            ]
+            return None if rows.empty else rows["spearman"].iloc[0]
+
+        for exp, target_metrics in (
+            ("hpi", ("hpi",)),
+            ("zori", ("zori",)),
+            ("joint", ("hpi", "zori")),
+        ):
+            verdicts = []
+            for m in target_metrics:
+                comp = _get(exp, m)
+                base = _get("baseline", m)
+                if comp is None or base is None:
+                    verdicts.append(f"{m.upper()} n/a")
+                    continue
                 delta = comp - base
-                verdict = "PASS" if delta >= 0.05 else "FAIL"
-                print(f"  {metric.upper()} {horizon}: composite={comp:+.4f}, baseline={base:+.4f}, delta={delta:+.4f} [{verdict}]")
-            except (IndexError, KeyError):
-                print(f"  {metric.upper()} {horizon}: insufficient data")
+                v = "PASS" if delta >= 0.05 else "FAIL"
+                verdicts.append(f"{m.upper()} composite={comp:+.4f} baseline={base:+.4f} delta={delta:+.4f} [{v}]")
+            print(f"  {exp.upper():5s}: {'  |  '.join(verdicts)}")
 
     # Ablation — which features matter? Show for both horizons + both metrics.
     print("\n\n--- FEATURE ABLATION ('all' regime, sorted by importance) ---")
@@ -204,17 +230,22 @@ def main() -> None:
     logger.info("Scoring %d rows across %d periods", len(features_df), features_df["period_end_date"].nunique())
     scored = score_all_periods(features_df)
 
-    # 3. Evaluate composite + baseline + ablation
-    logger.info("Evaluating composite score across regimes")
-    composite_results = evaluate(scored, experiment_label="composite")
+    # 3. Evaluate each composite + baseline + ablation
+    all_results = []
+    for comp in COMPOSITES:
+        logger.info("Evaluating %s composite across regimes", comp.name)
+        all_results.extend(evaluate(
+            scored, experiment_label=comp.name, score_col=comp.score_col,
+        ))
+    # Also emit legacy "composite" label (alias for JOINT) so back-compat
+    # dashboards keep working.
+    all_results.extend(evaluate(scored, experiment_label="composite"))
 
     logger.info("Evaluating baseline (trailing 12mo momentum)")
-    baseline_results = evaluate_baseline(scored)
+    all_results.extend(evaluate_baseline(scored))
 
     logger.info("Running leave-one-out ablation on %d features", len(FEATURES))
-    ablation_results = evaluate_ablation(scored, features_df)
-
-    all_results = composite_results + baseline_results + ablation_results
+    all_results.extend(evaluate_ablation(scored, features_df))
 
     # 4. Persist
     write_scores(scored, args.output_dir / "scores")
