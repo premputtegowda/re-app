@@ -55,9 +55,22 @@ pop_growth as (
 ),
 
 disq_latest as (
-    -- Top-supersector share (concentration flag context).
-    select fips, max_supersector_share
+    -- Latest disqualifier signals per fips: concentration + MF cycle indicators.
+    select fips, max_supersector_share, mf_cycle_score,
+           macro_regime, disq_mf_top
     from {{ ref('int_disqualifiers') }}
+    qualify row_number() over (partition by fips order by period_end_date desc) = 1
+),
+
+anchor_latest as (
+    -- Latest anchor-institution profile per fips (federal/university/
+    -- healthcare/tourism dominance). Tested + reverted from composite
+    -- 2026-09-01 (regressed Spearman) but kept for browsing/filtering.
+    -- Empirical: high anchor score → +3.9 pp ZORI 5y Q1-Q5 spread.
+    select fips, anchor_type, anchor_stability_score,
+           tourism_share, edu_share, healthcare_share, federal_gov_share,
+           state_local_gov_share
+    from {{ ref('int_anchor_institutions') }}
     qualify row_number() over (partition by fips order by period_end_date desc) = 1
 ),
 
@@ -169,6 +182,17 @@ base as (
         bps.mf_permits_3yr,
         dl.employment_diversity_hhi,
         dq.max_supersector_share,
+        dq.mf_cycle_score,
+        dq.macro_regime,
+        dq.disq_mf_top,
+        -- Anchor institution profile (v19, display only).
+        al.anchor_type,
+        al.anchor_stability_score,
+        al.tourism_share,
+        al.edu_share,
+        al.healthcare_share,
+        al.federal_gov_share,
+        al.state_local_gov_share,
         cf.domesticmig_per_1000,
         cf.domesticmig_accel_3yr,
         cf.high_wage_share,
@@ -233,6 +257,7 @@ base as (
     left join {{ ref('int_mf_features') }} mf using (fips)
     left join div_latest dl using (fips)
     left join disq_latest dq using (fips)
+    left join anchor_latest al using (fips)
     left join trailing_appr ta using (fips)
     left join comp_features cf using (fips)
     left join unemployment un using (fips)
@@ -371,6 +396,19 @@ select
     -- Diversity metrics (sector-level via HHI; employer-level not available).
     round(employment_diversity_hhi::decimal, 3) as hhi,
     round(max_supersector_share * 100, 1) as top_sector_pct,
+    -- MF cycle indicators (Phase 1-3 disqualifier redesign, 2026-09-01).
+    round(mf_cycle_score::decimal, 1) as mf_cycle_score,
+    macro_regime,
+    disq_mf_top as flag_mf_top_risk,
+    -- Anchor institution profile (display only — not in composite).
+    -- Empirical: high anchor_stability_score → +3.9 pp ZORI 5y edge.
+    anchor_type,
+    round(anchor_stability_score::decimal, 3) as anchor_stability_score,
+    round(tourism_share * 100, 1) as tourism_share_pct,
+    round(edu_share * 100, 1) as edu_share_pct,
+    round(healthcare_share * 100, 1) as healthcare_share_pct,
+    round(federal_gov_share * 100, 1) as federal_gov_share_pct,
+    round(state_local_gov_share * 100, 1) as state_local_gov_share_pct,
     -- ── HISTORICAL ANALOG (interpretive only — did NOT validate in backtest) ──
     analog_rank,
     round(analog_similarity_score::decimal, 3) as analog_score,

@@ -134,6 +134,21 @@ annual_dec_periods as (
     from hpi_latest
 ),
 
+-- MF cycle score with ntile computed ONLY within the investable universe
+-- (~977 counties). If we let ntile see all 3000+ counties, small/rural
+-- counties dominate quintile 1 and our target universe skews to quintile 5.
+cycle_score_ranked as (
+    select
+        cs.fips,
+        cs.period_end_date,
+        cs.mf_cycle_score,
+        ntile(5) over (
+            partition by cs.period_end_date order by cs.mf_cycle_score nulls first
+        ) as cycle_quintile
+    from {{ ref('int_mf_cycle_score') }} cs
+    inner join {{ ref('int_universe') }} u on u.fips = cs.fips
+),
+
 joined as (
     select
         a.fips,
@@ -143,9 +158,25 @@ joined as (
         -- Sector concentration uses same-Dec-31 QCEW.
         sc.max_supersector_share,
         sc.disq_sector_concentration,
-        -- Price ran uses same-Dec-31 HPI.
+        -- Price ran (LEGACY — SFR-focused, hurts 5yr perf. Kept for
+        -- diagnostic but no longer feeds any_disqualifier).
         pr.hpi_trailing_24mo,
-        pr.disq_price_ran_25pct
+        pr.disq_price_ran_25pct,
+        -- MF cycle score (0-100, higher = later local cycle).
+        csr.mf_cycle_score,
+        csr.cycle_quintile,
+        -- National macro regime.
+        mr.macro_regime,
+        mr.regime_mf_hostile,
+        -- ── NEW COMBINED DISQUALIFIER (Phase 3, 2026-08-31) ──
+        -- Fires ONLY when BOTH:
+        --   (a) county in TOP QUINTILE of MF cycle indicators (~195 counties)
+        --   (b) national macro is TOPPING or TIGHTENING
+        -- Backtest showed single condition alone is anti-signal; combined
+        -- correctly protected in 2022 (+4.6 pp ZORI 3y). Silent in other
+        -- regimes (no false positives).
+        (csr.cycle_quintile = 5
+         and mr.macro_regime in ('TOPPING', 'TIGHTENING')) as disq_mf_top
     from annual_dec_periods a
     left join aging_trap ag
         on ag.fips = a.fips
@@ -154,6 +185,10 @@ joined as (
         on sc.fips = a.fips and sc.period_end_date = a.period_end_date
     left join hpi_24mo_change pr
         on pr.fips = a.fips and pr.period_end_date = a.period_end_date
+    left join cycle_score_ranked csr
+        on csr.fips = a.fips and csr.period_end_date = a.period_end_date
+    left join {{ ref('int_national_macro_regime') }} mr
+        on mr.period_end_date = a.period_end_date
 )
 
 select
@@ -163,13 +198,19 @@ select
     j.max_supersector_share,
     j.disq_sector_concentration,
     j.hpi_trailing_24mo,
-    j.disq_price_ran_25pct,
-    -- Convenience: true if ANY implemented disqualifier fires.
-    -- NULL propagation is intentional — a county with missing signals
-    -- shouldn't be silently marked "safe".
-    coalesce(j.disq_aging_trap, false)
-        or coalesce(j.disq_sector_concentration, false)
-        or coalesce(j.disq_price_ran_25pct, false)
-        as any_disqualifier
+    j.disq_price_ran_25pct,  -- LEGACY, no longer in any_disqualifier
+    j.mf_cycle_score,
+    j.macro_regime,
+    j.regime_mf_hostile,
+    j.disq_mf_top,
+    -- Convenience: true if ANY ACTIVE disqualifier fires.
+    -- REMOVED (2026-08-31): disq_price_ran_25pct — hurt 5yr HPI by -18.6 pp.
+    -- REMOVED (2026-09-01): disq_sector_concentration — hurt HPI by -3.3 pp.
+    -- REMOVED (2026-09-01): disq_aging_trap — hurt HPI by -1.4 pp, ZORI by
+    -- -6.4 pp. Post-Boomer retirement migration reversed the classical
+    -- "aging = declining" pattern; retiree destinations (FL, AZ, coastal)
+    -- now BOOM instead of decline. All three kept as diagnostic flags.
+    -- ADDED (2026-09-01): disq_mf_top — county cycle × macro regime (Phase 3).
+    coalesce(j.disq_mf_top, false) as any_disqualifier
 from joined j
 inner join {{ ref('int_universe') }} u on u.fips = j.fips

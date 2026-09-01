@@ -15,6 +15,8 @@ dependencies = [
     "dbt-duckdb>=1.9.0",
     # Phase 3 — Spearman correlations + regime stats for backtest.
     "scipy>=1.14.0",
+    "lightgbm>=4.7.0",
+    "scikit-learn>=1.9.0",
 ]
 
 [project.optional-dependencies]

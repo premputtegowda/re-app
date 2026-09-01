@@ -92,6 +92,12 @@ sources:
           (100/20 Mbps and 1 Gbps). Manual download required (Akamai WAF
           blocks programmatic access). Fiber @ 1 Gbps = remote-work
           attractiveness leading indicator.
+      - name: fred_macro
+        description: >
+          FRED national macro time series (10yr Tsy, Fed Funds, CPI,
+          unemployment, yield curve, 30yr mortgage). Long format:
+          (observation_date, series_id, value). NOT fips-keyed — national
+          data. Sampled at year-end for annual regime classification.
 
   - name: backtest
     description: >

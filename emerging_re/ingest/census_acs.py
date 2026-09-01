@@ -61,6 +61,19 @@ LATEST_VINTAGE = 2024
 # Approximate release dates for bitemporal as_of correctness. ACS 5-year
 # typically publishes in December.
 VINTAGE_RELEASE_DATES: dict[int, date] = {
+    # Older vintages added 2026-09-01 to extend ACS coverage back to 2008
+    # period_end (vintage 2010 = 2006-2010 rolling, midpoint 2008-12-31).
+    # Enables ML training window back to 2008 cohorts with observed 36mo
+    # ACS median-gross-rent forward targets.
+    2010: date(2011, 12, 8),
+    2011: date(2012, 12, 6),
+    2012: date(2013, 12, 17),
+    2013: date(2014, 12, 4),
+    2014: date(2015, 12, 3),
+    2015: date(2016, 12, 8),
+    2016: date(2017, 12, 7),
+    2017: date(2018, 12, 6),
+    2018: date(2019, 12, 19),
     2019: date(2020, 12, 10),
     2020: date(2022, 3, 17),   # 2020 vintage delayed by pandemic
     2021: date(2022, 12, 8),

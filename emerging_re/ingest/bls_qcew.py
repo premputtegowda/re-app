@@ -92,9 +92,16 @@ COLUMNS_TO_READ = [
 
 # Aggregation levels + ownership codes we keep after filtering.
 # (agglvl, own) → semantic label (used in logging + provenance).
+#
+# 2026-09-01 expansion: added federal/state/local supersector slices to
+# enable anchor-institution detection (military bases → federal, state
+# universities → state, VA hospitals → federal, public schools → local).
 KEPT_SLICES: dict[tuple[int, int], str] = {
     (70, 0): "county_total_all_ownership",
     (74, 5): "county_supersector_private",
+    (74, 1): "county_supersector_federal",   # military bases, federal agencies, VA
+    (74, 2): "county_supersector_state",     # state universities, state agencies
+    (74, 3): "county_supersector_local",     # public schools, county govt
 }
 
 DEFAULT_START_YEAR = 2000
@@ -254,23 +261,23 @@ def _normalize_and_partition(
     ]
     clean = clean[keep_cols]
 
-    # Dedup key includes industry_code + agglvl_code because a single county
-    # has multiple rows (one for the county total, many for supersectors).
-    dedup_key = ["fips", "period_end_date", "agglvl_code", "industry_code"]
+    # Dedup key: (fips, period, agglvl, own, industry). Includes own_code
+    # so federal/state/local/private supersector rows stay distinct.
+    # (2026-09-01: fixed — previously omitted own_code and silently merged
+    # ownership series after we added multi-ownership loading.)
+    dedup_key = ["fips", "period_end_date", "agglvl_code", "own_code", "industry_code"]
     dupes = clean.duplicated(subset=dedup_key).sum()
     if dupes:
         # FIPS remap collisions: two source counties merged into one under
         # 2020 codes (e.g. Bedford VA). Sum employment/wages/estabs; take
-        # first for remap_flag. Same rationale as census_bps.
+        # first for remap_flag.
         logger.warning("Aggregating %d dedup-key duplicates from FIPS remaps", dupes)
         agg_map = {
-            "own_code": "first",
             "annual_avg_estabs": "sum",
             "annual_avg_emplvl": "sum",
             "total_annual_wages": "sum",
             # avg wkly wage and avg annual pay are per-employee — recompute
-            # after summing wages and employment; safer than "mean" which
-            # weights by row count not employee count.
+            # after summing wages and employment.
             "annual_avg_wkly_wage": "mean",
             "avg_annual_pay": "mean",
             "_fips_remap_flag": "first",

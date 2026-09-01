@@ -66,6 +66,18 @@ _ALL_FEATURES: tuple[FeatureSpec, ...] = (
     FeatureSpec("age_20_34_share_yoy_chg",           "tier1_demand",   +1),
     FeatureSpec("foreign_born_share_yoy_chg",        "tier1_demand",   +1),
     FeatureSpec("mf_permit_ratio_ts",                "tier1_demand",   -1),
+    # v20 mean-reversion features TESTED + REMOVED (2026-09-01). Added to
+    # address 2022 cohort miss (Vermilion IL, Broome NY etc.). Barely
+    # moved 2022 in-sample and OOF ablation on TRAIN (<=2018) confirmed
+    # avg_delta ~= 0 for zori_5yr_cagr_deficit and slightly positive for
+    # hpi_5yr_cagr_deficit — dropping them doesn't hurt or slightly helps.
+    # Kept int_rent_catchup.sql as a build artifact; nothing scores it.
+    # v19 anchor-institution features TESTED + REVERTED (2026-09-01).
+    # Diagnostic showed +3.9 pp ZORI 5y Q1-Q5 spread but composite
+    # Spearman regressed −0.01 across all targets when added. Same
+    # pattern as sector_concentration: raw-group means don't translate
+    # to composite ranking improvement. Kept as DISPLAY columns in
+    # mart_mf_scored for manual filtering (e.g., "buy tourism markets").
     # Tier 4 — trailing momentum
     FeatureSpec("hpi_yoy",                           "tier4_momentum", +1),
     FeatureSpec("zori_yoy",                          "tier4_momentum", +1),
@@ -105,18 +117,19 @@ HPI_MAX_FEATURES = _subset(
 )
 
 ZORI_MAX_FEATURES = _subset(
+    # v21 OOF-pruned list (2026-09-01). Trained on TRAIN=<=2018-12-31.
+    # These 4 are the only features where LOO drop_delta < 0 avg over ZORI
+    # 24mo + 36mo targets AFTER catch-up features were removed from the
+    # candidate pool. Prior v18-A list carried 11 additional features that
+    # OOF ablation ranked as noise. hpi_yoy was borderline in the initial
+    # OOF run and shifted to slightly positive after catch-up removal —
+    # empirically it hurt 2022+ ZORI predictions by ~+0.25 Spearman and
+    # ~+3.6 pp Q1-Q5 spread. HPI momentum led rent momentum 2019-2020
+    # then decoupled: Sunbelt price rippers went flat on rent in 2022+.
+    # Thematically cleaner too — a pure ZORI-max shouldn't use price mom.
     "domesticmig_per_1000",
     "domesticmig_accel_3yr",
-    "cap_rate_proxy",
-    "irs_income_gap",
-    "irs_income_gap_pct",
-    "fmr_2br_cagr_3yr_vs_state_pp",
-    "vt_vacancy_change_3yr",
-    "vt_vacancy_change_5yr",
-    "age_20_34_share_yoy_chg",
-    "foreign_born_share_yoy_chg",
     "mf_permit_ratio_ts",
-    "hpi_yoy",
     "zori_yoy",
 )
 

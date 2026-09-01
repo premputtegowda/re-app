@@ -359,6 +359,37 @@ with_mf_permit_trend as (
         on mpt.fips = ct.fips and mpt.period_end_date = ct.period_end_date
 ),
 
+-- v19 candidates (2026-09-01): anchor-institution features. Backtest
+-- showed anchor_stability_score → ZORI 5y Q1-Q5 spread -3.9 pp (high
+-- anchor wins on rent). Tourism markets +6 pp premium. Adding to test.
+with_anchor as (
+    select
+        mpt.*,
+        ai.anchor_stability_score,
+        ai.tourism_share,
+        ai.edu_share as edu_share,
+        ai.healthcare_share,
+        ai.federal_gov_share,
+        ai.anchor_type
+    from with_mf_permit_trend mpt
+    left join {{ ref('int_anchor_institutions') }} ai
+        on ai.fips = mpt.fips and ai.period_end_date = mpt.period_end_date
+),
+
+-- v20 candidates (2026-09-01): rent/price catch-up features. Mean-reversion
+-- signal — negative deficit = county underperformed national avg → catch-up
+-- candidate. Complements momentum-heavy composite; test if it fixes the
+-- 2022 cohort where actual winners were catch-up markets we missed.
+with_catchup as (
+    select
+        a.*,
+        rc.zori_5yr_cagr_deficit,
+        rc.hpi_5yr_cagr_deficit
+    from with_anchor a
+    left join {{ ref('int_rent_catchup') }} rc
+        on rc.fips = a.fips and rc.period_end_date = a.period_end_date
+),
+
 -- Disqualifiers
 with_disq as (
     select
@@ -369,7 +400,7 @@ with_disq as (
         d.hpi_trailing_24mo,
         d.disq_price_ran_25pct,
         d.any_disqualifier
-    from with_mf_permit_trend r
+    from with_catchup r
     left join {{ ref('int_disqualifiers') }} d
         on d.fips = r.fips and d.period_end_date = r.period_end_date
 ),
