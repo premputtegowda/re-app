@@ -49,6 +49,8 @@ REALIZED_CAP_ENTRY_COL = "target_cap_entry"             # cap rate at cohort yea
 REALIZED_CAP_EXIT_COL = "target_cap_exit"               # cap rate at cohort year + horizon
 REALIZED_RETURN_COL_ZORI36 = "zori_forward_return_36mo" # ZORI 36mo observable through cohort 2022
 REALIZED_RETURN_COL_ZORI24 = "zori_forward_return_24mo" # ZORI 24mo observable through cohort 2023
+REALIZED_TOTAL_ZORI36_COL  = "total_return_zori36_36mo" # ZORI-based composite (rent × cap Δ)
+REALIZED_TOTAL_ZORI24_COL  = "total_return_zori24_24mo" # ZORI 24mo × cap Δ (24mo horizon)
 HORIZON_YEARS = 3
 
 WINNER_TOP_PCT = 0.10  # top 10% per cohort year
@@ -83,6 +85,8 @@ NON_FEATURE_COLS = {
     REALIZED_RETURN_COL_TOTAL, TARGET_COL_TOTAL_RETURN,
     REALIZED_CAP_ENTRY_COL, REALIZED_CAP_EXIT_COL,
     REALIZED_RETURN_COL_ZORI36, REALIZED_RETURN_COL_ZORI24,
+    REALIZED_TOTAL_ZORI36_COL, REALIZED_TOTAL_ZORI24_COL,
+    "cap_rate_entry", "cap_rate_exit", "cap_rate_exit_2yr",
     # MF market-size context — display-only, not for similarity matching.
     "mf_units_5plus", "mf_bldgs_est", "mf_units_10_19",
     "year",
@@ -480,7 +484,66 @@ def walk_forward(
         else:
             test_z["cap_rate_exit"] = np.nan
 
+        # Also attach exit cap at Y+2 (for the ZORI 24mo composite total return).
+        exit_year_2yr = Y + 2
+        exit_2yr_panel = panel_raw[panel_raw["year"] == exit_year_2yr]
+        if not exit_2yr_panel.empty:
+            exit_cap_2yr = exit_2yr_panel[["fips", "cap_rate_proxy"]].rename(
+                columns={"cap_rate_proxy": "cap_rate_exit_2yr"}
+            )
+            test_z = test_z.merge(exit_cap_2yr, on="fips", how="left")
+        else:
+            test_z["cap_rate_exit_2yr"] = np.nan
+
+        # Compute ZORI-based composite total return: (1 + ZORI_growth) × (cap_entry / cap_exit) - 1
+        # Uses ACS-derived cap change (same for all rent measures — cap is a valuation ratio).
+        # 36mo version:
+        test_z[REALIZED_TOTAL_ZORI36_COL] = (
+            (1 + test_z[REALIZED_RETURN_COL_ZORI36])
+            * (test_z["cap_rate_entry"] / test_z["cap_rate_exit"]) - 1
+        )
+        # 24mo version:
+        test_z[REALIZED_TOTAL_ZORI24_COL] = (
+            (1 + test_z[REALIZED_RETURN_COL_ZORI24])
+            * (test_z["cap_rate_entry"] / test_z["cap_rate_exit_2yr"]) - 1
+        )
+
         top5 = pick_top_n_with_state_cap(test_z, "analog_score", n=5, max_per_state=2)
+
+        # ── In-shortlist tie-breaker composite ──────────────────────────
+        # Rerank the top-5 by a decision-support composite (not replacing
+        # cosine — augmenting it). Signals within the top-5:
+        #   0.50 × cap_rate_entry percentile      (higher yield = better)
+        #   0.30 × zori_yoy percentile           (rent momentum trajectory)
+        #   0.20 × similarity_score percentile   (residual conviction from cosine)
+        # All percentiles computed WITHIN the top-5 (not universe) — this is
+        # a within-shortlist ranker, not a replacement for the primary model.
+        if not top5.empty:
+            top5 = top5.copy()
+            top5["_sim_rank"] = range(1, len(top5) + 1)  # preserve original order
+            # zori_yoy comes from mart_county_features (already in test_z / top5 if present)
+            for col in ["cap_rate_entry", "zori_yoy", "analog_score"]:
+                if col not in top5.columns:
+                    top5[col] = np.nan
+            def _rank_pct(series):
+                # percentile within top-5. NaN → 0.5 (neutral)
+                vals = series.astype(float)
+                if vals.notna().sum() == 0:
+                    return pd.Series([0.5] * len(vals), index=vals.index)
+                ranked = vals.rank(pct=True, na_option="bottom")
+                return ranked.fillna(0.5)
+            cap_pct  = _rank_pct(top5["cap_rate_entry"])
+            rent_pct = _rank_pct(top5["zori_yoy"])
+            sim_pct  = _rank_pct(top5["analog_score"])
+            top5["tie_breaker_score"] = 0.50 * cap_pct + 0.30 * rent_pct + 0.20 * sim_pct
+            top5["tb_cap_pct"]  = cap_pct
+            top5["tb_rent_pct"] = rent_pct
+            top5["tb_sim_pct"]  = sim_pct
+            # Rerank: highest tie-breaker score = new #1
+            top5 = top5.sort_values("tie_breaker_score", ascending=False).reset_index(drop=True)
+            top5["_tb_rank"] = range(1, len(top5) + 1)
+            # Restore original ordering by _sim_rank so display still shows model's picks in order
+            top5 = top5.sort_values("_sim_rank").reset_index(drop=True)
 
         # Universe means (universe = same filtered diverse-tertiary panel at year Y).
         def _mean(col: str) -> float:
@@ -602,9 +665,9 @@ def print_report(results: list[StepResult], panel_raw: pd.DataFrame | None = Non
             mf_units_str = f"{int(mf_units):>6,}" if pd.notna(mf_units) else "   n/a"
             mf_bldgs_str = f"{int(mf_bldgs):>4,}" if pd.notna(mf_bldgs) else " n/a"
             mf_10_19_str = f"{int(mf_10_19):>5,}" if pd.notna(mf_10_19) else "  n/a"
-            print(f"  #{i}  {row['county_name']:<22} {row['state_name']:<16} "
-                  f"pop={int(row['pop_latest']):>7,}   sim={row['analog_score']:.4f}   "
-                  f"ACS36={_rf(acs_ret)} ({_rfa(acs_annual)})  ZORI36={_rf(zori36_ret)} ({_rfa(zori36_annual)})  ZORI24={_rf(zori24_ret)} ({_rfa(zori24_annual)})")
+            tb_rank = row.get("_tb_rank", None)
+            tb_score = row.get("tie_breaker_score", None)
+            tb_str = f"  [TB #{int(tb_rank)}, score={tb_score:.3f}]" if pd.notna(tb_rank) else ""
             # Cap rate — prefer the target-source cap values (same-source as
             # rent for consistency), fall back to mart panel cap_rate_proxy
             # (which is PIT-correct as of the scoring date).
@@ -614,6 +677,22 @@ def print_report(results: list[StepResult], panel_raw: pd.DataFrame | None = Non
                 cap_entry = row.get("cap_rate_entry", float("nan"))
             if pd.isna(cap_exit):
                 cap_exit = row.get("cap_rate_exit", float("nan"))
+            # Compact inline cap summary for the main pick line.
+            if pd.notna(cap_entry) and pd.notna(cap_exit):
+                inline_cap = f"cap {cap_entry*100:4.2f}%→{cap_exit*100:4.2f}% ({(cap_exit-cap_entry)*10000:+4.0f}bps)"
+            elif pd.notna(cap_entry):
+                inline_cap = f"cap {cap_entry*100:4.2f}% (exit n/a)      "
+            else:
+                inline_cap = "cap n/a                            "
+            # ZORI-based total returns (rent × cap compression) — separate from ACS total return
+            zori36_total = row.get(REALIZED_TOTAL_ZORI36_COL, float("nan"))
+            zori24_total = row.get(REALIZED_TOTAL_ZORI24_COL, float("nan"))
+            zori36_total_annual = _annualize(zori36_total, 3)
+            zori24_total_annual = _annualize(zori24_total, 2)
+            print(f"  #{i}{tb_str}  {row['county_name']:<22} {row['state_name']:<16} "
+                  f"pop={int(row['pop_latest']):>7,}   sim={row['analog_score']:.4f}   {inline_cap}   "
+                  f"ACS36={_rf(acs_ret)} ({_rfa(acs_annual)})  ZORI36={_rf(zori36_ret)} ({_rfa(zori36_annual)})  ZORI24={_rf(zori24_ret)} ({_rfa(zori24_annual)})  "
+                  f"TR-ZORI36={_rf(zori36_total)} ({_rfa(zori36_total_annual)})  TR-ZORI24={_rf(zori24_total)} ({_rfa(zori24_total_annual)})")
             def _cap(v):
                 return f"{v*100:5.2f}%" if pd.notna(v) else "  n/a"
             if pd.notna(cap_entry) and pd.notna(cap_exit):
@@ -661,6 +740,68 @@ def print_report(results: list[StepResult], panel_raw: pd.DataFrame | None = Non
             continue
         sdf[c] = sdf[c].astype(float).round(2)
     print(sdf.to_string(index=False))
+
+    # ── Tie-breaker validation: does TB #1 beat cosine-similarity #1? ──
+    print("\n" + "=" * 130)
+    print("TIE-BREAKER VALIDATION — did the tie-breaker composite pick a better #1 than cosine similarity alone?")
+    print("=" * 130)
+    print("For each cohort, compare the realized return of the model's SIMILARITY #1 vs the TIE-BREAKER #1 pick.")
+    print("Also show BEST-of-5 for reference (perfect hindsight ceiling).")
+    print()
+    tb_rows = []
+    for r in results:
+        if r.top5.empty:
+            continue
+        # Pick the return metric with best observability
+        for ret_col, label, horizon in (
+            (REALIZED_RETURN_COL_TOTAL,  "TOTAL 36mo", 3),
+            (REALIZED_RETURN_COL_ACS,    "ACS 36mo",   3),
+            (REALIZED_RETURN_COL_ZORI36, "ZORI 36mo",  3),
+            (REALIZED_RETURN_COL_ZORI24, "ZORI 24mo",  2),
+        ):
+            if ret_col not in r.top5.columns:
+                continue
+            picks_with_ret = r.top5.dropna(subset=[ret_col])
+            if picks_with_ret.empty:
+                continue
+            # Cosine #1 (top5 is currently ordered by _sim_rank)
+            sim1 = r.top5.sort_values("_sim_rank").iloc[0]
+            sim1_ret = sim1.get(ret_col, float("nan"))
+            # Tie-breaker #1
+            tb1 = r.top5.sort_values("_tb_rank").iloc[0]
+            tb1_ret = tb1.get(ret_col, float("nan"))
+            # Best-of-5 (hindsight)
+            best5_ret = picks_with_ret[ret_col].max()
+            best5_row = picks_with_ret.loc[picks_with_ret[ret_col].idxmax()]
+            tb_rows.append({
+                "year": r.test_year,
+                "metric": label,
+                "sim_#1_pick": f"{sim1['county_name']}, {sim1['state_name']}",
+                "sim_#1_ret_pct": sim1_ret * 100 if pd.notna(sim1_ret) else None,
+                "tb_#1_pick": f"{tb1['county_name']}, {tb1['state_name']}",
+                "tb_#1_ret_pct": tb1_ret * 100 if pd.notna(tb1_ret) else None,
+                "best_pick": f"{best5_row['county_name']}, {best5_row['state_name']}",
+                "best_ret_pct": best5_ret * 100 if pd.notna(best5_ret) else None,
+                "tb_lift_pp": (tb1_ret - sim1_ret) * 100 if pd.notna(tb1_ret) and pd.notna(sim1_ret) else None,
+            })
+            break  # take first observable metric only
+
+    tbdf = pd.DataFrame(tb_rows)
+    if not tbdf.empty:
+        for c in ("sim_#1_ret_pct", "tb_#1_ret_pct", "best_ret_pct", "tb_lift_pp"):
+            tbdf[c] = tbdf[c].astype(float).round(2)
+        print(tbdf.to_string(index=False))
+        # Aggregate: does TB beat sim on average?
+        agg = tbdf.dropna(subset=["tb_lift_pp"])
+        if not agg.empty:
+            n = len(agg)
+            wins = (agg["tb_lift_pp"] > 0).sum()
+            losses = (agg["tb_lift_pp"] < 0).sum()
+            ties = n - wins - losses
+            avg_lift = agg["tb_lift_pp"].mean()
+            print(f"\nAggregate over {n} observable cohorts:")
+            print(f"  TB beat SIM: {wins}   TB lost to SIM: {losses}   ties: {ties}")
+            print(f"  Avg lift (TB #1 return − SIM #1 return): {avg_lift:+.2f} pp")
 
 
 def main() -> None:

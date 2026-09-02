@@ -200,12 +200,19 @@ with_unemployment as (
 -- 2026-09-02 rewrite of int_mf_features — grain is now (fips, period_end_date)
 -- with as_of-aware ACS + FMR joins. Match on both keys so scoring at each
 -- date uses only data that was public at that date.
+--
+-- v6.1 (2026-09-03): also expose mf_cap_rate_estimated, an MF-adjusted cap
+-- rate estimate (2BR FMR × 12 / home_value + 1.5% MF premium) that better
+-- reflects small-mid MF economics than the SFR-biased cap_rate_proxy.
+-- Complementary to cap_rate_proxy — both flow into feature matrix for the
+-- analog matching to weight as appropriate.
 with_mf as (
     select
         a.*,
         mf.renter_share,
         mf.mf_permit_ratio,
-        mf.rental_vacancy_change_3yr
+        mf.rental_vacancy_change_3yr,
+        mf.mf_cap_rate_estimated
     from with_unemployment a
     left join {{ ref('int_mf_features') }} mf
         on mf.fips = a.fips and mf.period_end_date = a.period_end_date
