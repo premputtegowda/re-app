@@ -60,8 +60,11 @@ trailing_returns as (
 ),
 
 mf_context as (
+    -- int_mf_features is now (fips, period_end_date) grain after PIT rewrite.
+    -- This screener is a current-state view — take latest period per fips.
     select fips, mf_cap_rate_estimated, rental_vacancy_rate, renter_share
     from {{ ref('int_mf_features') }}
+    qualify row_number() over (partition by fips order by period_end_date desc) = 1
 )
 
 select

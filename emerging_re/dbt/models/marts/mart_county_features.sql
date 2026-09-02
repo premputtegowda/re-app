@@ -196,7 +196,10 @@ with_unemployment as (
     ) un on true
 ),
 
--- v6 additions (2026-08-29): MF-oriented features
+-- v6 additions (2026-08-29): MF-oriented features. PIT-correct after
+-- 2026-09-02 rewrite of int_mf_features — grain is now (fips, period_end_date)
+-- with as_of-aware ACS + FMR joins. Match on both keys so scoring at each
+-- date uses only data that was public at that date.
 with_mf as (
     select
         a.*,
@@ -204,7 +207,8 @@ with_mf as (
         mf.mf_permit_ratio,
         mf.rental_vacancy_change_3yr
     from with_unemployment a
-    left join {{ ref('int_mf_features') }} mf using (fips)
+    left join {{ ref('int_mf_features') }} mf
+        on mf.fips = a.fips and mf.period_end_date = a.period_end_date
 ),
 
 -- v8 candidates (2026-08-31): IRS SOI migration features. IRS is annual

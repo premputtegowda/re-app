@@ -12,8 +12,13 @@ Similarity: cosine between z-scored feature vectors (z-scored within
             each cohort so features are relative to that year's universe).
 Aggregation: for each candidate, score = mean of top-K similarities to
              historical winners. K=5 default.
-Walk-forward: for test year Y, use only winners from cohorts <= Y-3
-              (need observed forward returns for training).
+Walk-forward: EXPANDING window. At each test year Y, train on all prior
+              cohort years [first_panel_year, Y-1] that have observed targets.
+              Training pool grows by 1 each iteration until it hits the
+              observability cap (latest cohort year with observed ACS 36mo
+              target), then stays frozen for later test years. Minimum
+              MIN_TRAIN_YEARS = 5 cohorts required or the iteration is
+              skipped.
 
 State cap: max 2 per state in top-5 (same as ml_walk_forward).
 
@@ -45,12 +50,20 @@ HORIZON_YEARS = 3
 WINNER_TOP_PCT = 0.10  # top 10% per cohort year
 TOP_K_ANALOGS = 5      # aggregate similarity: mean of top-K winner matches
 DIVERSITY_HHI_MAX = 0.10  # filter to diversified employment (drops top ~13% concentrated)
+MIN_TRAIN_YEARS = 5    # walk-forward: skip test years with fewer training cohorts available
 
 # Reuse same feature exclusions as ml_walk_forward.
 LEAKY_FEATURES = {
-    "rental_vacancy_rate", "rent_to_income_ratio", "cap_rate_proxy",
-    "renter_share", "mf_permit_ratio", "rental_vacancy_change_3yr",
-    "pcpi_cagr_5yr", "n_supersectors_reporting",
+    # As of 2026-09-02 PIT rewrite: int_acs_features + int_mf_features +
+    # int_mf_inventory now emit one row per (fips, scoring_period) with
+    # as_of-aware source lookups. The following features that were previously
+    # leaky-latest are now PIT-correct and safe to include as ML/analog inputs:
+    #   - rental_vacancy_rate, rent_to_income_ratio, cap_rate_proxy (int_acs_features)
+    #   - renter_share, mf_permit_ratio, rental_vacancy_change_3yr (int_mf_features)
+    #
+    # Remaining exclusions — these weren't rebuilt in the PIT pass, so treat as leaky:
+    "pcpi_cagr_5yr",              # int_bea_income — still latest-per-fips
+    "n_supersectors_reporting",   # int_employment_diversity — likely latest-per-fips
 }
 NON_FEATURE_COLS = {
     "fips", "period_end_date", "county_name", "state_name", "pop_latest",
@@ -64,6 +77,8 @@ NON_FEATURE_COLS = {
     # ACS-derived target cols we add (must not be features).
     REALIZED_RETURN_COL_ACS, TARGET_COL,
     REALIZED_RETURN_COL_ZORI36, REALIZED_RETURN_COL_ZORI24,
+    # MF market-size context — display-only, not for similarity matching.
+    "mf_units_5plus", "mf_bldgs_est", "mf_units_10_19",
     "year",
 }
 CATEGORICAL_COLS = {"anchor_type", "macro_regime"}
@@ -99,12 +114,59 @@ def load_tertiary_panel() -> pd.DataFrame:
     return df
 
 
+def load_mf_context() -> pd.DataFrame:
+    """MF market-size context per county from ACS 1-year (latest vintage).
+
+    Returns per fips:
+      - mf_units_5plus: total housing units in buildings of 5+ units (5-9, 10-19, 20-49, 50+)
+      - mf_bldgs_est: estimated MF building count = sum(units / bucket midpoint)
+                     midpoints: 7 (5-9), 14.5 (10-19), 34.5 (20-49), 75 (50+)
+      - mf_units_10_19: units in the 10-19 bucket alone (primary MF investor target size)
+
+    ACS 1-year covers all counties with pop >= 65K, which is our full tertiary
+    universe. Uses latest as_of per fips (a snapshot of the most recent vintage
+    published for that county — same "latest" convention as int_acs_features).
+    """
+    con = duckdb.connect(str(WAREHOUSE_PATH), read_only=True)
+    df = con.execute("""
+        SELECT fips,
+               units_in_5_to_9_bldgs,
+               units_in_10_to_19_bldgs,
+               units_in_20_to_49_bldgs,
+               units_in_50_plus_bldgs
+        FROM main_staging.stg_census_acs_1yr
+        QUALIFY row_number() OVER (
+            PARTITION BY fips ORDER BY period_end_date DESC, as_of_date DESC
+        ) = 1
+    """).df()
+    for col in ["units_in_5_to_9_bldgs", "units_in_10_to_19_bldgs",
+                "units_in_20_to_49_bldgs", "units_in_50_plus_bldgs"]:
+        df[col] = df[col].fillna(0)
+    df["mf_units_5plus"] = (
+        df["units_in_5_to_9_bldgs"] + df["units_in_10_to_19_bldgs"]
+        + df["units_in_20_to_49_bldgs"] + df["units_in_50_plus_bldgs"]
+    )
+    df["mf_bldgs_est"] = (
+        df["units_in_5_to_9_bldgs"] / 7.0
+        + df["units_in_10_to_19_bldgs"] / 14.5
+        + df["units_in_20_to_49_bldgs"] / 34.5
+        + df["units_in_50_plus_bldgs"] / 75.0
+    )
+    df["mf_units_10_19"] = df["units_in_10_to_19_bldgs"]
+    return df[["fips", "mf_units_5plus", "mf_bldgs_est", "mf_units_10_19"]]
+
+
 def build_acs_target(horizon_years: int = 3) -> pd.DataFrame:
     """ACS median gross rent 36mo forward change, demeaned by NATIONAL mean.
 
-    Uses latest as_of per (fips, period_end_date). National demeaning uses
-    all counties in the ACS 5yr panel (not just tertiary) to match the
-    demeaning convention of target_zori_*_demeaned in the mart.
+    Uses latest as_of per (fips, period_end_date) as the "realized value" at
+    each period. Target is by definition forward-looking (measures what
+    eventually happens), so we use the most-revised ACS estimate — no PIT
+    filter needed on the target side. The PIT concern is on FEATURES, which
+    is handled by int_acs_features + int_mf_features (as of 2026-09-02).
+
+    National demeaning uses all counties in the ACS 5yr panel to match the
+    demeaning convention of target_zori_*_demeaned.
 
     Returns: (fips, period_end_date, acs_forward_return_36mo,
               target_acs_rent_36mo_demeaned)
@@ -222,21 +284,64 @@ def pick_top_n_with_state_cap(
     return pd.DataFrame(picked) if picked else pd.DataFrame()
 
 
+def build_walk_forward_schedule(
+    panel_z: pd.DataFrame,
+    test_years: list[int] | None,
+    min_train_years: int,
+) -> list[dict]:
+    """Expanding walk-forward: at each test year, train on all prior cohort
+    years that have observed targets. Training pool grows by 1 each iteration
+    until it hits the observability cap (latest cohort year with observed
+    ACS 36mo target), then stays frozen for later test years.
+
+    If `test_years` is None, auto-generate all test years from
+    (first_panel_year + min_train_years) through the last panel year.
+    """
+    obs_years = set(panel_z.dropna(subset=[TARGET_COL])["year"].unique().tolist())
+    all_years = sorted(panel_z["year"].unique().tolist())
+    if not all_years:
+        return []
+    first_year = int(all_years[0])
+    last_year = int(all_years[-1])
+
+    if test_years is None:
+        test_years = list(range(first_year + min_train_years, last_year + 1))
+
+    schedule: list[dict] = []
+    for Y in test_years:
+        train_years = [y for y in all_years if first_year <= y < Y and y in obs_years]
+        schedule.append({
+            "test_year": int(Y),
+            "train_years": train_years,
+            "n_train_years": len(train_years),
+        })
+    return schedule
+
+
 def walk_forward(
     panel_z: pd.DataFrame,
     panel_raw: pd.DataFrame,
     feature_cols: list[str],
-    test_years: list[int],
+    test_years: list[int] | None = None,
+    min_train_years: int = MIN_TRAIN_YEARS,
 ) -> list[StepResult]:
+    schedule = build_walk_forward_schedule(panel_z, test_years, min_train_years)
+    print(f"\nWalk-forward schedule ({len(schedule)} iterations, min_train_years={min_train_years}):")
+    for step in schedule:
+        n = step["n_train_years"]
+        marker = "  " if n >= min_train_years else "  SKIP "
+        train_span = f"{min(step['train_years'])}-{max(step['train_years'])}" if step["train_years"] else "(none)"
+        print(f"{marker}test={step['test_year']}   train_cohorts={n:2d}   span={train_span}")
+
     results: list[StepResult] = []
-    for Y in test_years:
-        train_years = [y for y in panel_z["year"].unique() if y <= Y - HORIZON_YEARS]
-        if not train_years:
-            print(f"  SKIP {Y}: no train years available")
+    for step in schedule:
+        Y = step["test_year"]
+        train_years = step["train_years"]
+        if len(train_years) < min_train_years:
             continue
         winners = identify_winners(panel_z, train_years)
         if winners.empty:
-            print(f"  SKIP {Y}: no winners identified in train {train_years}")
+            print(f"  SKIP {Y}: no winners identified in train cohorts")
             continue
 
         # Attach winner label (fips + year) for interpretability.
@@ -340,9 +445,16 @@ def print_report(results: list[StepResult]) -> None:
             zori24_ret = row.get(REALIZED_RETURN_COL_ZORI24, float("nan"))
             def _rf(v):
                 return f"{v*100:+6.2f}%" if pd.notna(v) else "  n/a "
+            mf_units = row.get("mf_units_5plus", float("nan"))
+            mf_bldgs = row.get("mf_bldgs_est", float("nan"))
+            mf_10_19 = row.get("mf_units_10_19", float("nan"))
+            mf_units_str = f"{int(mf_units):>6,}" if pd.notna(mf_units) else "   n/a"
+            mf_bldgs_str = f"{int(mf_bldgs):>4,}" if pd.notna(mf_bldgs) else " n/a"
+            mf_10_19_str = f"{int(mf_10_19):>5,}" if pd.notna(mf_10_19) else "  n/a"
             print(f"  #{i}  {row['county_name']:<22} {row['state_name']:<16} "
                   f"pop={int(row['pop_latest']):>7,}   sim={row['analog_score']:.4f}   "
                   f"ACS36={_rf(acs_ret)}  ZORI36={_rf(zori36_ret)}  ZORI24={_rf(zori24_ret)}")
+            print(f"      MF context: units_5plus={mf_units_str}  est_bldgs={mf_bldgs_str}  units_10-19={mf_10_19_str}")
             print(f"      top analogs: {row['top_analogs']}")
 
         summary_rows.append({
@@ -373,7 +485,14 @@ def print_report(results: list[StepResult]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--test-years", type=int, nargs="+", default=[2019, 2020, 2021, 2022, 2023])
+    parser.add_argument(
+        "--test-years", type=int, nargs="+", default=None,
+        help="Test cohort years (default: auto-generate expanding schedule from first panel year + min_train_years)",
+    )
+    parser.add_argument(
+        "--min-train-years", type=int, default=MIN_TRAIN_YEARS,
+        help=f"Minimum training cohorts required to run an iteration (default: {MIN_TRAIN_YEARS})",
+    )
     args = parser.parse_args()
 
     print("Loading tertiary panel (100-300K, Dec-31 cohorts)...")
@@ -388,13 +507,22 @@ def main() -> None:
     n_with_target = panel[TARGET_COL].notna().sum()
     print(f"  After merge: {n_with_target} panel rows have observed ACS 36mo target")
 
+    print("Loading MF market-size context (ACS 1-year, latest vintage per fips)...")
+    mf_ctx = load_mf_context()
+    panel = panel.merge(mf_ctx, on="fips", how="left")
+    n_with_mf = panel["mf_units_5plus"].notna().sum()
+    print(f"  {n_with_mf} panel rows have MF unit-count context ({len(mf_ctx)} fips in ACS 1yr)")
+
     print("Building feature matrix + z-scoring within cohort...")
     panel_fe, feature_cols = build_feature_matrix(panel)
     print(f"  {len(feature_cols)} features")
     panel_z = zscore_within_cohort(panel_fe, feature_cols)
 
-    print(f"Walk-forward analog search on test years: {args.test_years}")
-    results = walk_forward(panel_z, panel_fe, feature_cols, args.test_years)
+    results = walk_forward(
+        panel_z, panel_fe, feature_cols,
+        test_years=args.test_years,
+        min_train_years=args.min_train_years,
+    )
 
     print_report(results)
 

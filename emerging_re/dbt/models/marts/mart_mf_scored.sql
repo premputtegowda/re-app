@@ -254,7 +254,12 @@ base as (
         sp.nearest_tier1_distance_mi
     from {{ ref('mart_backtest_current') }} bc
     left join {{ ref('mart_county_context') }} cc using (fips)
-    left join {{ ref('int_mf_features') }} mf using (fips)
+    left join (
+        -- int_mf_features is now (fips, period_end_date) grain after PIT rewrite.
+        -- mart_mf_scored is a "current-state" view, so take latest period per fips.
+        select * from {{ ref('int_mf_features') }}
+        qualify row_number() over (partition by fips order by period_end_date desc) = 1
+    ) mf using (fips)
     left join div_latest dl using (fips)
     left join disq_latest dq using (fips)
     left join anchor_latest al using (fips)
@@ -264,7 +269,12 @@ base as (
     left join bea using (fips)
     left join irs_migration im using (fips)
     left join fema_risk fr using (fips)
-    left join {{ ref('int_mf_inventory') }} inv using (fips)
+    left join (
+        -- int_mf_inventory is now (fips, period_end_date) grain after PIT rewrite.
+        -- Current-state view — take latest period per fips.
+        select * from {{ ref('int_mf_inventory') }}
+        qualify row_number() over (partition by fips order by period_end_date desc) = 1
+    ) inv using (fips)
     left join pop_growth pg using (fips)
     left join {{ ref('mart_analog_ranking') }} anlg using (fips)
     left join {{ ref('mart_spillover_ranking') }} sp using (fips)
