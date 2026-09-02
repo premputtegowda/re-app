@@ -41,8 +41,12 @@ import pandas as pd
 
 WAREHOUSE_PATH = Path("/Users/premputtegowda/reps/reps-tracker/emerging_re/data/warehouse/emerging_re.duckdb")
 
-TARGET_COL = "target_acs_rent_36mo_demeaned"  # winner-identification target (2008-2019 observable)
+TARGET_COL = "target_acs_rent_36mo_demeaned"  # rent-only training target (backward compat)
+TARGET_COL_TOTAL_RETURN = "target_total_return_36mo_demeaned"  # composite: rent × cap change
 REALIZED_RETURN_COL_ACS = "acs_forward_return_36mo"     # ACS 36mo observable only through cohort 2019
+REALIZED_RETURN_COL_TOTAL = "total_return_36mo"         # composite realized return
+REALIZED_CAP_ENTRY_COL = "target_cap_entry"             # cap rate at cohort year (for target)
+REALIZED_CAP_EXIT_COL = "target_cap_exit"               # cap rate at cohort year + horizon
 REALIZED_RETURN_COL_ZORI36 = "zori_forward_return_36mo" # ZORI 36mo observable through cohort 2022
 REALIZED_RETURN_COL_ZORI24 = "zori_forward_return_24mo" # ZORI 24mo observable through cohort 2023
 HORIZON_YEARS = 3
@@ -75,7 +79,9 @@ NON_FEATURE_COLS = {
     "hpi_forward_return_60mo", "target_hpi_60mo_demeaned",
     "zori_forward_return_60mo", "target_zori_60mo_demeaned",
     # ACS-derived target cols we add (must not be features).
-    REALIZED_RETURN_COL_ACS, TARGET_COL,
+    REALIZED_RETURN_COL_ACS, TARGET_COL, "target_source",
+    REALIZED_RETURN_COL_TOTAL, TARGET_COL_TOTAL_RETURN,
+    REALIZED_CAP_ENTRY_COL, REALIZED_CAP_EXIT_COL,
     REALIZED_RETURN_COL_ZORI36, REALIZED_RETURN_COL_ZORI24,
     # MF market-size context — display-only, not for similarity matching.
     "mf_units_5plus", "mf_bldgs_est", "mf_units_10_19",
@@ -90,9 +96,10 @@ class StepResult:
     n_winners: int
     n_train_cohorts: int
     top5: pd.DataFrame  # with realized returns + matched winners
-    universe_mean_acs_36mo: float   # NaN if not observable
-    universe_mean_zori_36mo: float  # NaN if not observable
-    universe_mean_zori_24mo: float  # NaN if not observable
+    universe_mean_acs_36mo: float    # NaN if not observable
+    universe_mean_total_36mo: float  # composite total return (rent × cap)
+    universe_mean_zori_36mo: float   # NaN if not observable
+    universe_mean_zori_24mo: float   # NaN if not observable
 
 
 def load_tertiary_panel() -> pd.DataFrame:
@@ -159,48 +166,113 @@ def load_mf_context() -> pd.DataFrame:
 def build_acs_target(horizon_years: int = 3) -> pd.DataFrame:
     """ACS median gross rent 36mo forward change, demeaned by NATIONAL mean.
 
+    Hybrid source (2026-09-03): prefer ACS 1-year (calendar-year snapshot,
+    single-year precision) where available for the (fips, year) pair;
+    fall back to ACS 5-year (rolling window, smoothed) otherwise. ACS 1-year
+    is the more direct point-in-time measurement — a "2022 rent" value is
+    actual 2022 rent, not a 2020-2022 rolling average — but covers only
+    pop >= 65K counties and skips 2020 vintage (Census pandemic pause).
+    5-year fills those gaps.
+
     Uses latest as_of per (fips, period_end_date) as the "realized value" at
     each period. Target is by definition forward-looking (measures what
     eventually happens), so we use the most-revised ACS estimate — no PIT
     filter needed on the target side. The PIT concern is on FEATURES, which
     is handled by int_acs_features + int_mf_features (as of 2026-09-02).
 
-    National demeaning uses all counties in the ACS 5yr panel to match the
+    National demeaning uses all counties in the pooled ACS panel to match the
     demeaning convention of target_zori_*_demeaned.
 
     Returns: (fips, period_end_date, acs_forward_return_36mo,
-              target_acs_rent_36mo_demeaned)
+              target_acs_rent_36mo_demeaned, target_source)
+      target_source: '1yr' | '5yr' — provenance of the anchor value used
     """
     con = duckdb.connect(str(WAREHOUSE_PATH), read_only=True)
-    acs = con.execute("""
-        SELECT fips, period_end_date, median_gross_rent
-        FROM main_staging.stg_census_acs
-        WHERE median_gross_rent IS NOT NULL
+    # Now pulling BOTH rent and home_value so we can compute cap rate
+    # (cap_rate_proxy = 12 × rent / home_value) at entry and exit for the
+    # composite total-return target.
+    acs_1yr = con.execute("""
+        SELECT fips, period_end_date, median_gross_rent, median_home_value
+        FROM main_staging.stg_census_acs_1yr
+        WHERE median_gross_rent IS NOT NULL AND median_home_value IS NOT NULL AND median_home_value > 0
         QUALIFY row_number() OVER (
             PARTITION BY fips, period_end_date ORDER BY as_of_date DESC
         ) = 1
     """).df()
-    acs["period_end_date"] = pd.to_datetime(acs["period_end_date"])
-    acs["year"] = acs["period_end_date"].dt.year
+    acs_1yr["period_end_date"] = pd.to_datetime(acs_1yr["period_end_date"])
+    acs_1yr["year"] = acs_1yr["period_end_date"].dt.year
+    acs_1yr["source"] = "1yr"
+    acs_1yr["cap_rate"] = 12.0 * acs_1yr["median_gross_rent"] / acs_1yr["median_home_value"]
 
-    # Forward join: rent[year + horizon] onto rent[year].
-    forward = acs[["fips", "year", "median_gross_rent"]].rename(
-        columns={"median_gross_rent": "median_gross_rent_forward"}
-    )
-    forward["year"] = forward["year"] - horizon_years  # shift back for join
-    merged = acs.merge(forward, on=["fips", "year"], how="left")
-    merged[REALIZED_RETURN_COL_ACS] = (
-        merged["median_gross_rent_forward"] / merged["median_gross_rent"] - 1
-    )
+    acs_5yr = con.execute("""
+        SELECT fips, period_end_date, median_gross_rent, median_home_value
+        FROM main_staging.stg_census_acs
+        WHERE median_gross_rent IS NOT NULL AND median_home_value IS NOT NULL AND median_home_value > 0
+        QUALIFY row_number() OVER (
+            PARTITION BY fips, period_end_date ORDER BY as_of_date DESC
+        ) = 1
+    """).df()
+    acs_5yr["period_end_date"] = pd.to_datetime(acs_5yr["period_end_date"])
+    acs_5yr["year"] = acs_5yr["period_end_date"].dt.year
+    acs_5yr["source"] = "5yr"
+    acs_5yr["cap_rate"] = 12.0 * acs_5yr["median_gross_rent"] / acs_5yr["median_home_value"]
 
-    # Demean by NATIONAL mean per cohort year (across ALL counties with target).
-    year_mean = (
-        merged.dropna(subset=[REALIZED_RETURN_COL_ACS])
-        .groupby("year")[REALIZED_RETURN_COL_ACS].mean()
-    )
-    merged[TARGET_COL] = merged[REALIZED_RETURN_COL_ACS] - merged["year"].map(year_mean)
+    # For each source (1yr or 5yr), compute BOTH rent forward return and
+    # cap rate at entry+exit within the same source. INNER join ensures
+    # both endpoints exist for a valid (fips, year) target.
+    def _forward_return_within_source(src_df: pd.DataFrame) -> pd.DataFrame:
+        fwd = src_df[["fips", "year", "median_gross_rent", "cap_rate"]].rename(
+            columns={"median_gross_rent": "median_gross_rent_forward",
+                     "cap_rate": "cap_rate_forward"}
+        ).copy()
+        fwd["year"] = fwd["year"] - horizon_years
+        joined = src_df.merge(fwd, on=["fips", "year"], how="inner")
+        joined[REALIZED_RETURN_COL_ACS] = (
+            joined["median_gross_rent_forward"] / joined["median_gross_rent"] - 1
+        )
+        # Composite total return: (1 + rent_growth) × (cap_entry / cap_exit) - 1
+        # Same formula as V_end/V_start = (NOI_end/NOI_start) × (cap_start/cap_end).
+        joined[REALIZED_RETURN_COL_TOTAL] = (
+            (1 + joined[REALIZED_RETURN_COL_ACS])
+            * (joined["cap_rate"] / joined["cap_rate_forward"]) - 1
+        )
+        joined[REALIZED_CAP_ENTRY_COL] = joined["cap_rate"]
+        joined[REALIZED_CAP_EXIT_COL]  = joined["cap_rate_forward"]
+        return joined[[
+            "fips", "year", "period_end_date",
+            REALIZED_RETURN_COL_ACS, REALIZED_RETURN_COL_TOTAL,
+            REALIZED_CAP_ENTRY_COL, REALIZED_CAP_EXIT_COL,
+            "source",
+        ]]
 
-    return merged[["fips", "period_end_date", REALIZED_RETURN_COL_ACS, TARGET_COL]]
+    ret_1yr = _forward_return_within_source(acs_1yr)
+    ret_5yr = _forward_return_within_source(acs_5yr)
+
+    # Coalesce: prefer 1yr where the 1yr-consistent target is available,
+    # else use 5yr-consistent. Anti-join filter keeps 5yr rows only where
+    # 1yr is absent for (fips, year).
+    ret_5yr_fallback = ret_5yr.merge(
+        ret_1yr[["fips", "year"]].drop_duplicates(),
+        on=["fips", "year"], how="left", indicator=True
+    )
+    ret_5yr_fallback = ret_5yr_fallback[ret_5yr_fallback["_merge"] == "left_only"].drop(columns=["_merge"])
+    merged = pd.concat([ret_1yr, ret_5yr_fallback], ignore_index=True).sort_values(["fips", "year"])
+
+    # Demean each target by its NATIONAL mean per cohort year.
+    for col, target_col in [
+        (REALIZED_RETURN_COL_ACS,   TARGET_COL),
+        (REALIZED_RETURN_COL_TOTAL, TARGET_COL_TOTAL_RETURN),
+    ]:
+        year_mean = merged.dropna(subset=[col]).groupby("year")[col].mean()
+        merged[target_col] = merged[col] - merged["year"].map(year_mean)
+
+    return merged[[
+        "fips", "period_end_date",
+        REALIZED_RETURN_COL_ACS, TARGET_COL,
+        REALIZED_RETURN_COL_TOTAL, TARGET_COL_TOTAL_RETURN,
+        REALIZED_CAP_ENTRY_COL, REALIZED_CAP_EXIT_COL,
+        "source",
+    ]].rename(columns={"source": "target_source"})
 
 
 def build_feature_matrix(panel: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
@@ -240,15 +312,20 @@ def zscore_within_cohort(
     return out
 
 
-def identify_winners(panel: pd.DataFrame, train_years: list[int]) -> pd.DataFrame:
-    """Top-decile counties by target_zori_36mo_demeaned within each train year."""
-    train = panel[panel["year"].isin(train_years)].dropna(subset=[TARGET_COL]).copy()
+def identify_winners(panel: pd.DataFrame, train_years: list[int], target_col: str = TARGET_COL) -> pd.DataFrame:
+    """Top-decile counties by the specified target column within each train year.
+
+    target_col options:
+      - TARGET_COL (default): rent-only demeaned ACS 36mo growth
+      - TARGET_COL_TOTAL_RETURN: composite (rent × cap-rate compression) demeaned
+    """
+    train = panel[panel["year"].isin(train_years)].dropna(subset=[target_col]).copy()
     if train.empty:
         return train
     winners = []
     for year, sub in train.groupby("year"):
-        threshold = sub[TARGET_COL].quantile(1 - WINNER_TOP_PCT)
-        w = sub[sub[TARGET_COL] >= threshold].copy()
+        threshold = sub[target_col].quantile(1 - WINNER_TOP_PCT)
+        w = sub[sub[target_col] >= threshold].copy()
         winners.append(w)
     return pd.concat(winners, ignore_index=False) if winners else pd.DataFrame()
 
@@ -288,6 +365,7 @@ def build_walk_forward_schedule(
     panel_z: pd.DataFrame,
     test_years: list[int] | None,
     min_train_years: int,
+    target_col: str = TARGET_COL,
 ) -> list[dict]:
     """Expanding walk-forward: at each test year, train on all prior cohort
     years that have observed targets. Training pool grows by 1 each iteration
@@ -297,7 +375,7 @@ def build_walk_forward_schedule(
     If `test_years` is None, auto-generate all test years from
     (first_panel_year + min_train_years) through the last panel year.
     """
-    obs_years = set(panel_z.dropna(subset=[TARGET_COL])["year"].unique().tolist())
+    obs_years = set(panel_z.dropna(subset=[target_col])["year"].unique().tolist())
     all_years = sorted(panel_z["year"].unique().tolist())
     if not all_years:
         return []
@@ -324,9 +402,10 @@ def walk_forward(
     feature_cols: list[str],
     test_years: list[int] | None = None,
     min_train_years: int = MIN_TRAIN_YEARS,
+    target_col: str = TARGET_COL,
 ) -> list[StepResult]:
-    schedule = build_walk_forward_schedule(panel_z, test_years, min_train_years)
-    print(f"\nWalk-forward schedule ({len(schedule)} iterations, min_train_years={min_train_years}):")
+    schedule = build_walk_forward_schedule(panel_z, test_years, min_train_years, target_col=target_col)
+    print(f"\nWalk-forward schedule ({len(schedule)} iterations, min_train_years={min_train_years}, target={target_col}):")
     for step in schedule:
         n = step["n_train_years"]
         marker = "  " if n >= min_train_years else "  SKIP "
@@ -339,7 +418,7 @@ def walk_forward(
         train_years = step["train_years"]
         if len(train_years) < min_train_years:
             continue
-        winners = identify_winners(panel_z, train_years)
+        winners = identify_winners(panel_z, train_years, target_col=target_col)
         if winners.empty:
             print(f"  SKIP {Y}: no winners identified in train cohorts")
             continue
@@ -372,11 +451,34 @@ def walk_forward(
         ]
         test_z["top_analogs"] = matched_labels
 
-        # Merge realized returns from raw panel — ACS 36mo + ZORI 36mo + ZORI 24mo.
-        realized_cols = [REALIZED_RETURN_COL_ACS, REALIZED_RETURN_COL_ZORI36, REALIZED_RETURN_COL_ZORI24]
-        realized = panel_raw[panel_raw["year"] == Y][["fips", *realized_cols]]
-        drop_from_test = [c for c in realized_cols if c in test_z.columns]
+        # Merge realized returns from raw panel — ACS 36mo + total return + ZORI 36mo + ZORI 24mo.
+        # Also pull cap rate at entry/exit as computed in the target build (same
+        # source semantics as target — 1yr or 5yr-consistent).
+        realized_cols = [
+            REALIZED_RETURN_COL_ACS, REALIZED_RETURN_COL_TOTAL,
+            REALIZED_CAP_ENTRY_COL, REALIZED_CAP_EXIT_COL,
+            REALIZED_RETURN_COL_ZORI36, REALIZED_RETURN_COL_ZORI24,
+        ]
+        available_cols = [c for c in realized_cols if c in panel_raw.columns]
+        realized = panel_raw[panel_raw["year"] == Y][["fips", *available_cols]]
+        drop_from_test = [c for c in available_cols if c in test_z.columns]
         test_z = test_z.drop(columns=drop_from_test).merge(realized, on="fips", how="left")
+
+        # Attach entry + exit cap rate (cap_rate_proxy = ACS gross rent × 12 / home value).
+        # Entry cap = cohort year Y; exit cap = Y + HORIZON_YEARS if observable in panel.
+        entry_cap = panel_raw[panel_raw["year"] == Y][["fips", "cap_rate_proxy"]].rename(
+            columns={"cap_rate_proxy": "cap_rate_entry"}
+        )
+        test_z = test_z.merge(entry_cap, on="fips", how="left")
+        exit_year = Y + HORIZON_YEARS
+        exit_year_in_panel = panel_raw[panel_raw["year"] == exit_year]
+        if not exit_year_in_panel.empty:
+            exit_cap = exit_year_in_panel[["fips", "cap_rate_proxy"]].rename(
+                columns={"cap_rate_proxy": "cap_rate_exit"}
+            )
+            test_z = test_z.merge(exit_cap, on="fips", how="left")
+        else:
+            test_z["cap_rate_exit"] = np.nan
 
         top5 = pick_top_n_with_state_cap(test_z, "analog_score", n=5, max_per_state=2)
 
@@ -391,6 +493,7 @@ def walk_forward(
             n_train_cohorts=len(train_years),
             top5=top5,
             universe_mean_acs_36mo=_mean(REALIZED_RETURN_COL_ACS),
+            universe_mean_total_36mo=_mean(REALIZED_RETURN_COL_TOTAL),
             universe_mean_zori_36mo=_mean(REALIZED_RETURN_COL_ZORI36),
             universe_mean_zori_24mo=_mean(REALIZED_RETURN_COL_ZORI24),
         ))
@@ -417,6 +520,7 @@ def print_report(results: list[StepResult], panel_raw: pd.DataFrame | None = Non
             return float(s.mean()) if not s.empty else float("nan")
 
         top5_acs_mean = _top5_mean(REALIZED_RETURN_COL_ACS)
+        top5_total_mean = _top5_mean(REALIZED_RETURN_COL_TOTAL)
         top5_zori36_mean = _top5_mean(REALIZED_RETURN_COL_ZORI36)
         top5_zori24_mean = _top5_mean(REALIZED_RETURN_COL_ZORI24)
 
@@ -451,8 +555,8 @@ def print_report(results: list[StepResult], panel_raw: pd.DataFrame | None = Non
         # Universe universes recompute from raw panel (need per-fips cumulative
         # returns to annualize each then average). Pull from panel_raw via r.top5's
         # cohort year — we need the full universe returns for that year.
-        # Use a small helper closure capturing panel_raw and Y.
         top5_acs_annual   = _mean_of_annualized(r.top5[REALIZED_RETURN_COL_ACS]   if REALIZED_RETURN_COL_ACS   in r.top5.columns else None, 3)
+        top5_total_annual = _mean_of_annualized(r.top5[REALIZED_RETURN_COL_TOTAL] if REALIZED_RETURN_COL_TOTAL in r.top5.columns else None, 3)
         top5_zori36_annual = _mean_of_annualized(r.top5[REALIZED_RETURN_COL_ZORI36] if REALIZED_RETURN_COL_ZORI36 in r.top5.columns else None, 3)
         top5_zori24_annual = _mean_of_annualized(r.top5[REALIZED_RETURN_COL_ZORI24] if REALIZED_RETURN_COL_ZORI24 in r.top5.columns else None, 2)
 
@@ -460,16 +564,21 @@ def print_report(results: list[StepResult], panel_raw: pd.DataFrame | None = Non
         # series for that cohort year. Recompute via panel_raw filtered to the year.
         uni_year_df = panel_raw[panel_raw["year"] == r.test_year] if panel_raw is not None else None
         uni_acs_annual    = _mean_of_annualized(uni_year_df[REALIZED_RETURN_COL_ACS]   if uni_year_df is not None and REALIZED_RETURN_COL_ACS   in uni_year_df.columns else None, 3)
+        uni_total_annual  = _mean_of_annualized(uni_year_df[REALIZED_RETURN_COL_TOTAL] if uni_year_df is not None and REALIZED_RETURN_COL_TOTAL in uni_year_df.columns else None, 3)
         uni_zori36_annual = _mean_of_annualized(uni_year_df[REALIZED_RETURN_COL_ZORI36] if uni_year_df is not None and REALIZED_RETURN_COL_ZORI36 in uni_year_df.columns else None, 3)
         uni_zori24_annual = _mean_of_annualized(uni_year_df[REALIZED_RETURN_COL_ZORI24] if uni_year_df is not None and REALIZED_RETURN_COL_ZORI24 in uni_year_df.columns else None, 2)
+
+        total_edge = _edge(top5_total_mean, r.universe_mean_total_36mo)
         acs_edge_annual   = (top5_acs_annual - uni_acs_annual)     * 100 if pd.notna(top5_acs_annual)   and pd.notna(uni_acs_annual)   else float("nan")
+        total_edge_annual = (top5_total_annual - uni_total_annual) * 100 if pd.notna(top5_total_annual) and pd.notna(uni_total_annual) else float("nan")
         zori36_edge_annual = (top5_zori36_annual - uni_zori36_annual) * 100 if pd.notna(top5_zori36_annual) and pd.notna(uni_zori36_annual) else float("nan")
         zori24_edge_annual = (top5_zori24_annual - uni_zori24_annual) * 100 if pd.notna(top5_zori24_annual) and pd.notna(uni_zori24_annual) else float("nan")
 
         print(f"\n===== TEST YEAR {r.test_year}  (train cohorts={r.n_train_cohorts}, winners={r.n_winners}) =====")
-        print(f"  ACS 36mo:   top5={_fmt(top5_acs_mean*100)} ({_fmt(top5_acs_annual*100,   '%/yr')})   uni={_fmt(r.universe_mean_acs_36mo*100)} ({_fmt(uni_acs_annual*100,   '%/yr')})   edge={_fmt(acs_edge,   'pp')} ({_fmt(acs_edge_annual,   'pp/yr')})")
-        print(f"  ZORI 36mo:  top5={_fmt(top5_zori36_mean*100)} ({_fmt(top5_zori36_annual*100,'%/yr')})   uni={_fmt(r.universe_mean_zori_36mo*100)} ({_fmt(uni_zori36_annual*100,'%/yr')})   edge={_fmt(zori36_edge,'pp')} ({_fmt(zori36_edge_annual,'pp/yr')})")
-        print(f"  ZORI 24mo:  top5={_fmt(top5_zori24_mean*100)} ({_fmt(top5_zori24_annual*100,'%/yr')})   uni={_fmt(r.universe_mean_zori_24mo*100)} ({_fmt(uni_zori24_annual*100,'%/yr')})   edge={_fmt(zori24_edge,'pp')} ({_fmt(zori24_edge_annual,'pp/yr')})")
+        print(f"  ACS RENT 36mo:  top5={_fmt(top5_acs_mean*100)} ({_fmt(top5_acs_annual*100,'%/yr')})   uni={_fmt(r.universe_mean_acs_36mo*100)} ({_fmt(uni_acs_annual*100,'%/yr')})   edge={_fmt(acs_edge,'pp')} ({_fmt(acs_edge_annual,'pp/yr')})")
+        print(f"  TOTAL RETN 36mo:top5={_fmt(top5_total_mean*100)} ({_fmt(top5_total_annual*100,'%/yr')})   uni={_fmt(r.universe_mean_total_36mo*100)} ({_fmt(uni_total_annual*100,'%/yr')})   edge={_fmt(total_edge,'pp')} ({_fmt(total_edge_annual,'pp/yr')})")
+        print(f"  ZORI 36mo:      top5={_fmt(top5_zori36_mean*100)} ({_fmt(top5_zori36_annual*100,'%/yr')})   uni={_fmt(r.universe_mean_zori_36mo*100)} ({_fmt(uni_zori36_annual*100,'%/yr')})   edge={_fmt(zori36_edge,'pp')} ({_fmt(zori36_edge_annual,'pp/yr')})")
+        print(f"  ZORI 24mo:      top5={_fmt(top5_zori24_mean*100)} ({_fmt(top5_zori24_annual*100,'%/yr')})   uni={_fmt(r.universe_mean_zori_24mo*100)} ({_fmt(uni_zori24_annual*100,'%/yr')})   edge={_fmt(zori24_edge,'pp')} ({_fmt(zori24_edge_annual,'pp/yr')})")
 
         if r.top5.empty:
             print("  (no picks)")
@@ -496,7 +605,30 @@ def print_report(results: list[StepResult], panel_raw: pd.DataFrame | None = Non
             print(f"  #{i}  {row['county_name']:<22} {row['state_name']:<16} "
                   f"pop={int(row['pop_latest']):>7,}   sim={row['analog_score']:.4f}   "
                   f"ACS36={_rf(acs_ret)} ({_rfa(acs_annual)})  ZORI36={_rf(zori36_ret)} ({_rfa(zori36_annual)})  ZORI24={_rf(zori24_ret)} ({_rfa(zori24_annual)})")
+            # Cap rate — prefer the target-source cap values (same-source as
+            # rent for consistency), fall back to mart panel cap_rate_proxy
+            # (which is PIT-correct as of the scoring date).
+            cap_entry = row.get(REALIZED_CAP_ENTRY_COL, float("nan"))
+            cap_exit  = row.get(REALIZED_CAP_EXIT_COL,  float("nan"))
+            if pd.isna(cap_entry):
+                cap_entry = row.get("cap_rate_entry", float("nan"))
+            if pd.isna(cap_exit):
+                cap_exit = row.get("cap_rate_exit", float("nan"))
+            def _cap(v):
+                return f"{v*100:5.2f}%" if pd.notna(v) else "  n/a"
+            if pd.notna(cap_entry) and pd.notna(cap_exit):
+                delta_bps = (cap_exit - cap_entry) * 10000
+                cap_str = f"{_cap(cap_entry)} → {_cap(cap_exit)}  Δ={delta_bps:+.0f} bps"
+            elif pd.notna(cap_entry):
+                cap_str = f"{_cap(cap_entry)} → {_cap(cap_exit)}  Δ=n/a (exit not yet observable)"
+            else:
+                cap_str = "n/a"
+            # Total return: rent + cap-compression stacked.
+            total_ret = row.get(REALIZED_RETURN_COL_TOTAL, float("nan"))
+            total_annual = _annualize(total_ret, 3)
+            total_str = f"{total_ret*100:+6.2f}% ({total_annual*100:+5.2f}%/yr)" if pd.notna(total_ret) else "n/a"
             print(f"      MF context: units_5plus={mf_units_str}  est_bldgs={mf_bldgs_str}  units_10-19={mf_10_19_str}")
+            print(f"      Cap rate (ACS-proxy): {cap_str}   Total return 36mo: {total_str}")
             print(f"      top analogs: {row['top_analogs']}")
 
         summary_rows.append({
@@ -541,7 +673,13 @@ def main() -> None:
         "--min-train-years", type=int, default=MIN_TRAIN_YEARS,
         help=f"Minimum training cohorts required to run an iteration (default: {MIN_TRAIN_YEARS})",
     )
+    parser.add_argument(
+        "--target", choices=["rent", "total_return"], default="rent",
+        help="Training target: 'rent' = ACS 36mo demeaned rent growth; "
+             "'total_return' = composite (rent × cap compression) demeaned",
+    )
     args = parser.parse_args()
+    target_col = TARGET_COL if args.target == "rent" else TARGET_COL_TOTAL_RETURN
 
     print("Loading tertiary panel (100-300K, Dec-31 cohorts)...")
     panel = load_tertiary_panel()
@@ -570,6 +708,7 @@ def main() -> None:
         panel_z, panel_fe, feature_cols,
         test_years=args.test_years,
         min_train_years=args.min_train_years,
+        target_col=target_col,
     )
 
     print_report(results, panel_raw=panel_fe)

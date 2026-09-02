@@ -56,6 +56,19 @@ ACS_URL_TEMPLATE = "https://api.census.gov/data/{vintage}/acs/acs1"
 LATEST_VINTAGE = 2024
 
 VINTAGE_RELEASE_DATES: dict[int, date] = {
+    # Older vintages added 2026-09-03 to enable ACS 1-year based composite
+    # target (rent + cap rate at entry/exit). Extends training window back
+    # to cohort 2010 with observable 36mo forward via 1yr[Y+3]. Cohorts
+    # 2017 and 2020 remain unobservable due to Census skipping 1yr 2020.
+    2010: date(2011, 9, 22),
+    2011: date(2012, 9, 20),
+    2012: date(2013, 9, 19),
+    2013: date(2014, 9, 18),
+    2014: date(2015, 9, 17),
+    2015: date(2016, 9, 15),
+    2016: date(2017, 9, 14),
+    2017: date(2018, 9, 13),
+    2018: date(2019, 9, 26),
     2019: date(2020, 9, 17),
     # 2020 SKIPPED — Census did not publish standard 1yr for 2020
     2021: date(2022, 9, 15),
