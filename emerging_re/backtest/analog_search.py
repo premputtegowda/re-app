@@ -398,7 +398,7 @@ def walk_forward(
     return results
 
 
-def print_report(results: list[StepResult]) -> None:
+def print_report(results: list[StepResult], panel_raw: pd.DataFrame | None = None) -> None:
     print("\n" + "=" * 130)
     print("ANALOG-SEARCH TOP-5 — feature similarity to historical top-decile winners")
     print("=" * 130)
@@ -430,10 +430,46 @@ def print_report(results: list[StepResult]) -> None:
         def _fmt(v: float, unit: str = "%") -> str:
             return f"{v:+7.2f}{unit}" if pd.notna(v) else "   n/a  "
 
+        # Annualize a cumulative return over horizon years: (1+r)^(1/n) - 1.
+        # Returns nan for null or invalid (negative denom) inputs.
+        def _annualize(cumulative: float, horizon_years: int) -> float:
+            if not pd.notna(cumulative) or (1 + cumulative) <= 0:
+                return float("nan")
+            return (1 + cumulative) ** (1.0 / horizon_years) - 1
+
+        # Per-location CAGR then average — this matches the "typical single
+        # market CAGR" perspective an investor picking one market cares about.
+        # Portfolio-CAGR (annualize the aggregate cumulative) would be a
+        # different number appropriate for equal-weight portfolio view.
+        def _mean_of_annualized(cum_series, horizon_years: int) -> float:
+            if cum_series is None:
+                return float("nan")
+            cagrs = cum_series.dropna().apply(lambda r: _annualize(r, horizon_years))
+            cagrs = cagrs.dropna()
+            return float(cagrs.mean()) if not cagrs.empty else float("nan")
+
+        # Universe universes recompute from raw panel (need per-fips cumulative
+        # returns to annualize each then average). Pull from panel_raw via r.top5's
+        # cohort year — we need the full universe returns for that year.
+        # Use a small helper closure capturing panel_raw and Y.
+        top5_acs_annual   = _mean_of_annualized(r.top5[REALIZED_RETURN_COL_ACS]   if REALIZED_RETURN_COL_ACS   in r.top5.columns else None, 3)
+        top5_zori36_annual = _mean_of_annualized(r.top5[REALIZED_RETURN_COL_ZORI36] if REALIZED_RETURN_COL_ZORI36 in r.top5.columns else None, 3)
+        top5_zori24_annual = _mean_of_annualized(r.top5[REALIZED_RETURN_COL_ZORI24] if REALIZED_RETURN_COL_ZORI24 in r.top5.columns else None, 2)
+
+        # Universe per-location CAGR mean requires the full universe cumulative
+        # series for that cohort year. Recompute via panel_raw filtered to the year.
+        uni_year_df = panel_raw[panel_raw["year"] == r.test_year] if panel_raw is not None else None
+        uni_acs_annual    = _mean_of_annualized(uni_year_df[REALIZED_RETURN_COL_ACS]   if uni_year_df is not None and REALIZED_RETURN_COL_ACS   in uni_year_df.columns else None, 3)
+        uni_zori36_annual = _mean_of_annualized(uni_year_df[REALIZED_RETURN_COL_ZORI36] if uni_year_df is not None and REALIZED_RETURN_COL_ZORI36 in uni_year_df.columns else None, 3)
+        uni_zori24_annual = _mean_of_annualized(uni_year_df[REALIZED_RETURN_COL_ZORI24] if uni_year_df is not None and REALIZED_RETURN_COL_ZORI24 in uni_year_df.columns else None, 2)
+        acs_edge_annual   = (top5_acs_annual - uni_acs_annual)     * 100 if pd.notna(top5_acs_annual)   and pd.notna(uni_acs_annual)   else float("nan")
+        zori36_edge_annual = (top5_zori36_annual - uni_zori36_annual) * 100 if pd.notna(top5_zori36_annual) and pd.notna(uni_zori36_annual) else float("nan")
+        zori24_edge_annual = (top5_zori24_annual - uni_zori24_annual) * 100 if pd.notna(top5_zori24_annual) and pd.notna(uni_zori24_annual) else float("nan")
+
         print(f"\n===== TEST YEAR {r.test_year}  (train cohorts={r.n_train_cohorts}, winners={r.n_winners}) =====")
-        print(f"  ACS 36mo:   top5={_fmt(top5_acs_mean*100)}  uni={_fmt(r.universe_mean_acs_36mo*100)}  edge={_fmt(acs_edge, 'pp')}")
-        print(f"  ZORI 36mo:  top5={_fmt(top5_zori36_mean*100)}  uni={_fmt(r.universe_mean_zori_36mo*100)}  edge={_fmt(zori36_edge, 'pp')}")
-        print(f"  ZORI 24mo:  top5={_fmt(top5_zori24_mean*100)}  uni={_fmt(r.universe_mean_zori_24mo*100)}  edge={_fmt(zori24_edge, 'pp')}")
+        print(f"  ACS 36mo:   top5={_fmt(top5_acs_mean*100)} ({_fmt(top5_acs_annual*100,   '%/yr')})   uni={_fmt(r.universe_mean_acs_36mo*100)} ({_fmt(uni_acs_annual*100,   '%/yr')})   edge={_fmt(acs_edge,   'pp')} ({_fmt(acs_edge_annual,   'pp/yr')})")
+        print(f"  ZORI 36mo:  top5={_fmt(top5_zori36_mean*100)} ({_fmt(top5_zori36_annual*100,'%/yr')})   uni={_fmt(r.universe_mean_zori_36mo*100)} ({_fmt(uni_zori36_annual*100,'%/yr')})   edge={_fmt(zori36_edge,'pp')} ({_fmt(zori36_edge_annual,'pp/yr')})")
+        print(f"  ZORI 24mo:  top5={_fmt(top5_zori24_mean*100)} ({_fmt(top5_zori24_annual*100,'%/yr')})   uni={_fmt(r.universe_mean_zori_24mo*100)} ({_fmt(uni_zori24_annual*100,'%/yr')})   edge={_fmt(zori24_edge,'pp')} ({_fmt(zori24_edge_annual,'pp/yr')})")
 
         if r.top5.empty:
             print("  (no picks)")
@@ -443,8 +479,14 @@ def print_report(results: list[StepResult]) -> None:
             acs_ret = row.get(REALIZED_RETURN_COL_ACS, float("nan"))
             zori36_ret = row.get(REALIZED_RETURN_COL_ZORI36, float("nan"))
             zori24_ret = row.get(REALIZED_RETURN_COL_ZORI24, float("nan"))
+            # Per-pick annualized (cumulative -> per-year rate).
+            acs_annual   = _annualize(acs_ret,   3)
+            zori36_annual = _annualize(zori36_ret, 3)
+            zori24_annual = _annualize(zori24_ret, 2)
             def _rf(v):
                 return f"{v*100:+6.2f}%" if pd.notna(v) else "  n/a "
+            def _rfa(v):
+                return f"{v*100:+5.2f}%/yr" if pd.notna(v) else "  n/a   "
             mf_units = row.get("mf_units_5plus", float("nan"))
             mf_bldgs = row.get("mf_bldgs_est", float("nan"))
             mf_10_19 = row.get("mf_units_10_19", float("nan"))
@@ -453,7 +495,7 @@ def print_report(results: list[StepResult]) -> None:
             mf_10_19_str = f"{int(mf_10_19):>5,}" if pd.notna(mf_10_19) else "  n/a"
             print(f"  #{i}  {row['county_name']:<22} {row['state_name']:<16} "
                   f"pop={int(row['pop_latest']):>7,}   sim={row['analog_score']:.4f}   "
-                  f"ACS36={_rf(acs_ret)}  ZORI36={_rf(zori36_ret)}  ZORI24={_rf(zori24_ret)}")
+                  f"ACS36={_rf(acs_ret)} ({_rfa(acs_annual)})  ZORI36={_rf(zori36_ret)} ({_rfa(zori36_annual)})  ZORI24={_rf(zori24_ret)} ({_rfa(zori24_annual)})")
             print(f"      MF context: units_5plus={mf_units_str}  est_bldgs={mf_bldgs_str}  units_10-19={mf_10_19_str}")
             print(f"      top analogs: {row['top_analogs']}")
 
@@ -462,14 +504,20 @@ def print_report(results: list[StepResult]) -> None:
             "n_train_cohorts": r.n_train_cohorts,
             "n_winners": r.n_winners,
             "acs36_top5": top5_acs_mean * 100 if pd.notna(top5_acs_mean) else None,
+            "acs36_top5_annual": top5_acs_annual * 100 if pd.notna(top5_acs_annual) else None,
             "acs36_uni": r.universe_mean_acs_36mo * 100 if pd.notna(r.universe_mean_acs_36mo) else None,
             "acs36_edge_pp": acs_edge if pd.notna(acs_edge) else None,
+            "acs36_edge_pp_annual": acs_edge_annual if pd.notna(acs_edge_annual) else None,
             "zori36_top5": top5_zori36_mean * 100 if pd.notna(top5_zori36_mean) else None,
+            "zori36_top5_annual": top5_zori36_annual * 100 if pd.notna(top5_zori36_annual) else None,
             "zori36_uni": r.universe_mean_zori_36mo * 100 if pd.notna(r.universe_mean_zori_36mo) else None,
             "zori36_edge_pp": zori36_edge if pd.notna(zori36_edge) else None,
+            "zori36_edge_pp_annual": zori36_edge_annual if pd.notna(zori36_edge_annual) else None,
             "zori24_top5": top5_zori24_mean * 100 if pd.notna(top5_zori24_mean) else None,
+            "zori24_top5_annual": top5_zori24_annual * 100 if pd.notna(top5_zori24_annual) else None,
             "zori24_uni": r.universe_mean_zori_24mo * 100 if pd.notna(r.universe_mean_zori_24mo) else None,
             "zori24_edge_pp": zori24_edge if pd.notna(zori24_edge) else None,
+            "zori24_edge_pp_annual": zori24_edge_annual if pd.notna(zori24_edge_annual) else None,
         })
 
     print("\n" + "=" * 130)
@@ -524,7 +572,7 @@ def main() -> None:
         min_train_years=args.min_train_years,
     )
 
-    print_report(results)
+    print_report(results, panel_raw=panel_fe)
 
 
 if __name__ == "__main__":
