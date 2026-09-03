@@ -4,7 +4,7 @@ Alternative to ML: rather than train a model to predict forward returns,
 identify past top-decile winners and rank current candidates by feature
 similarity (cosine) to those winners.
 
-Universe:  tertiary (pop 100K-300K), same as ml_walk_forward.
+Universe:  mid-size metros (pop 300K-500K), diversified employment.
 Target:    winner definition uses target_zori_36mo_demeaned. A "winner"
            is a county in the top 10% of demeaned 36mo ZORI return within
            its cohort year.
@@ -107,7 +107,7 @@ class StepResult:
 
 
 def load_tertiary_panel() -> pd.DataFrame:
-    """Tertiary (pop 100-300K) + diversified employment (HHI <= threshold)."""
+    """Mid-size metro (pop 300-500K) + diversified employment (HHI <= threshold)."""
     con = duckdb.connect(str(WAREHOUSE_PATH), read_only=True)
     df = con.execute(f"""
         SELECT f.*, mr.macro_regime
@@ -115,8 +115,8 @@ def load_tertiary_panel() -> pd.DataFrame:
         LEFT JOIN main_intermediate.int_national_macro_regime mr
             ON EXTRACT(YEAR FROM f.period_end_date) = mr.year
         WHERE EXTRACT(MONTH FROM f.period_end_date) = 12
-          AND f.pop_latest > 100000
-          AND f.pop_latest <= 300000
+          AND f.pop_latest > 300000
+          AND f.pop_latest <= 500000
           AND f.employment_diversity_hhi IS NOT NULL
           AND f.employment_diversity_hhi <= {DIVERSITY_HHI_MAX}
     """).df()
@@ -568,7 +568,7 @@ def print_report(results: list[StepResult], panel_raw: pd.DataFrame | None = Non
     print("\n" + "=" * 130)
     print("ANALOG-SEARCH TOP-5 — feature similarity to historical top-decile winners")
     print("=" * 130)
-    print(f"Universe: tertiary 100-300K + emp_diversity_hhi <= {DIVERSITY_HHI_MAX}   "
+    print(f"Universe: mid-size metros 300-500K + emp_diversity_hhi <= {DIVERSITY_HHI_MAX}   "
           f"Training: 2008-2018 cohorts   Winner def: top {WINNER_TOP_PCT*100:.0f}% by ACS 36mo demeaned")
     print(f"Similarity: cosine on z-scored features (within cohort). Score = mean of top-{TOP_K_ANALOGS} matches.")
     print("Eval: report BOTH ACS 36mo (observable 2019 only) AND ZORI 36mo (observable 2015+ through 2022).")
@@ -822,7 +822,7 @@ def main() -> None:
     args = parser.parse_args()
     target_col = TARGET_COL if args.target == "rent" else TARGET_COL_TOTAL_RETURN
 
-    print("Loading tertiary panel (100-300K, Dec-31 cohorts)...")
+    print("Loading mid-size metro panel (300-500K, Dec-31 cohorts)...")
     panel = load_tertiary_panel()
     print(f"  {len(panel)} rows across years {panel['year'].min()}-{panel['year'].max()}")
 
