@@ -4,7 +4,7 @@ Alternative to ML: rather than train a model to predict forward returns,
 identify past top-decile winners and rank current candidates by feature
 similarity (cosine) to those winners.
 
-Universe:  mid-size metros (pop 300K-500K), diversified employment.
+Universe:  parameterized pop band (default 300K-500K), diversified employment.
 Target:    winner definition uses target_zori_36mo_demeaned. A "winner"
            is a county in the top 10% of demeaned 36mo ZORI return within
            its cohort year.
@@ -106,8 +106,12 @@ class StepResult:
     universe_mean_zori_24mo: float   # NaN if not observable
 
 
-def load_tertiary_panel() -> pd.DataFrame:
-    """Mid-size metro (pop 300-500K) + diversified employment (HHI <= threshold)."""
+def load_tertiary_panel(
+    pop_min: int = 300_000,
+    pop_max: int = 500_000,
+    hhi_max: float = DIVERSITY_HHI_MAX,
+) -> pd.DataFrame:
+    """County panel filtered to (pop_min, pop_max] with employment HHI <= hhi_max."""
     con = duckdb.connect(str(WAREHOUSE_PATH), read_only=True)
     df = con.execute(f"""
         SELECT f.*, mr.macro_regime
@@ -115,14 +119,63 @@ def load_tertiary_panel() -> pd.DataFrame:
         LEFT JOIN main_intermediate.int_national_macro_regime mr
             ON EXTRACT(YEAR FROM f.period_end_date) = mr.year
         WHERE EXTRACT(MONTH FROM f.period_end_date) = 12
-          AND f.pop_latest > 300000
-          AND f.pop_latest <= 500000
+          AND f.pop_latest > {pop_min}
+          AND f.pop_latest <= {pop_max}
           AND f.employment_diversity_hhi IS NOT NULL
-          AND f.employment_diversity_hhi <= {DIVERSITY_HHI_MAX}
+          AND f.employment_diversity_hhi <= {hhi_max}
     """).df()
     df["period_end_date"] = pd.to_datetime(df["period_end_date"])
     df["year"] = df["period_end_date"].dt.year
     return df
+
+
+def augment_temporal_diffs(
+    panel: pd.DataFrame,
+    diff_cols: list[str] | None = None,
+    horizons: tuple[int, ...] = (1, 3),
+) -> pd.DataFrame:
+    """Compute per-fips YoY and multi-year changes for level features.
+
+    Adds columns like `{col}_yoy_chg` and `{col}_change_3yr` alongside the
+    original level features. Runs entirely on the loaded panel — no dbt
+    rebuild needed. Safe for PIT since each row only references its own
+    fips's prior years (which are strictly earlier in time).
+
+    Args:
+      panel: rows keyed by (fips, year); must be sorted by year within fips
+      diff_cols: which columns to diff. If None, uses a curated default
+        list of level features that don't already have diff counterparts.
+      horizons: which multi-year gaps to compute (default: 1yr and 3yr)
+
+    Returns:
+      panel with new diff columns appended (does not mutate input).
+    """
+    if diff_cols is None:
+        diff_cols = [
+            "pop_latest",              # → pop_latest_yoy_chg, pop_latest_change_3yr
+            "renter_share",            # → captures whether renting is growing
+            "cap_rate_proxy",          # → cap-rate movement (yoy version missing)
+            "rental_vacancy_rate",     # → vacancy trend (currently only 3yr)
+            "unemployment_rate",       # → unemployment trend (currently only yoy)
+            "mf_permit_ratio",         # → MF-supply share trend
+            "permits_per_1000",        # → permit intensity trend
+            "per_capita_income",       # → income growth (currently pcpi_yoy is a ratio, not level change)
+        ]
+
+    out = panel.sort_values(["fips", "year"]).copy()
+    added = []
+    for col in diff_cols:
+        if col not in out.columns:
+            continue
+        for h in horizons:
+            new_col = f"{col}_yoy_chg" if h == 1 else f"{col}_change_{h}yr"
+            if new_col in out.columns:
+                continue  # don't clobber existing diff features
+            out[new_col] = out.groupby("fips")[col].diff(h)
+            added.append(new_col)
+    if added:
+        print(f"  augment_temporal_diffs: added {len(added)} diff columns: {added}")
+    return out
 
 
 def load_mf_context() -> pd.DataFrame:
@@ -316,12 +369,26 @@ def zscore_within_cohort(
     return out
 
 
-def identify_winners(panel: pd.DataFrame, train_years: list[int], target_col: str = TARGET_COL) -> pd.DataFrame:
+def identify_winners(
+    panel: pd.DataFrame,
+    train_years: list[int],
+    target_col: str = TARGET_COL,
+    min_winner_cohorts: int = 1,
+    elite_top_pct: float | None = None,
+) -> pd.DataFrame:
     """Top-decile counties by the specified target column within each train year.
 
     target_col options:
       - TARGET_COL (default): rent-only demeaned ACS 36mo growth
       - TARGET_COL_TOTAL_RETURN: composite (rent × cap-rate compression) demeaned
+
+    Optional filters on the winner set:
+      - min_winner_cohorts (default 1): keep only fips that appeared in top-decile
+        in at least N training cohorts. Filters lucky one-year outliers,
+        keeps durable outperformers. 1 = no filter (current behavior).
+      - elite_top_pct (default None): after per-cohort top-10% selection, keep
+        only the top X% of those winners globally by target value. E.g. 0.10
+        keeps the top 10% of winners (~12 rows from ~120). None = no filter.
     """
     train = panel[panel["year"].isin(train_years)].dropna(subset=[target_col]).copy()
     if train.empty:
@@ -331,7 +398,20 @@ def identify_winners(panel: pd.DataFrame, train_years: list[int], target_col: st
         threshold = sub[target_col].quantile(1 - WINNER_TOP_PCT)
         w = sub[sub[target_col] >= threshold].copy()
         winners.append(w)
-    return pd.concat(winners, ignore_index=False) if winners else pd.DataFrame()
+    if not winners:
+        return pd.DataFrame()
+    result = pd.concat(winners, ignore_index=False)
+
+    if min_winner_cohorts > 1:
+        counts = result.groupby("fips").size()
+        durable_fips = set(counts[counts >= min_winner_cohorts].index)
+        result = result[result["fips"].isin(durable_fips)]
+
+    if elite_top_pct is not None and 0 < elite_top_pct < 1 and not result.empty:
+        threshold = result[target_col].quantile(1 - elite_top_pct)
+        result = result[result[target_col] >= threshold]
+
+    return result
 
 
 def cosine_similarity_matrix(A: np.ndarray, B: np.ndarray) -> np.ndarray:
@@ -370,6 +450,8 @@ def build_walk_forward_schedule(
     test_years: list[int] | None,
     min_train_years: int,
     target_col: str = TARGET_COL,
+    strict_pit_targets: bool = False,
+    horizon_years: int = HORIZON_YEARS,
 ) -> list[dict]:
     """Expanding walk-forward: at each test year, train on all prior cohort
     years that have observed targets. Training pool grows by 1 each iteration
@@ -378,6 +460,19 @@ def build_walk_forward_schedule(
 
     If `test_years` is None, auto-generate all test years from
     (first_panel_year + min_train_years) through the last panel year.
+
+    strict_pit_targets:
+        False (default) — training cohorts include any prior year whose target
+        is observable IN THE PANEL AT RUN TIME. This may include cohorts C
+        where C + horizon_years > Y (i.e., their forward returns wouldn't have
+        been observable to a real investor at time Y). Preserves the maximum
+        training-cohort count.
+
+        True — strict PIT walk-forward: training cohorts limited to those
+        where (C + horizon_years) <= Y. A 2017 investor could only train on
+        cohorts through 2014 (since 2015's 3yr return isn't observable until
+        2018). Removes ~horizon_years cohorts from the training pool for
+        recent test years but eliminates target look-ahead.
     """
     obs_years = set(panel_z.dropna(subset=[target_col])["year"].unique().tolist())
     all_years = sorted(panel_z["year"].unique().tolist())
@@ -392,6 +487,8 @@ def build_walk_forward_schedule(
     schedule: list[dict] = []
     for Y in test_years:
         train_years = [y for y in all_years if first_year <= y < Y and y in obs_years]
+        if strict_pit_targets:
+            train_years = [y for y in train_years if (y + horizon_years) <= Y]
         schedule.append({
             "test_year": int(Y),
             "train_years": train_years,
@@ -407,9 +504,32 @@ def walk_forward(
     test_years: list[int] | None = None,
     min_train_years: int = MIN_TRAIN_YEARS,
     target_col: str = TARGET_COL,
+    strict_pit_targets: bool = False,
+    weighted_by_target: bool = False,
+    min_winner_cohorts: int = 1,
+    elite_top_pct: float | None = None,
+    top_n: int = 5,
+    max_per_state: int = 2,
 ) -> list[StepResult]:
-    schedule = build_walk_forward_schedule(panel_z, test_years, min_train_years, target_col=target_col)
-    print(f"\nWalk-forward schedule ({len(schedule)} iterations, min_train_years={min_train_years}, target={target_col}):")
+    """
+    Extra flags:
+      weighted_by_target : score = weighted mean of top-K similarities, weights = winner target values
+      min_winner_cohorts : winners kept only if fips appears in >=N training cohorts
+      elite_top_pct      : after per-cohort top-10%, keep only top X of those globally
+      top_n              : how many picks to return per cohort (default 5). Result stored on .top5 field.
+      max_per_state      : state cap on picks (default 2)
+    """
+    schedule = build_walk_forward_schedule(
+        panel_z, test_years, min_train_years,
+        target_col=target_col, strict_pit_targets=strict_pit_targets,
+    )
+    variant_notes = []
+    if strict_pit_targets: variant_notes.append("STRICT-PIT")
+    if weighted_by_target: variant_notes.append("WEIGHTED")
+    if min_winner_cohorts > 1: variant_notes.append(f"PERSISTENT(>={min_winner_cohorts})")
+    if elite_top_pct: variant_notes.append(f"ELITE({elite_top_pct*100:.0f}%)")
+    variant_label = f" [{' '.join(variant_notes)}]" if variant_notes else ""
+    print(f"\nWalk-forward schedule{variant_label} ({len(schedule)} iterations, min_train_years={min_train_years}, target={target_col}):")
     for step in schedule:
         n = step["n_train_years"]
         marker = "  " if n >= min_train_years else "  SKIP "
@@ -422,7 +542,10 @@ def walk_forward(
         train_years = step["train_years"]
         if len(train_years) < min_train_years:
             continue
-        winners = identify_winners(panel_z, train_years, target_col=target_col)
+        winners = identify_winners(
+            panel_z, train_years, target_col=target_col,
+            min_winner_cohorts=min_winner_cohorts, elite_top_pct=elite_top_pct,
+        )
         if winners.empty:
             print(f"  SKIP {Y}: no winners identified in train cohorts")
             continue
@@ -441,10 +564,24 @@ def walk_forward(
         sim = cosine_similarity_matrix(candidate_features, winner_features)
 
         # Aggregate: mean of top-K winner matches per candidate.
+        # If weighted_by_target: weight each sim by the matched winner's target magnitude
+        # (better winners contribute more).
         k = min(TOP_K_ANALOGS, sim.shape[1])
         top_k_idx = np.argsort(sim, axis=1)[:, -k:]
         top_k_sim = np.take_along_axis(sim, top_k_idx, axis=1)
-        analog_score = top_k_sim.mean(axis=1)
+        if weighted_by_target:
+            winner_targets = winners[target_col].astype(float).values
+            top_k_targets = winner_targets[top_k_idx]                       # (n_cand, K)
+            # Guard against all-zero weights → fallback to unweighted mean.
+            wsum = top_k_targets.sum(axis=1)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                analog_score = np.where(
+                    wsum > 0,
+                    (top_k_sim * top_k_targets).sum(axis=1) / wsum,
+                    top_k_sim.mean(axis=1),
+                )
+        else:
+            analog_score = top_k_sim.mean(axis=1)
 
         test_z["analog_score"] = analog_score
         # Also record which winners were top matches for interpretability.
@@ -508,7 +645,7 @@ def walk_forward(
             * (test_z["cap_rate_entry"] / test_z["cap_rate_exit_2yr"]) - 1
         )
 
-        top5 = pick_top_n_with_state_cap(test_z, "analog_score", n=5, max_per_state=2)
+        top5 = pick_top_n_with_state_cap(test_z, "analog_score", n=top_n, max_per_state=max_per_state)
 
         # ── In-shortlist tie-breaker composite ──────────────────────────
         # Rerank the top-5 by a decision-support composite (not replacing
@@ -568,7 +705,12 @@ def print_report(results: list[StepResult], panel_raw: pd.DataFrame | None = Non
     print("\n" + "=" * 130)
     print("ANALOG-SEARCH TOP-5 — feature similarity to historical top-decile winners")
     print("=" * 130)
-    print(f"Universe: mid-size metros 300-500K + emp_diversity_hhi <= {DIVERSITY_HHI_MAX}   "
+    if panel_raw is not None and len(panel_raw):
+        pop_lo, pop_hi = int(panel_raw['pop_latest'].min()), int(panel_raw['pop_latest'].max())
+        band_label = f"pop {pop_lo//1000}K-{pop_hi//1000}K"
+    else:
+        band_label = "universe"
+    print(f"Universe: {band_label} + emp_diversity_hhi <= {DIVERSITY_HHI_MAX}   "
           f"Training: 2008-2018 cohorts   Winner def: top {WINNER_TOP_PCT*100:.0f}% by ACS 36mo demeaned")
     print(f"Similarity: cosine on z-scored features (within cohort). Score = mean of top-{TOP_K_ANALOGS} matches.")
     print("Eval: report BOTH ACS 36mo (observable 2019 only) AND ZORI 36mo (observable 2015+ through 2022).")
@@ -819,11 +961,45 @@ def main() -> None:
         help="Training target: 'rent' = ACS 36mo demeaned rent growth; "
              "'total_return' = composite (rent × cap compression) demeaned",
     )
+    parser.add_argument(
+        "--pop-min", type=int, default=300_000,
+        help="Population lower bound (exclusive) for universe filter (default: 300000)",
+    )
+    parser.add_argument(
+        "--pop-max", type=int, default=500_000,
+        help="Population upper bound (inclusive) for universe filter (default: 500000)",
+    )
+    parser.add_argument(
+        "--hhi-max", type=float, default=DIVERSITY_HHI_MAX,
+        help=f"Employment-diversity HHI ceiling (default: {DIVERSITY_HHI_MAX})",
+    )
+    parser.add_argument(
+        "--strict-pit", action="store_true",
+        help="Enforce strict PIT walk-forward: training cohorts limited to those "
+             "whose forward-return target would have been observable AS OF each "
+             "test year Y (i.e., C + horizon_years <= Y). Default: off (uses all "
+             "cohorts observable at run time — modest look-ahead in training).",
+    )
+    parser.add_argument(
+        "--weighted-by-target", action="store_true",
+        help="Weighted analog: score = weighted mean of top-K sims, weights = "
+             "winner target magnitudes. Better winners contribute more.",
+    )
+    parser.add_argument(
+        "--min-winner-cohorts", type=int, default=1,
+        help="Persistent winners: keep only fips appearing in >=N training cohorts "
+             "as top-decile winners. Default 1 = no filter.",
+    )
+    parser.add_argument(
+        "--elite-top-pct", type=float, default=None,
+        help="Elite filter: after per-cohort top-10%%, keep only top X of those "
+             "globally by target. E.g. 0.10 keeps top 10%% of winners.",
+    )
     args = parser.parse_args()
     target_col = TARGET_COL if args.target == "rent" else TARGET_COL_TOTAL_RETURN
 
-    print("Loading mid-size metro panel (300-500K, Dec-31 cohorts)...")
-    panel = load_tertiary_panel()
+    print(f"Loading panel (pop {args.pop_min//1000}K-{args.pop_max//1000}K + HHI <= {args.hhi_max}, Dec-31 cohorts)...")
+    panel = load_tertiary_panel(pop_min=args.pop_min, pop_max=args.pop_max, hhi_max=args.hhi_max)
     print(f"  {len(panel)} rows across years {panel['year'].min()}-{panel['year'].max()}")
 
     print("Building ACS 36mo target from stg_census_acs...")
@@ -850,6 +1026,10 @@ def main() -> None:
         test_years=args.test_years,
         min_train_years=args.min_train_years,
         target_col=target_col,
+        strict_pit_targets=args.strict_pit,
+        weighted_by_target=args.weighted_by_target,
+        min_winner_cohorts=args.min_winner_cohorts,
+        elite_top_pct=args.elite_top_pct,
     )
 
     print_report(results, panel_raw=panel_fe)
