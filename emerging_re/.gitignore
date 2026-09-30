@@ -19,6 +19,9 @@ __pycache__/
 .ruff_cache/
 uv.lock
 
+# Jupyter
+.ipynb_checkpoints/
+
 # Secrets — HUD API token etc. Never commit.
 .env
 .env.*
