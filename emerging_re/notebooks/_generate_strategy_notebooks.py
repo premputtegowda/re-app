@@ -53,7 +53,7 @@ HHI_MAX       = 0.10         # employment diversity ceiling (lower = more divers
 
 # ── Selection knobs (edit to change how many picks and geographic spread) ──
 TOP_N         = 5            # number of picks to return
-MAX_PER_STATE = 2            # max picks from any single state (diversification cap)
+MAX_PER_STATE = 2            # max picks per state (diversification cap).  0 = NO CAP (unlimited per state).
 
 # ── Analysis constants (don't usually change) ──
 HORIZON_YEARS = 3            # hold period for forward returns
@@ -676,7 +676,7 @@ def pick_for_year(year):
     c = uni[uni['year'] == year].dropna(subset=['cap_rate_proxy']).sort_values('cap_rate_proxy', ascending=False)
     picked, sc = [], {}
     for _, r in c.iterrows():
-        if sc.get(r['state_name'], 0) >= MAX_PER_STATE: continue
+        if MAX_PER_STATE > 0 and sc.get(r['state_name'], 0) >= MAX_PER_STATE: continue
         picked.append(r); sc[r['state_name']] = sc.get(r['state_name'], 0) + 1
         if len(picked) >= TOP_N: break
     return pd.DataFrame(picked) if picked else pd.DataFrame()
@@ -756,7 +756,7 @@ def pick_for_year(year, gates=GATES):
 
     picked, sc = [], {}
     for _, r in c.iterrows():
-        if sc.get(r['state_name'], 0) >= MAX_PER_STATE: continue
+        if MAX_PER_STATE > 0 and sc.get(r['state_name'], 0) >= MAX_PER_STATE: continue
         picked.append(r); sc[r['state_name']] = sc.get(r['state_name'], 0) + 1
         if len(picked) >= TOP_N: break
     return pd.DataFrame(picked) if picked else pd.DataFrame()
@@ -822,7 +822,7 @@ def pick_for_year(year, gates=GATES_V3):
     c = c.sort_values('cap_rate_proxy', ascending=False)
     picked, sc = [], {}
     for _, r in c.iterrows():
-        if sc.get(r['state_name'], 0) >= MAX_PER_STATE: continue
+        if MAX_PER_STATE > 0 and sc.get(r['state_name'], 0) >= MAX_PER_STATE: continue
         picked.append(r); sc[r['state_name']] = sc.get(r['state_name'], 0) + 1
         if len(picked) >= TOP_N: break
     return pd.DataFrame(picked) if picked else pd.DataFrame()
@@ -882,7 +882,7 @@ def pick_for_year(year, momentum_col='zori_yoy'):
     # State cap
     picked, sc = [], {}
     for _, r in shortlist.iterrows():
-        if sc.get(r['state_name'], 0) >= MAX_PER_STATE: continue
+        if MAX_PER_STATE > 0 and sc.get(r['state_name'], 0) >= MAX_PER_STATE: continue
         picked.append(r); sc[r['state_name']] = sc.get(r['state_name'], 0) + 1
         if len(picked) >= TOP_N: break
 
@@ -1208,7 +1208,7 @@ def pick_for_year(year, gates=EMERGING_GATES):
     # State cap
     picked, sc = [], {}
     for _, r in c.iterrows():
-        if sc.get(r['state_name'], 0) >= MAX_PER_STATE: continue
+        if MAX_PER_STATE > 0 and sc.get(r['state_name'], 0) >= MAX_PER_STATE: continue
         picked.append(r); sc[r['state_name']] = sc.get(r['state_name'], 0) + 1
         if len(picked) >= TOP_N: break
     return pd.DataFrame(picked) if picked else pd.DataFrame()
@@ -1363,7 +1363,7 @@ def pick_for_year(year, gates=EMERGING_GATES):
     # State cap
     picked, sc = [], {}
     for _, r in c.iterrows():
-        if sc.get(r['state_name'], 0) >= MAX_PER_STATE:
+        if MAX_PER_STATE > 0 and sc.get(r['state_name'], 0) >= MAX_PER_STATE:
             continue
         picked.append(r); sc[r['state_name']] = sc.get(r['state_name'], 0) + 1
         if len(picked) >= TOP_N:
@@ -1549,7 +1549,7 @@ def pick_for_year(year, gates=EMERGING_VALUE_GATES):
     # ── Layer 5 — State cap + top-N ──
     picked, sc = [], {}
     for _, r in c.iterrows():
-        if sc.get(r['state_name'], 0) >= MAX_PER_STATE:
+        if MAX_PER_STATE > 0 and sc.get(r['state_name'], 0) >= MAX_PER_STATE:
             continue
         picked.append(r); sc[r['state_name']] = sc.get(r['state_name'], 0) + 1
         if len(picked) >= TOP_N:

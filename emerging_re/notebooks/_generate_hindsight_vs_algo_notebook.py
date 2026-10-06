@@ -16,7 +16,8 @@ from pathlib import Path
 NB_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(NB_DIR))
 from _generate_strategy_notebooks import (
-    CONFIG_CELL, DATA_LOAD_CELL, STRATEGIES, md, code, wrap
+    CONFIG_CELL, DATA_LOAD_CELL, STRATEGIES, REGIME_CONTEXT_CELL,
+    md, code, wrap
 )
 
 EV = STRATEGIES['emerging_value']
@@ -73,6 +74,136 @@ pd.set_option('display.width', 250); pd.set_option('display.max_rows', 200)
 print(f'Config loaded.')
 print(f'  Universe: pop {POP_MIN:,}-{POP_MAX:,}  HHI<={HHI_MAX}')
 print(f'  Selection: top-{TOP_N}   state-cap: {\"NO CAP\" if MAX_PER_STATE == 0 else f\"max {MAX_PER_STATE}/state\"}')
+"""
+
+# ══════════════════════════════════════════════════════════════════════════════
+# REGIME SHIFT LIKELIHOOD — feature-based (not Markov: too few observations)
+# ══════════════════════════════════════════════════════════════════════════════
+# Uses the same z-scores computed in the regime cell. For each of the 5 signals,
+# measures how close its current z-score sits to its ±1.5 vote threshold. Signals
+# within 0.5z of flipping mean the regime label is "on the edge". Aggregate count
+# → LOW / MODERATE / HIGH shift risk. This replaces a Markov transition matrix,
+# which needs >100 observations per state to be meaningful; we have ~35.
+REGIME_SHIFT_CELL = """# Regime shift likelihood — feature-based, PIT-strict, in-sample/OOS split
+#
+# Approach: use each year's z-scores (already computed in REGIME_CONTEXT_CELL via
+# expanding-window PIT z-scores — signals at year Y only see data ≤ year Y-1) to
+# measure "vote-flip tension": how close each signal sits to its ±1.5 threshold.
+# Aggregate → LOW / MODERATE / HIGH shift risk for the NEXT year.
+#
+# Rule is CALIBRATED on data before 2003 (in-sample), then VALIDATED on 2003+ (OOS).
+#
+# Why not Markov: with ~35 year-to-year transitions across 5 states, cell counts are
+# 0–7. Transition probabilities from cells that small are noise, not signal.
+
+IN_SAMPLE_END = 2003    # < 2003 in-sample, ≥ 2003 out-of-sample
+NEAR_THR = 0.5          # z-distance below which a signal is "close to flipping"
+
+# ── Compute shift-risk label for every year (uses PIT-strict z-scores) ──
+_shift_rows = []
+for _, r in _regime.iterrows():
+    signals = [
+        # (name, z_value, hot_direction)
+        ('HPI',    r.get('z_hpi'),       'above'),   # z > +1.5 = HOT (bubble)
+        ('Unemp',  r.get('z_unemp_chg'), 'below'),   # z < -1.5 = HOT (unemp falling fast = late cycle)
+        ('CPI',    r.get('z_cpi'),       'above'),   # z > +1.5 = HOT (inflation)
+        ('RealFF', r.get('z_real_ff'),   'above'),   # z > +1.5 = HOT (tight money)
+    ]
+    unstable = []
+    for name, z, hot_dir in signals:
+        if pd.isna(z): continue
+        d_hot  = (1.5 - z) if hot_dir == 'above' else (z - (-1.5))
+        d_cold = (z - (-1.5)) if hot_dir == 'above' else (1.5 - z)
+        d, side = (d_hot, 'HOT') if abs(d_hot) < abs(d_cold) else (d_cold, 'COLD')
+        if abs(d) < NEAR_THR:
+            unstable.append((name, round(float(d), 2), side))
+    yc = r.get('yield_curve')
+    if pd.notna(yc) and abs(yc) < NEAR_THR:
+        side = 'HOT' if yc > 0 else 'unfire-HOT'
+        unstable.append(('Curve', round(float(yc), 2), side))
+
+    n = len(unstable)
+    if   n >= 3: risk = 'HIGH'
+    elif n == 2: risk = 'MODERATE'
+    else:        risk = 'LOW'
+    _shift_rows.append({
+        'year': int(r['year']),
+        'regime': r['regime'],
+        'shift_risk': risk,
+        'n_unstable': n,
+        'unstable_signals': ', '.join(f'{s}({d:+.2f}→{side})' for s, d, side in unstable) if unstable else 'none',
+    })
+_regime_shift = pd.DataFrame(_shift_rows).sort_values('year').reset_index(drop=True)
+
+# Ground truth: did the regime label actually change next year?
+_regime_shift['regime_next_year'] = _regime_shift['regime'].shift(-1)
+_regime_shift['did_shift_next_year'] = (
+    (_regime_shift['regime_next_year'] != _regime_shift['regime']) & _regime_shift['regime_next_year'].notna()
+)
+
+def _regime_shift_lookup(year):
+    row = _regime_shift[_regime_shift['year'] == year]
+    return row.iloc[0].to_dict() if not row.empty else None
+
+# ── VALIDATION: split at IN_SAMPLE_END ──────────────────────────────────────
+_data_start = int(_regime_shift['year'].min())
+_data_end   = int(_regime_shift['year'].max())
+_valid = _regime_shift.dropna(subset=['regime_next_year']).copy()
+_is  = _valid[_valid['year'] <  IN_SAMPLE_END].copy()
+_oos = _valid[_valid['year'] >= IN_SAMPLE_END].copy()
+
+def _cond_table(df, label):
+    if df.empty:
+        print(f'  ({label}: no observations)')
+        return
+    order = ['LOW', 'MODERATE', 'HIGH']
+    tbl = (df.groupby('shift_risk')['did_shift_next_year']
+             .agg(n_years='count', n_shifts='sum')
+             .reindex(order))
+    tbl['P(shift next yr)'] = (tbl['n_shifts'] / tbl['n_years']).map(lambda v: f'{v*100:.0f}%' if pd.notna(v) else 'n/a')
+    tbl['n_years']  = tbl['n_years'].fillna(0).astype(int)
+    tbl['n_shifts'] = tbl['n_shifts'].fillna(0).astype(int)
+    print(tbl.to_string())
+    base = df['did_shift_next_year'].mean() * 100
+    print(f'  Base rate ({label}, any risk level): {base:.0f}% of years saw a regime change next year')
+
+print('=' * 100)
+print(f'FEATURE-BASED REGIME SHIFT MODEL — data window {_data_start}-{_data_end}')
+print('=' * 100)
+print(f'  Rule: shift_risk = # of signals within {NEAR_THR}z of a vote threshold')
+print(f'        (0-1 → LOW, 2 → MODERATE, 3+ → HIGH)')
+print(f'  Signals evaluated: HPI YoY, Unemp YoY chg, CPI YoY, Real Fed funds, Yield curve inversion')
+print(f'  All z-scores are expanding-window PIT — year Y only sees data through year Y-1')
+print()
+
+print(f'IN-SAMPLE ({_data_start}-{IN_SAMPLE_END - 1}, n={len(_is)} years):')
+_cond_table(_is, 'in-sample')
+print()
+
+print(f'OUT-OF-SAMPLE ({IN_SAMPLE_END}-{_data_end}, n={len(_oos)} years):')
+_cond_table(_oos, 'OOS')
+print()
+
+print('Interpretation:')
+print('  If P(shift next yr | HIGH) > P(shift next yr | LOW) in BOTH splits, the rule generalizes.')
+print('  If OOS looks like the in-sample table, the calibration held. If not, the pre-2003 rule')
+print('  was regime-specific and shouldn\\'t drive decisions today.')
+print()
+
+# ── Current-year read (may fall in OOS) ──
+_cur = _regime_shift_lookup(2025)
+if _cur is not None:
+    print('=' * 100)
+    print(f'CURRENT — 2025 shift-risk assessment')
+    print('=' * 100)
+    print(f'  Current regime:     {_cur[\"regime\"]}')
+    print(f'  Shift risk:         {_cur[\"shift_risk\"]}   ({_cur[\"n_unstable\"]} of 5 signals within {NEAR_THR}z of flipping)')
+    print(f'  Unstable signals:   {_cur[\"unstable_signals\"]}')
+    print(f'  Note: 2025 is OOS relative to the {IN_SAMPLE_END} split — read via the OOS table above.')
+    print()
+
+print('Recent shift-risk record:')
+print(_regime_shift[_regime_shift['year'].between(2018, 2025)][['year','regime','shift_risk','n_unstable','unstable_signals','did_shift_next_year']].to_string(index=False))
 """
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -356,6 +487,25 @@ Algorithm rank is preserved. The four columns are shown alongside so you can mak
 SINGLE_DEAL_CELL = """# ══════════════════════════════════════════════════════════════════════════
 #  Single-deal deployability filter
 # ══════════════════════════════════════════════════════════════════════════
+
+# ── Fetch LIVE MORTGAGE30US from FRED for current-year spread column ──
+# The DATA_LOAD_CELL attaches the Dec-31 value per year, which is stale for today's
+# deployment decisions. For CURRENT_YR_DEPLOY, use the most recent observation instead.
+_con_mtg = duckdb.connect(WAREHOUSE, read_only=True)
+_mtg_latest = _con_mtg.execute('''
+    SELECT observation_date, value / 100.0 AS mortgage_rate
+    FROM main_staging.stg_fred_macro
+    WHERE series_id = 'MORTGAGE30US'
+    ORDER BY observation_date DESC
+    LIMIT 1
+''').df()
+_con_mtg.close()
+if not _mtg_latest.empty:
+    _LIVE_MORTGAGE_RATE = float(_mtg_latest['mortgage_rate'].iloc[0])
+    _LIVE_MORTGAGE_DATE = str(_mtg_latest['observation_date'].iloc[0])[:10]
+    print(f'Latest MORTGAGE30US from FRED: {_LIVE_MORTGAGE_RATE*100:.2f}%  as of {_LIVE_MORTGAGE_DATE}')
+    print(f'(Used for spread column on current-year picks; prior years keep their Dec-31 cohort rate.)')
+
 # Landlord-friendliness by state (10 = most landlord-friendly)
 # Based on eviction timeline, rent control presence, security-deposit caps,
 # judicial vs non-judicial process, and general court-culture toward landlords.
@@ -437,40 +587,131 @@ def annotate_picks(picks_df):
     out['RRS'] = out.apply(rrs_score, axis=1)
     return out
 
-def print_picks_with_attrs(year, picks_df):
-    if picks_df is None or picks_df.empty: return
-    ann = annotate_picks(picks_df)
-    print('=' * 130)
-    print(f'{year} — ALGORITHM top-{len(ann)} with deployment attributes (rank unchanged)')
-    print('=' * 130)
-    print(f'  {"rk":<3} {"county":<32} {"cap":>7} {"opex":>5} {"net_yld":>8} {"mtg":>7} {"spread":>10}  '
-          f'{"LL":>4} {"INS":>4} {"RRS":>5}')
-    print('  ' + '-' * 114)
-    for i, r in ann.iterrows():
-        cap = r['cap_rate_proxy'] * 100
-        opx = r['opex_ratio'] * 100
-        net = cap * (1 - r['opex_ratio'])
-        mtg = r['mortgage_rate'] * 100
-        sp  = net - mtg
-        name = f"{r['county_name'].replace(' County','')}, {r['state_name']}"
-        print(f'  #{i+1:<2} {name:<32} '
-              f'{cap:>6.2f}% {opx:>4.0f}% {net:>7.2f}% {mtg:>6.2f}% {sp:>+9.2f}pp  '
-              f'{r["LL"]:>4.0f} {r["INS"]:>4.0f} {r["RRS"]:>5.1f}')
-    print()
+def _regime_for_year(year):
+    '''Look up regime label, vote counts, and feature-based shift risk for this year.'''
+    try:
+        row = _regime[_regime['year'] == year]
+        if row.empty: return None
+        r = row.iloc[0]
+        info = {'label': r['regime'], 'h': int(r['h']), 'c': int(r['c'])}
+        try:
+            sh = _regime_shift[_regime_shift['year'] == year]
+            if not sh.empty:
+                s = sh.iloc[0]
+                info['shift_risk'] = str(s['shift_risk'])
+                info['n_unstable'] = int(s['n_unstable'])
+        except (NameError, KeyError, AttributeError):
+            pass
+        return info
+    except NameError:
+        return None
 
-# ── Current year — algorithm picks annotated with LL / INS / NS / RRS ──
+def picks_dataframe(year, picks_df):
+    '''Build a display DataFrame with all criteria + financial columns per pick.'''
+    if picks_df is None or picks_df.empty: return pd.DataFrame()
+    ann = annotate_picks(picks_df).reset_index(drop=True)
+    # Live mortgage rate override for current-year cohort
+    mtg_override = None
+    if year == CURRENT_YR_DEPLOY:
+        try:    mtg_override = _LIVE_MORTGAGE_RATE
+        except NameError: pass
+    rows = []
+    for i, r in ann.iterrows():
+        cap  = r['cap_rate_proxy']
+        opx  = r['opex_ratio']
+        net  = cap * (1 - opx)
+        mtg  = mtg_override if mtg_override is not None else r['mortgage_rate']
+        sp   = net - mtg
+        rows.append({
+            'rank':     i + 1,
+            'county':   r['county_name'].replace(' County',''),
+            'state':    r['state_name'],
+            'cap %':    round(cap*100, 2),
+            'net %':    round(net*100, 2),
+            'mtg %':    round(mtg*100, 2),
+            'spread pp': round(sp*100, 2),
+            'cap_sp pp':r.get('cap_spread_to_gateway_pp', float('nan')),
+            'wage %':   r.get('wage_growth_yoy', float('nan')) * 100 if pd.notna(r.get('wage_growth_yoy')) else float('nan'),
+            'pop %':    r.get('pop_yoy_pct', float('nan')),
+            'bapps':    r.get('business_apps_per_1000', float('nan')),
+            'perm/job': r.get('permits_per_new_job', float('nan')),
+            'k_emp pp': r.get('knowledge_emp_growth_vs_state_pp', float('nan')),
+            'rent-w pp':r.get('rent_growth_vs_wage_growth', float('nan')),
+            'RRS':      r['RRS'],
+            'LL':       int(r['LL']),
+            'INS':      int(r['INS']),
+        })
+    return pd.DataFrame(rows)
+
+def display_picks(year, picks_df):
+    '''Display picks as a pandas table with regime header.'''
+    if picks_df is None or picks_df.empty: return
+    df = picks_dataframe(year, picks_df)
+    reg = _regime_for_year(year)
+    header = f'{year} — '
+    if reg:
+        header += f"REGIME: {reg['label']} (hot={reg['h']} cold={reg['c']})"
+        if 'shift_risk' in reg:
+            header += f"  |  shift-risk: {reg['shift_risk']} ({reg['n_unstable']}/5 signals near flip)"
+    else:
+        header += 'REGIME: n/a'
+    header += f'   ALGORITHM top-{len(df)}'
+    try:
+        if year == CURRENT_YR_DEPLOY: header += f'   (spread uses live FRED mtg {_LIVE_MORTGAGE_RATE*100:.2f}% @ {_LIVE_MORTGAGE_DATE})'
+    except NameError: pass
+    print(header)
+    # Color-code spread: red if negative, green if positive
+    def _color_spread(v):
+        if pd.isna(v): return ''
+        if v > 1:   return 'background-color: #d4edda; color: #155724'
+        if v > 0:   return 'background-color: #e2f0d9; color: #155724'
+        if v > -2:  return 'background-color: #fff3cd; color: #856404'
+        return 'background-color: #f8d7da; color: #721c24'
+    def _color_rrs(v):
+        if pd.isna(v): return ''
+        if v >= 7: return 'background-color: #d4edda; color: #155724; font-weight: bold'
+        if v >= 5: return 'background-color: #e2f0d9'
+        if v >= 3: return 'background-color: #fff3cd'
+        return 'background-color: #f8d7da'
+    styled = (df.style
+        .format({'cap %':'{:.2f}%', 'net %':'{:.2f}%', 'mtg %':'{:.2f}%',
+                 'spread pp':'{:+.2f}pp', 'cap_sp pp':'{:+.2f}pp',
+                 'wage %':'{:+.1f}%', 'pop %':'{:+.2f}%',
+                 'bapps':'{:.1f}', 'perm/job':'{:.2f}',
+                 'k_emp pp':'{:+.2f}pp', 'rent-w pp':'{:+.2f}pp',
+                 'RRS':'{:.1f}'}, na_rep='n/a')
+        .map(_color_spread, subset=['spread pp'])
+        .map(_color_rrs,    subset=['RRS'])
+        .hide(axis='index')
+    )
+    display(styled)
+
+# ── Current year — algorithm picks with regime header + all criteria ──
 CURRENT_YR_DEPLOY = 2025
-print_picks_with_attrs(CURRENT_YR_DEPLOY, pick_for_year(CURRENT_YR_DEPLOY))
+display_picks(CURRENT_YR_DEPLOY, pick_for_year(CURRENT_YR_DEPLOY))
 
 # ── Recent forward-looking years — same annotation ──
 for yr in [2024, 2023]:
-    print_picks_with_attrs(yr, pick_for_year(yr))
+    display_picks(yr, pick_for_year(yr))
 
+print()
 print('Column key:')
-print('  spread — net_yield − mortgage_rate in percentage points (positive = cash-flows before appreciation)')
-print('  LL     — landlord-friendliness (0-10, higher = friendlier state statutes/courts)')
-print('  INS    — insurance environment (0-10, higher = cheaper/simpler; coastal FL = 2, CA = 2)')
-print('  RRS    — recession resilience score (0-10, forward-looking; yield + bubble + diversification + migration + permit)')
+print('  cap       — gross cap rate proxy (higher = more yield cushion)')
+print('  net       — cap × (1 − opex_ratio) — cash yield after operating expenses')
+print('  mtg       — mortgage rate. Current year uses LIVE FRED value; prior years use Dec-31 cohort value')
+print('  spread    — net − mtg (positive = cash-flows before appreciation). Color: green>+1pp, amber 0 to -2pp, red<-2pp')
+print('  cap_sp    — cap_spread_to_gateway_pp — cap vs gateway-market median (positive = below institutional band)')
+print('  wage%     — wage_growth_yoy — annual wage growth (leading signal)')
+print('  pop%      — pop_yoy_pct — population YoY growth')
+print('  bapps     — business_apps_per_1000 — high-propensity biz formation per 1000 residents (capped at 40)')
+print('  perm/job  — permits_per_new_job — inverse supply pressure (higher = building faster than hiring; INVERTED in scoring)')
+print('  k_emp     — knowledge_emp_growth_vs_state_pp — premium-worker employment growth vs state avg')
+print('  rent-w    — rent_growth_vs_wage_growth — rent capacity gap (positive = rents growing faster than wages)')
+print('  RRS       — recession resilience score (0-10). Color: green≥7, light-green≥5, amber≥3, red<3')
+print('  LL        — landlord-friendliness (0-10; higher = friendlier state statutes/courts)')
+print('  INS       — insurance environment (0-10; higher = cheaper/simpler; coastal FL = 2, CA = 2)')
+print()
+print('REGIME header per year — 5-signal consensus (HPI YoY, unemp chg, CPI, real Fed funds, curve inversion).')
 """
 
 PER_PICK_HINDSIGHT_MD = """## 7. Per-pick hindsight comparison
@@ -874,7 +1115,7 @@ alternative — Borda rank-sum — using the same 9 signals but treating them as
    - For 8 signals, "higher is better" → rank descending.
    - For `permits_per_new_job`, "lower is better" (supply-wave penalty) → rank ascending.
 3. Sum the 9 ranks per market → **borda_score** (lower = better).
-4. Apply the same max-3-per-state cap and pick top-10.
+4. Apply the same state cap (`MAX_PER_STATE`, 0 = no cap) and pick top-`TOP_N` — both configured in the Config cell.
 
 Then compare Borda top-10 vs weighted top-10 side-by-side per year, with realized 3yr TR for each.
 
@@ -941,10 +1182,10 @@ def pick_borda_for_year(year, gates=EMERGING_VALUE_GATES):
 
     c = c.sort_values('borda_score', ascending=True).reset_index(drop=True)
 
-    # Same state cap + top-N as algo
+    # Same state cap + top-N as algo. MAX_PER_STATE = 0 means NO CAP.
     picked, sc = [], {}
     for _, r in c.iterrows():
-        if sc.get(r['state_name'], 0) >= MAX_PER_STATE: continue
+        if MAX_PER_STATE > 0 and sc.get(r['state_name'], 0) >= MAX_PER_STATE: continue
         picked.append(r); sc[r['state_name']] = sc.get(r['state_name'], 0) + 1
         if len(picked) >= TOP_N: break
     return pd.DataFrame(picked)
@@ -1069,6 +1310,10 @@ cells = [
     code(COMPARISON_CELL),
     md("## 5. Aggregate summary"),
     code(SUMMARY_CELL),
+    md("## 5.5 Macro regime context (informational — does NOT drive picks)"),
+    code(REGIME_CONTEXT_CELL),
+    md("## 5.6 Regime-shift likelihood — feature-based, pre-2003 in-sample, 2003+ out-of-sample"),
+    code(REGIME_SHIFT_CELL),
     md(SINGLE_DEAL_MD),
     code(SINGLE_DEAL_CELL),
     md(PER_PICK_HINDSIGHT_MD),
